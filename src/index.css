@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+@media print {
+  /* Ocultar elementos desnecessários da UI na impressão */
+  aside,
+  header,
+  nav,
+  .print\:hidden,
+  .no-print {
+    display: none !important;
+  }
+
+  /* Reset limpo de cores e margens para folha A4 / impressora */
+  html,
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Modais ocupam fluxo normal de página sem fundo escuro ou cortes */
+  .fixed,
+  .backdrop-blur-xs,
+  .backdrop-blur-sm {
+    position: static !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+}

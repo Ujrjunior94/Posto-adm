@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MEU POSTO 2.0</title>
+    <meta name="description" content="Sistema operacional para postos de combustíveis com gestão de funcionários, escalas, planner, fechamento de caixa, medição de tanques e aferições." />
+    <meta property="og:title" content="MEU POSTO 2.0" />
+    <meta property="og:description" content="Sistema operacional para postos de combustíveis com gestão de funcionários, escalas, planner, fechamento de caixa, medição de tanques e aferições." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#2563eb" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(err => {
+            console.log('ServiceWorker registration error:', err);
+          });
+        });
+      }
+    </script>
+  </body>
+</html>
+

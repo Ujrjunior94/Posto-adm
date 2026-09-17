@@ -1,0 +1,6 @@
+{
+  "name": "MEU POSTO 2.0",
+  "description": "Sistema operacional para postos de combustíveis com gestão de funcionários, escalas, planner, fechamento de caixa, medição de tanques e aferições.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

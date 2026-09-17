@@ -1,0 +1,175 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Connection testing endpoint
+    match /test/connection {
+      allow read: if true;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isBootstrappedAdmin() {
+      return isSignedIn() && request.auth.token.email == 'ubirajaraaux@gmail.com';
+    }
+
+    function hasProfile() {
+      return isSignedIn() && exists(/databases/$(database)/documents/usuarios/$(request.auth.uid));
+    }
+
+    function getUserProfile() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
+    }
+
+    function isMaster() {
+      return isSignedIn() && (
+        isBootstrappedAdmin() ||
+        (hasProfile() && getUserProfile().role == 'MASTER')
+      );
+    }
+
+    function belongsToPosto(postoId) {
+      return isSignedIn() && (
+        isMaster() ||
+        !hasProfile() ||
+        (hasProfile() && (getUserProfile().postoId == postoId || getUserProfile().role in ['MASTER', 'GERENTE', 'SUPERVISOR', 'OPERADOR']))
+      );
+    }
+
+    function isSupervisorOrAbove(postoId) {
+      return isSignedIn() && (
+        isMaster() ||
+        !hasProfile() ||
+        (hasProfile() && (getUserProfile().role in ['MASTER', 'GERENTE', 'SUPERVISOR']))
+      );
+    }
+
+    function isGerenteOrAbove(postoId) {
+      return isSignedIn() && (
+        isMaster() ||
+        !hasProfile() ||
+        (hasProfile() && (getUserProfile().role in ['MASTER', 'GERENTE']))
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Coleção de Usuários
+    match /usuarios/{uid} {
+      allow read: if isSignedIn() && (request.auth.uid == uid || isMaster());
+      allow create: if isSignedIn() && request.auth.uid == uid;
+      allow update: if isSignedIn() && (
+        (request.auth.uid == uid && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']))) ||
+        isMaster()
+      );
+      allow delete: if false;
+    }
+
+    // Multi-tenant: Postos e subcoleções operacionais
+    match /postos/{postoId} {
+      allow read: if belongsToPosto(postoId);
+      allow write: if isGerenteOrAbove(postoId);
+
+      // Funcionários
+      match /funcionarios/{funcionarioId} {
+        allow read: if belongsToPosto(postoId);
+        allow create, update: if isSupervisorOrAbove(postoId) && isValidId(funcionarioId);
+        allow delete: if false;
+      }
+
+      // Escalas e Turnos
+      match /escalas/{escalaId} {
+        allow read: if belongsToPosto(postoId);
+        allow create, update: if isSupervisorOrAbove(postoId) && isValidId(escalaId);
+        allow delete: if isSupervisorOrAbove(postoId);
+      }
+
+      match /turnos/{turnoId} {
+        allow read: if belongsToPosto(postoId);
+        allow write: if isSupervisorOrAbove(postoId);
+      }
+
+      // Fechamentos de Caixa
+      match /fechamentos/{fechamentoId} {
+        allow read: if belongsToPosto(postoId);
+        allow create: if belongsToPosto(postoId) && isValidId(fechamentoId);
+        allow update: if isSupervisorOrAbove(postoId) && isValidId(fechamentoId);
+        allow delete: if false;
+      }
+
+      // Ocorrências de Caixa
+      match /ocorrenciasCaixa/{ocorrenciaId} {
+        allow read: if belongsToPosto(postoId);
+        allow create, update: if isSupervisorOrAbove(postoId) && isValidId(ocorrenciaId);
+        allow delete: if false;
+      }
+
+      // Tanques e Réguas
+      match /tanques/{tanqueId} {
+        allow read: if belongsToPosto(postoId);
+        allow create, update: if isSupervisorOrAbove(postoId) && isValidId(tanqueId);
+        allow delete: if isGerenteOrAbove(postoId);
+      }
+
+      // Bicos
+      match /bicos/{bicoId} {
+        allow read: if belongsToPosto(postoId);
+        allow create, update: if isSupervisorOrAbove(postoId) && isValidId(bicoId);
+        allow delete: if isGerenteOrAbove(postoId);
+      }
+
+      // Aferições (Medida Padrão 20L)
+      match /afericoes/{afericaoId} {
+        allow read: if belongsToPosto(postoId);
+        allow create: if belongsToPosto(postoId) && isValidId(afericaoId);
+        allow update: if belongsToPosto(postoId) && isValidId(afericaoId);
+        allow delete: if belongsToPosto(postoId);
+      }
+
+      // Densidades e Termodensímetro (ANP)
+      match /densidades/{densidadeId} {
+        allow read: if belongsToPosto(postoId);
+        allow create: if belongsToPosto(postoId) && isValidId(densidadeId);
+        allow update: if belongsToPosto(postoId) && isValidId(densidadeId);
+        allow delete: if belongsToPosto(postoId);
+      }
+
+      // Análises laboratoriais de combustível
+      match /analises/{analiseId} {
+        allow read: if belongsToPosto(postoId);
+        allow create: if belongsToPosto(postoId) && isValidId(analiseId);
+        allow update: if belongsToPosto(postoId) && isValidId(analiseId);
+        allow delete: if belongsToPosto(postoId);
+      }
+
+      // Conformidade Operacional
+      match /conformidades/{conformidadeId} {
+        allow read: if belongsToPosto(postoId);
+        allow write: if belongsToPosto(postoId) && isValidId(conformidadeId);
+      }
+
+      // Relatórios
+      match /relatorios/{relatorioId} {
+        allow read: if belongsToPosto(postoId);
+        allow write: if isSupervisorOrAbove(postoId);
+      }
+
+      // Auditoria: Totalmente imutável após escrita
+      match /auditoria/{auditoriaId} {
+        allow read: if isSupervisorOrAbove(postoId);
+        allow create: if belongsToPosto(postoId);
+        allow update, delete: if false;
+      }
+    }
+  }
+}

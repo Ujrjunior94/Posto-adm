@@ -1,0 +1,265 @@
+{
+  "entities": {
+    "usuario": {
+      "title": "UserProfile",
+      "description": "Perfil de usuário e credenciais de acesso por posto",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "nome": { "type": "string", "maxLength": 150 },
+        "email": { "type": "string", "maxLength": 200 },
+        "role": { "type": "string", "enum": ["MASTER", "GERENTE", "SUPERVISOR", "OPERADOR"] },
+        "postoId": { "type": "string", "maxLength": 64 },
+        "ativo": { "type": "boolean" },
+        "criadoEm": { "type": "string", "maxLength": 50 },
+        "atualizadoEm": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["uid", "nome", "email", "role", "postoId", "ativo"]
+    },
+    "posto": {
+      "title": "Posto",
+      "description": "Dados da unidade operacional de posto de combustíveis",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "nome": { "type": "string", "maxLength": 150 },
+        "cnpj": { "type": "string", "maxLength": 30 },
+        "cidade": { "type": "string", "maxLength": 100 },
+        "uf": { "type": "string", "maxLength": 2 },
+        "criadoEm": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "nome", "cnpj"]
+    },
+    "funcionario": {
+      "title": "Funcionario",
+      "description": "Colaborador operacional (frentista, caixa, gerente, supervisor)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "postoId": { "type": "string", "maxLength": 64 },
+        "nome": { "type": "string", "maxLength": 150 },
+        "cpf": { "type": "string", "maxLength": 20 },
+        "matricula": { "type": "string", "maxLength": 30 },
+        "cargo": { "type": "string", "maxLength": 100 },
+        "funcao": { "type": "string", "maxLength": 100 },
+        "status": { "type": "string", "enum": ["ATIVO", "INATIVO", "FERIAS", "AFASTADO"] },
+        "dataAdmissao": { "type": "string", "maxLength": 30 }
+      },
+      "required": ["id", "postoId", "nome", "status"]
+    },
+    "escala": {
+      "title": "Escala",
+      "description": "Escala de trabalho e turnos dos funcionários",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "postoId": { "type": "string", "maxLength": 64 },
+        "funcionarioId": { "type": "string", "maxLength": 64 },
+        "data": { "type": "string", "maxLength": 20 },
+        "turno": { "type": "string", "maxLength": 50 },
+        "horarioInicio": { "type": "string", "maxLength": 10 },
+        "horarioFim": { "type": "string", "maxLength": 10 },
+        "status": { "type": "string", "enum": ["TRABALHO", "FOLGA", "FERIAS", "AFASTADO", "AUSENTE", "SUBSTITUIDO"] }
+      },
+      "required": ["id", "postoId", "funcionarioId", "data", "status"]
+    },
+    "fechamento": {
+      "title": "FechamentoCaixa",
+      "description": "Fechamento físico e operacional de caixa por turno",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "postoId": { "type": "string", "maxLength": 64 },
+        "data": { "type": "string", "maxLength": 20 },
+        "turno": { "type": "string", "maxLength": 50 },
+        "caixaId": { "type": "string", "maxLength": 64 },
+        "funcionarioId": { "type": "string", "maxLength": 64 },
+        "totalInformado": { "type": "number" },
+        "totalConferido": { "type": "number" },
+        "diferenca": { "type": "number" },
+        "tipoDiferenca": { "type": "string", "enum": ["SEM_DIFERENCA", "SOBRA", "FALTA"] },
+        "conferidoPor": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "enum": ["ABERTO", "CONFERIDO", "CONTESTADO"] }
+      },
+      "required": ["id", "postoId", "data", "turno", "funcionarioId", "status"]
+    },
+    "ocorrenciaCaixa": {
+      "title": "OcorrenciaCaixa",
+      "description": "Registro de falta ou sobra de caixa com regras de rateio",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "fechamentoId": { "type": "string", "maxLength": 64 },
+        "postoId": { "type": "string", "maxLength": 64 },
+        "data": { "type": "string", "maxLength": 20 },
+        "valorFalta": { "type": "number" },
+        "funcionarioPrincipalId": { "type": "string", "maxLength": 64 },
+        "regraDistribuicao": { "type": "string", "maxLength": 50 },
+        "status": { "type": "string", "enum": ["PENDENTE", "CONFIRMADO", "CANCELADO"] }
+      },
+      "required": ["id", "fechamentoId", "postoId", "valorFalta", "status"]
+    },
+    "tanque": {
+      "title": "Tanque",
+      "description": "Cadastro e medição dos tanques subterrâneos ou aéreos de combustíveis",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "postoId": { "type": "string", "maxLength": 64 },
+        "codigo": { "type": "string", "maxLength": 30 },
+        "produto": { "type": "string", "maxLength": 100 },
+        "capacidadeNominal": { "type": "number" },
+        "capacidadeOperacional": { "type": "number" },
+        "unidade": { "type": "string", "maxLength": 20 },
+        "ativo": { "type": "boolean" }
+      },
+      "required": ["id", "postoId", "codigo", "produto", "capacidadeNominal"]
+    },
+    "bico": {
+      "title": "Bico",
+      "description": "Bicos de abastecimento ligados a tanques e bombas",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "postoId": { "type": "string", "maxLength": 64 },
+        "numero": { "type": "number" },
+        "bomba": { "type": "string", "maxLength": 100 },
+        "tanqueId": { "type": "string", "maxLength": 64 },
+        "produto": { "type": "string", "maxLength": 100 },
+        "lado": { "type": "string", "maxLength": 10 },
+        "status": { "type": "string", "enum": ["ATIVO", "MANUTENCAO", "INATIVO"] }
+      },
+      "required": ["id", "postoId", "numero", "tanqueId", "produto", "status"]
+    },
+    "afericao": {
+      "title": "Afericao",
+      "description": "Teste de aferição volumétrica (medida padrão de 20L)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "postoId": { "type": "string", "maxLength": 64 },
+        "bicoId": { "type": "string", "maxLength": 64 },
+        "tanqueId": { "type": "string", "maxLength": 64 },
+        "volumeNominal": { "type": "number" },
+        "volumeAferido": { "type": "number" },
+        "diferenca": { "type": "number" },
+        "resultado": { "type": "string", "enum": ["CONFORME", "NAO_CONFORME", "PENDENTE"] }
+      },
+      "required": ["id", "postoId", "bicoId", "volumeNominal", "volumeAferido", "resultado"]
+    },
+    "densidade": {
+      "title": "RegistroDensidade",
+      "description": "Controle termodensímetro e densidade a 20C (Resolução ANP)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "postoId": { "type": "string", "maxLength": 64 },
+        "produto": { "type": "string", "maxLength": 100 },
+        "temperatura": { "type": "number" },
+        "densidadeObservada": { "type": "number" },
+        "densidadeCalculada20C": { "type": "number" },
+        "resultado": { "type": "string", "enum": ["CONFORME", "NAO_CONFORME"] }
+      },
+      "required": ["id", "postoId", "produto", "temperatura", "densidadeObservada", "resultado"]
+    },
+    "analise": {
+      "title": "Analise",
+      "description": "Análises de qualidade do combustível e testes laboratoriais no recebimento",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "postoId": { "type": "string", "maxLength": 64 },
+        "tipo": { "type": "string", "maxLength": 50 },
+        "produto": { "type": "string", "maxLength": 100 },
+        "resultado": { "type": "string", "maxLength": 200 },
+        "status": { "type": "string", "enum": ["APROVADO", "REPROVADO", "EM_ANALISE"] }
+      },
+      "required": ["id", "postoId", "tipo", "produto", "status"]
+    },
+    "conformidade": {
+      "title": "Conformidade",
+      "description": "Checklist de conformidade operacional, segurança e meio ambiente",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "postoId": { "type": "string", "maxLength": 64 },
+        "data": { "type": "string", "maxLength": 20 },
+        "categoria": { "type": "string", "maxLength": 50 },
+        "item": { "type": "string", "maxLength": 200 },
+        "status": { "type": "string", "enum": ["CONFORME", "NAO_CONFORME", "PENDENTE", "NAO_APLICAVEL"] }
+      },
+      "required": ["id", "postoId", "item", "status"]
+    },
+    "auditoria": {
+      "title": "AuditLog",
+      "description": "Trilha de auditoria imutável de eventos operacionais",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "postoId": { "type": "string", "maxLength": 64 },
+        "usuarioId": { "type": "string", "maxLength": 64 },
+        "usuarioNome": { "type": "string", "maxLength": 100 },
+        "modulo": { "type": "string", "maxLength": 50 },
+        "entidade": { "type": "string", "maxLength": 50 },
+        "entidadeId": { "type": "string", "maxLength": 64 },
+        "acao": { "type": "string", "maxLength": 30 },
+        "timestamp": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["postoId", "usuarioId", "modulo", "entidade", "acao", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/usuarios/{uid}": {
+      "schema": { "$ref": "#/entities/usuario" },
+      "description": "Perfis de usuários do sistema"
+    },
+    "/postos/{postoId}": {
+      "schema": { "$ref": "#/entities/posto" },
+      "description": "Postos de combustíveis cadastrados"
+    },
+    "/postos/{postoId}/funcionarios/{funcionarioId}": {
+      "schema": { "$ref": "#/entities/funcionario" },
+      "description": "Quadro de funcionários operacionais do posto"
+    },
+    "/postos/{postoId}/escalas/{escalaId}": {
+      "schema": { "$ref": "#/entities/escala" },
+      "description": "Escalas e turnos diários dos funcionários"
+    },
+    "/postos/{postoId}/fechamentos/{fechamentoId}": {
+      "schema": { "$ref": "#/entities/fechamento" },
+      "description": "Fechamentos de caixa por turno"
+    },
+    "/postos/{postoId}/ocorrenciasCaixa/{ocorrenciaId}": {
+      "schema": { "$ref": "#/entities/ocorrenciaCaixa" },
+      "description": "Ocorrências de faltas ou sobras de caixa"
+    },
+    "/postos/{postoId}/tanques/{tanqueId}": {
+      "schema": { "$ref": "#/entities/tanque" },
+      "description": "Tanques de combustível e réguas volumétricas"
+    },
+    "/postos/{postoId}/bicos/{bicoId}": {
+      "schema": { "$ref": "#/entities/bico" },
+      "description": "Bicos de abastecimento por bomba e tanque"
+    },
+    "/postos/{postoId}/afericoes/{afericaoId}": {
+      "schema": { "$ref": "#/entities/afericao" },
+      "description": "Aferições de bico padrão 20L"
+    },
+    "/postos/{postoId}/densidades/{densidadeId}": {
+      "schema": { "$ref": "#/entities/densidade" },
+      "description": "Testes de densidade e temperatura de combustíveis"
+    },
+    "/postos/{postoId}/analises/{analiseId}": {
+      "schema": { "$ref": "#/entities/analise" },
+      "description": "Análises de qualidade e conformidade do produto"
+    },
+    "/postos/{postoId}/conformidades/{conformidadeId}": {
+      "schema": { "$ref": "#/entities/conformidade" },
+      "description": "Checklists de conformidade diária/semanal"
+    },
+    "/postos/{postoId}/auditoria/{auditoriaId}": {
+      "schema": { "$ref": "#/entities/auditoria" },
+      "description": "Logs imutáveis de auditoria de operações"
+    }
+  }
+}
