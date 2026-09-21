@@ -11,7 +11,7 @@ import {
   Conformidade,
   AuditLog,
 } from '../../types';
-import { FileText, Printer, Download, Filter, Search } from 'lucide-react';
+import { FileText, Printer, Download, Filter, Search, Trash2 } from 'lucide-react';
 import { formatarMoeda } from '../../utils/calculations';
 
 interface RelatoriosProps {
@@ -25,17 +25,18 @@ interface RelatoriosProps {
   densidades: RegistroDensidade[];
   conformidades: Conformidade[];
   auditoria: AuditLog[];
+  onLimparDemonstracao?: () => void;
 }
 
 type TipoRelatorio =
-  | 'FUNCIONARIOS'
-  | 'ESCALAS'
   | 'FECHAMENTOS'
   | 'FALTAS'
-  | 'TANQUES'
   | 'AFERICOES'
   | 'DENSIDADES'
   | 'CONFORMIDADE'
+  | 'FUNCIONARIOS'
+  | 'ESCALAS'
+  | 'TANQUES'
   | 'AUDITORIA';
 
 export const RelatoriosView: React.FC<RelatoriosProps> = ({
@@ -49,6 +50,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
   densidades,
   conformidades,
   auditoria,
+  onLimparDemonstracao,
 }) => {
   const [tipo, setTipo] = useState<TipoRelatorio>('FECHAMENTOS');
   const [busca, setBusca] = useState('');
@@ -147,7 +149,17 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
           </p>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {onLimparDemonstracao && (
+            <button
+              onClick={onLimparDemonstracao}
+              className="inline-flex items-center gap-1.5 px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 font-medium rounded-lg text-sm transition border border-red-200"
+              title="Remover todos os dados de demonstração e resetar posto"
+            >
+              <Trash2 className="w-4 h-4 text-red-600" />
+              Limpar Demonstração
+            </button>
+          )}
           <button
             onClick={handleExportarCsv}
             className="inline-flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-lg text-sm transition"

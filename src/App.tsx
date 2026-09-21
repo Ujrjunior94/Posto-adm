@@ -12,12 +12,16 @@ import {
   RegistroDensidade,
   Conformidade,
   AuditLog,
+  LMCRegistro,
+  RateioTurno,
 } from './types';
-import { PostoSubcollectionRepository, testConnection } from './repositories/firestoreRepository';
+import { PostoSubcollectionRepository, testConnection, registrarAuditoria } from './repositories/firestoreRepository';
 import { DashboardView } from './features/dashboard/DashboardView';
 import { FuncionariosView } from './features/funcionarios/FuncionariosView';
 import { PlannerView } from './features/planner/PlannerView';
 import { FechamentoCaixaView } from './features/fechamento/FechamentoCaixaView';
+import { SobrasFaltasView } from './features/sobras-faltas/SobrasFaltasView';
+import { LMCView } from './features/lmc/LMCView';
 import { TanquesView } from './features/tanques/TanquesView';
 import { BicosAfericoesView } from './features/afericoes/BicosAfericoesView';
 import { AnalisesConformidadeView } from './features/analises/AnalisesConformidadeView';
@@ -41,6 +45,12 @@ import {
   RefreshCw,
   Menu,
   X,
+  Trash2,
+  AlertTriangle,
+  CheckCircle2,
+  Loader2,
+  BookOpen,
+  Scale,
 } from 'lucide-react';
 
 const repoFunc = new PostoSubcollectionRepository<Funcionario>('funcionarios');
@@ -53,129 +63,8 @@ const repoAfericoes = new PostoSubcollectionRepository<Afericao>('afericoes');
 const repoDensidades = new PostoSubcollectionRepository<RegistroDensidade>('densidades');
 const repoConformidades = new PostoSubcollectionRepository<Conformidade>('conformidades');
 const repoAuditoria = new PostoSubcollectionRepository<AuditLog>('auditoria');
-
-// Seed inicial inteligente para o Posto se estiver vazio
-const seedInicialSeVazio = async (postoId: string) => {
-  const funcs = await repoFunc.getAll(postoId);
-  if (funcs.length === 0) {
-    const f1: Funcionario = {
-      id: 'func-01',
-      postoId,
-      nome: 'Carlos Eduardo Silva',
-      cpf: '123.456.789-00',
-      matricula: 'MAT-1001',
-      telefone: '(11) 98765-4321',
-      cargo: 'Frentista',
-      funcao: 'Abastecimento e Pista',
-      status: 'ATIVO',
-      dataAdmissao: '2024-01-15',
-      turnoPreferencial: 'Manhã (06h - 14h)',
-      criadoEm: new Date().toISOString(),
-      atualizadoEm: new Date().toISOString(),
-    };
-    const f2: Funcionario = {
-      id: 'func-02',
-      postoId,
-      nome: 'Juliana Mendes Santos',
-      cpf: '234.567.890-11',
-      matricula: 'MAT-1002',
-      telefone: '(11) 98765-1122',
-      cargo: 'Operador de Caixa',
-      funcao: 'Fechamento e Operação',
-      status: 'ATIVO',
-      dataAdmissao: '2024-03-10',
-      turnoPreferencial: 'Tarde (14h - 22h)',
-      criadoEm: new Date().toISOString(),
-      atualizadoEm: new Date().toISOString(),
-    };
-    await repoFunc.save(postoId, f1);
-    await repoFunc.save(postoId, f2);
-
-    // Tanque com tabela de arqueação por régua real
-    const t1: Tanque = {
-      id: 'tanque-01',
-      postoId,
-      codigo: 'TQ-01',
-      produto: 'Gasolina Comum',
-      capacidadeNominal: 30000,
-      capacidadeOperacional: 28500,
-      unidade: 'Litros',
-      formato: 'CILINDRICO_HORIZONTAL',
-      ativo: true,
-      tabelaRegua: [
-        { altura: 10, volume: 950 },
-        { altura: 20, volume: 2100 },
-        { altura: 30, volume: 3400 },
-        { altura: 40, volume: 4800 },
-        { altura: 50, volume: 6300 },
-        { altura: 100, volume: 15000 },
-        { altura: 150, volume: 24000 },
-        { altura: 200, volume: 30000 },
-      ],
-      criadoEm: new Date().toISOString(),
-      atualizadoEm: new Date().toISOString(),
-    };
-    const t2: Tanque = {
-      id: 'tanque-02',
-      postoId,
-      codigo: 'TQ-02',
-      produto: 'Etanol Hidratado',
-      capacidadeNominal: 20000,
-      capacidadeOperacional: 19000,
-      unidade: 'Litros',
-      formato: 'CILINDRICO_HORIZONTAL',
-      ativo: true,
-      tabelaRegua: [
-        { altura: 10, volume: 600 },
-        { altura: 50, volume: 4200 },
-        { altura: 100, volume: 10000 },
-        { altura: 150, volume: 16000 },
-        { altura: 200, volume: 20000 },
-      ],
-      criadoEm: new Date().toISOString(),
-      atualizadoEm: new Date().toISOString(),
-    };
-    await repoTanques.save(postoId, t1);
-    await repoTanques.save(postoId, t2);
-
-    // Bicos vinculados
-    const b1: Bico = {
-      id: 'bico-01',
-      postoId,
-      numero: 1,
-      bomba: 'Bomba 01 (Quádrupla Ilha 1)',
-      tanqueId: 'tanque-01',
-      produto: 'Gasolina Comum',
-      lado: 'A',
-      status: 'ATIVO',
-      precoBase: 5.89,
-      precoLitro: 5.74,
-      temDesconto: true,
-      tipoDesconto: 'VALOR',
-      valorDesconto: 0.15,
-      motivoDesconto: 'Promoção Pista Rápida',
-      criadoEm: new Date().toISOString(),
-      atualizadoEm: new Date().toISOString(),
-    };
-    const b2: Bico = {
-      id: 'bico-02',
-      postoId,
-      numero: 2,
-      bomba: 'Bomba 01 (Quádrupla Ilha 1)',
-      tanqueId: 'tanque-02',
-      produto: 'Etanol Hidratado',
-      lado: 'B',
-      status: 'ATIVO',
-      precoBase: 3.89,
-      precoLitro: 3.89,
-      temDesconto: false,
-      criadoEm: new Date().toISOString(),
-      atualizadoEm: new Date().toISOString(),
-    };
-    await repoBicos.save(postoId, b1);
-    await repoBicos.save(postoId, b2);
-  }
-};
+const repoLMC = new PostoSubcollectionRepository<LMCRegistro>('lmc');
+const repoRateio = new PostoSubcollectionRepository<RateioTurno>('rateios');
 
 const MainApp: React.FC = () => {
   const { currentUser, userProfile, postoId, signInDemo, signInWithGoogle, signOut } = useAuth();
@@ -183,6 +72,9 @@ const MainApp: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [modalLimpezaAberto, setModalLimpezaAberto] = useState(false);
+  const [limpandoDados, setLimpandoDados] = useState(false);
+  const [toastSucesso, setToastSucesso] = useState('');
 
   // States dos dados operacionais reais em tempo real
   const [funcionarios, setFuncionarios] = useState<Funcionario[]>([]);
@@ -197,29 +89,90 @@ const MainApp: React.FC = () => {
   const [auditoria, setAuditoria] = useState<AuditLog[]>([]);
 
   const carregarDadosLocais = async () => {
-    const existingFuncs = await repoFunc.getAll(postoId);
-    if (existingFuncs.length > 0) {
-      setFuncionarios(existingFuncs);
-      setTanques(await repoTanques.getAll(postoId));
-      setBicos(await repoBicos.getAll(postoId));
-      setEscalas(await repoEscalas.getAll(postoId));
-      setFechamentos(await repoFech.getAll(postoId));
-      setOcorrencias(await repoOcorr.getAll(postoId));
-      setAfericoes(await repoAfericoes.getAll(postoId));
-      setDensidades(await repoDensidades.getAll(postoId));
-      setConformidades(await repoConformidades.getAll(postoId));
-      setAuditoria(await repoAuditoria.getAll(postoId));
-    } else {
-      await seedInicialSeVazio(postoId);
-      setFuncionarios(await repoFunc.getAll(postoId));
-      setTanques(await repoTanques.getAll(postoId));
-      setBicos(await repoBicos.getAll(postoId));
-      setEscalas(await repoEscalas.getAll(postoId));
-    }
+    setFuncionarios(await repoFunc.getAll(postoId));
+    setTanques(await repoTanques.getAll(postoId));
+    setBicos(await repoBicos.getAll(postoId));
+    setEscalas(await repoEscalas.getAll(postoId));
+    setFechamentos(await repoFech.getAll(postoId));
+    setOcorrencias(await repoOcorr.getAll(postoId));
+    setAfericoes(await repoAfericoes.getAll(postoId));
+    setDensidades(await repoDensidades.getAll(postoId));
+    setConformidades(await repoConformidades.getAll(postoId));
+    setAuditoria(await repoAuditoria.getAll(postoId));
   };
 
   const carregarDados = async () => {
     await carregarDadosLocais();
+  };
+
+  // Função para remover todos os dados de demonstração e resetar o posto
+  const handleRemoverDadosDemonstracao = async () => {
+    setLimpandoDados(true);
+    try {
+      // 1. Limpa todas as coleções operacionais
+      await Promise.all([
+        repoFunc.clearAll(postoId),
+        repoEscalas.clearAll(postoId),
+        repoFech.clearAll(postoId),
+        repoOcorr.clearAll(postoId),
+        repoTanques.clearAll(postoId),
+        repoBicos.clearAll(postoId),
+        repoAfericoes.clearAll(postoId),
+        repoDensidades.clearAll(postoId),
+        repoConformidades.clearAll(postoId),
+        repoAuditoria.clearAll(postoId),
+        repoLMC.clearAll(postoId),
+        repoRateio.clearAll(postoId),
+      ]);
+
+      // 2. Limpa dados armazenados em cache local
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const chavesParaRemover: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && (key.startsWith('meuposto_demo_') || key.startsWith('meuposto_'))) {
+            chavesParaRemover.push(key);
+          }
+        }
+        chavesParaRemover.forEach((k) => localStorage.removeItem(k));
+      }
+
+      // 3. Zera os estados em memória
+      setFuncionarios([]);
+      setEscalas([]);
+      setFechamentos([]);
+      setOcorrencias([]);
+      setTanques([]);
+      setBicos([]);
+      setAfericoes([]);
+      setDensidades([]);
+      setConformidades([]);
+      setAuditoria([]);
+
+      // 4. Registra auditoria
+      if (userProfile) {
+        await registrarAuditoria(
+          postoId,
+          userProfile.uid,
+          userProfile.nome,
+          'SISTEMA',
+          'BANCO_DE_DADOS',
+          postoId,
+          'DELETE',
+          { acao: 'Remoção de dados de demonstração e reset de coleções' },
+          null
+        );
+      }
+
+      setModalLimpezaAberto(false);
+      setToastSucesso('Dados de demonstração removidos com sucesso! Banco limpo para uso operacional.');
+      setTimeout(() => setToastSucesso(''), 5000);
+    } catch (err) {
+      console.error('Erro ao remover dados de demonstração:', err);
+      alert('Erro ao limpar dados: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setLimpandoDados(false);
+    }
   };
 
   useEffect(() => {
@@ -333,8 +286,10 @@ const MainApp: React.FC = () => {
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'fechamento', label: 'Fechamento de Caixa', icon: DollarSign },
+    { id: 'sobras-faltas', label: 'Sobras, Faltas & Rateio', icon: Scale },
     { id: 'planner', label: 'Planner & Escalas', icon: Calendar },
     { id: 'funcionarios', label: 'Funcionários', icon: Users },
+    { id: 'lmc', label: 'LMC — Movimentação', icon: BookOpen },
     { id: 'tanques', label: 'Tanques & Régua', icon: Fuel },
     { id: 'afericoes', label: 'Bicos & Aferições', icon: Gauge },
     { id: 'analises', label: 'Qualidade & Conformidade', icon: TestTubes },
@@ -395,6 +350,17 @@ const MainApp: React.FC = () => {
               </button>
             );
           })}
+
+          <div className="pt-4 mt-4 border-t border-slate-800">
+            <button
+              onClick={() => setModalLimpezaAberto(true)}
+              className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium text-red-400 hover:bg-red-500/10 hover:text-red-300 transition"
+              title="Remover todos os dados de demonstração e resetar coleções"
+            >
+              <Trash2 className="w-4 h-4 flex-shrink-0 text-red-400" />
+              <span>Remover Demonstração</span>
+            </button>
+          </div>
         </nav>
 
         {/* Status de Sincronização / Offline no Rodapé */}
@@ -470,6 +436,86 @@ const MainApp: React.FC = () => {
               </button>
             );
           })}
+          <div className="pt-2 border-t border-slate-800">
+            <button
+              onClick={() => {
+                setMobileMenuOpen(false);
+                setModalLimpezaAberto(true);
+              }}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-semibold text-red-400 hover:bg-red-500/10"
+            >
+              <Trash2 className="w-4 h-4 text-red-400" />
+              <span>Remover Demonstração</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Toast de Sucesso */}
+      {toastSucesso && (
+        <div className="fixed top-5 right-5 z-50 bg-emerald-700 text-white px-4 py-3 rounded-xl shadow-xl flex items-center gap-2 text-xs font-semibold animate-in fade-in duration-200">
+          <CheckCircle2 className="w-4 h-4 shrink-0" />
+          <span>{toastSucesso}</span>
+        </div>
+      )}
+
+      {/* Modal de Confirmação de Remoção de Dados de Demonstração */}
+      {modalLimpezaAberto && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-full bg-red-100 text-red-600 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Remover Dados de Demonstração?</h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Esta ação limpará permanentemente todos os registros de demonstração de funcionários, escalas, fechamentos, tanques e bicos do posto atual.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs text-slate-600 space-y-1">
+              <p className="font-semibold text-slate-800">O que será zerado:</p>
+              <ul className="list-disc pl-4 space-y-0.5 text-[11px] text-slate-500">
+                <li>Funcionários e operadores cadastrados</li>
+                <li>Escalas de trabalho e planejamentos</li>
+                <li>Fechamentos de caixa e faltas registradas</li>
+                <li>Tanques de combustível e tabelas de régua</li>
+                <li>Bicos e histórico de aferições</li>
+                <li>Análises de densidade e checklists</li>
+              </ul>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                disabled={limpandoDados}
+                onClick={() => setModalLimpezaAberto(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-lg transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={limpandoDados}
+                onClick={handleRemoverDadosDemonstracao}
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold text-xs rounded-lg transition shadow-xs disabled:opacity-50"
+              >
+                {limpandoDados ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Limpando dados...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Confirmar e Limpar Tudo
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -493,6 +539,27 @@ const MainApp: React.FC = () => {
           <FuncionariosView funcionarios={funcionarios} onReload={carregarDados} />
         )}
 
+        {activeTab === 'fechamento' && (
+          <FechamentoCaixaView
+            fechamentos={fechamentos}
+            ocorrencias={ocorrencias}
+            funcionarios={funcionarios}
+            escalas={escalas}
+            bicos={bicos}
+            tanques={tanques}
+            onReload={carregarDados}
+          />
+        )}
+
+        {activeTab === 'sobras-faltas' && (
+          <SobrasFaltasView
+            escalas={escalas}
+            funcionarios={funcionarios}
+            fechamentos={fechamentos}
+            onReload={carregarDados}
+          />
+        )}
+
         {activeTab === 'planner' && (
           <PlannerView
             escalas={escalas}
@@ -502,14 +569,11 @@ const MainApp: React.FC = () => {
           />
         )}
 
-        {activeTab === 'fechamento' && (
-          <FechamentoCaixaView
-            fechamentos={fechamentos}
-            ocorrencias={ocorrencias}
-            funcionarios={funcionarios}
-            escalas={escalas}
-            bicos={bicos}
+        {activeTab === 'lmc' && (
+          <LMCView
             tanques={tanques}
+            bicos={bicos}
+            fechamentos={fechamentos}
             onReload={carregarDados}
           />
         )}
@@ -547,6 +611,7 @@ const MainApp: React.FC = () => {
             densidades={densidades}
             conformidades={conformidades}
             auditoria={auditoria}
+            onLimparDemonstracao={() => setModalLimpezaAberto(true)}
           />
         )}
 

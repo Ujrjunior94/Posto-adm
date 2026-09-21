@@ -320,3 +320,109 @@ export interface DailyOperationalBalance {
   analisesRealizadas: number;
   conformidadePendencias: number;
 }
+
+// 5 Combustíveis Principais solicitados
+export type CombustivelPrincipal =
+  | 'Gasolina Comum'
+  | 'Gasolina Aditivada'
+  | 'Etanol'
+  | 'Diesel S10'
+  | 'Diesel S500';
+
+export const COMBUSTIVEIS_PRINCIPAIS_LIST: CombustivelPrincipal[] = [
+  'Gasolina Comum',
+  'Gasolina Aditivada',
+  'Etanol',
+  'Diesel S10',
+  'Diesel S500',
+];
+
+// Tipos do LMC (Livro de Movimentação de Combustíveis) - ANP
+export interface NotaFiscalLMC {
+  numeroNF: string;
+  serie?: string;
+  distribuidora: string;
+  dataEmissao?: string;
+  volumeLitros: number;
+}
+
+export interface LMCRegistro {
+  id: string;
+  postoId: string;
+  data: string; // YYYY-MM-DD
+  produto: CombustivelPrincipal | string;
+  tanqueId?: string;
+  tanqueCodigo?: string;
+  estoqueAbertura: number; // Volume de abertura em Litros
+  entradas: number; // Compras/Recebimentos em Litros
+  notasFiscais?: NotaFiscalLMC[];
+  vendas: number; // Vendas apuradas pelos encerrantes dos bicos em Litros
+  afericoes: number; // Litros utilizados em aferição
+  estoqueEscritural: number; // Abertura + Entradas - Vendas (em Litros)
+  estoqueFisico: number; // Medição da régua / arqueação em Litros
+  medicaoReguaCm?: number; // Altura da régua em cm
+  variacaoLitros: number; // estoqueFisico - estoqueEscritural (+ sobra, - perda)
+  variacaoPercentual: number; // % sobre a movimentação ou estoque
+  toleranciaANPMaxLitros: number; // 0,6% sobre o volume movimentado (Regulamentação ANP)
+  statusANP: 'CONFORME' | 'PERDA_EXCESSIVA' | 'SOBRA_EXCESSIVA';
+  fechado: boolean;
+  responsavelNome?: string;
+  observacoes?: string;
+  criadoEm: string;
+  atualizadoEm: string;
+}
+
+export interface LMCResumoPeriodo {
+  periodo: string; // Ex: '1ª Quinzena (01 a 15/09/2026)', 'Mês de Setembro/2026'
+  tipo: 'DIARIO' | 'QUINZENAL' | 'MENSAL';
+  dataInicio: string;
+  dataFim: string;
+  produto: string;
+  estoqueInicial: number;
+  totalEntradas: number;
+  totalVendas: number;
+  totalAfericoes: number;
+  estoqueEscrituralFinal: number;
+  estoqueFisicoFinal: number;
+  perdaSobraAcumulada: number;
+  percentualVariacao: number;
+  limiteToleranciaANPLitros: number;
+  statusANP: 'CONFORME' | 'FORA_DA_TOLERANCIA';
+  registrosCount: number;
+}
+
+// Tipos do Planner de Sobras e Faltas (Vinculado à Escala)
+export type TipoDiferencaTurno = 'FALTA' | 'SOBRA' | 'SEM_DIFERENCA';
+
+export interface RateioIntegrante {
+  funcionarioId: string;
+  funcionarioNome: string;
+  cargo?: string;
+  presente: boolean; // true = trabalhou no turno, false = faltou / ausente ("x faltou")
+  motivoAusencia?: string;
+  valorIndividual: number; // Parcela calculada do rateio
+  pago: boolean;
+  dataPagamento?: string;
+  formaPagamento?: 'DESCONTO_FOLHA' | 'DINHEIRO' | 'PIX' | 'DISPENSADO' | 'PENDENTE';
+  observacao?: string;
+}
+
+export interface RateioTurno {
+  id: string;
+  postoId: string;
+  data: string; // YYYY-MM-DD
+  turno: string; // 'Turno 2 (06h - 14h)', 'Turno 3 (14h - 22h)', 'Turno 4 (22h - 06h)'
+  tipo: TipoDiferencaTurno;
+  valorTotalDiferenca: number; // Valor total da falta ou sobra do caixa do turno
+  totalIntegrantesEscalados: number;
+  totalIntegrantesPresentes: number;
+  totalIntegrantesAusentes: number;
+  valorPorIntegrante: number; // valorTotalDiferenca / totalIntegrantesPresentes
+  integrantes: RateioIntegrante[];
+  fechamentoCaixaId?: string;
+  status: 'PENDENTE' | 'PARCIALMENTE_PAGO' | 'QUITADO' | 'DESCONTADO_FOLHA' | 'DISPENSADO';
+  motivo?: string;
+  criadoPor: string;
+  criadoEm: string;
+  atualizadoEm: string;
+}

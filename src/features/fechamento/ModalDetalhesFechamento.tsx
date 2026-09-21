@@ -1,9 +1,11 @@
 import React, { useEffect } from 'react';
 import { FechamentoCaixa } from '../../types';
 import { formatarMoeda } from '../../utils/calculations';
+import { exportarFechamentoCaixaPDF } from '../../utils/pdfGenerator';
 import {
   X,
   Printer,
+  Download,
   Fuel,
   Banknote,
   QrCode,
@@ -66,11 +68,19 @@ export const ModalDetalhesFechamento: React.FC<ModalDetalhesFechamentoProps> = (
           </div>
           <div className="flex items-center gap-2">
             <button
+              onClick={() => exportarFechamentoCaixaPDF(fechamento)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-xs font-semibold transition shadow-xs"
+              title="Exportar documento oficial em PDF formatado"
+            >
+              <Download className="w-4 h-4" />
+              Exportar PDF
+            </button>
+            <button
               onClick={handleImprimir}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition shadow-xs"
             >
               <Printer className="w-4 h-4" />
-              Imprimir Comprovante
+              Imprimir
             </button>
             <button
               onClick={onClose}

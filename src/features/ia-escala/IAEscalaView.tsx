@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Escala, Funcionario, EscalaStatus } from '../../types';
 import { PostoSubcollectionRepository, registrarAuditoria } from '../../repositories/firestoreRepository';
 import { useAuth } from '../../contexts/AuthContext';
@@ -17,6 +17,10 @@ import {
   ArrowRight,
   ShieldCheck,
   Upload,
+  Image as ImageIcon,
+  FileImage,
+  FolderOpen,
+  Clock,
 } from 'lucide-react';
 
 const repoEscalas = new PostoSubcollectionRepository<Escala>('escalas');
@@ -81,14 +85,110 @@ const normalizarDataParaIso = (rawDate: string): string => {
   return trimmed;
 };
 
+// Normalizador dos turnos operacionais do posto
+export const normalizarTurno = (
+  rawTurno: string,
+  rawInicio?: string,
+  rawFim?: string
+): {
+  turno: string;
+  horarioInicio: string;
+  horarioFim: string;
+} => {
+  const t = (rawTurno || '').trim().toLowerCase();
+
+  // Turno 2: 06h às 14h
+  if (
+    t === '2' ||
+    t === 't2' ||
+    t.includes('turno 2') ||
+    t.includes('turno2') ||
+    t.includes('06-14') ||
+    t.includes('06h') ||
+    t.includes('06:00') ||
+    t.includes('manha') ||
+    t.includes('manhã')
+  ) {
+    return {
+      turno: 'Turno 2 (06h - 14h)',
+      horarioInicio: '06:00',
+      horarioFim: '14:00',
+    };
+  }
+
+  // Turno 3: 14h às 22h
+  if (
+    t === '3' ||
+    t === 't3' ||
+    t.includes('turno 3') ||
+    t.includes('turno3') ||
+    t.includes('14-22') ||
+    t.includes('14h') ||
+    t.includes('14:00') ||
+    t.includes('tarde')
+  ) {
+    return {
+      turno: 'Turno 3 (14h - 22h)',
+      horarioInicio: '14:00',
+      horarioFim: '22:00',
+    };
+  }
+
+  // Turno 4: 22h às 06h
+  if (
+    t === '4' ||
+    t === 't4' ||
+    t.includes('turno 4') ||
+    t.includes('turno4') ||
+    t.includes('22-06') ||
+    t.includes('22h') ||
+    t.includes('22:00') ||
+    t.includes('noite') ||
+    t.includes('noturno')
+  ) {
+    return {
+      turno: 'Turno 4 (22h - 06h)',
+      horarioInicio: '22:00',
+      horarioFim: '06:00',
+    };
+  }
+
+  if (t.includes('10h') || t.includes('10-18') || t.includes('intermed')) {
+    return {
+      turno: 'Intermediário (10h - 18h)',
+      horarioInicio: '10:00',
+      horarioFim: '18:00',
+    };
+  }
+
+  if (t.includes('12x36')) {
+    return {
+      turno: '12x36 (07h - 19h)',
+      horarioInicio: '07:00',
+      horarioFim: '19:00',
+    };
+  }
+
+  return {
+    turno: rawTurno || 'Turno 2 (06h - 14h)',
+    horarioInicio: rawInicio || '06:00',
+    horarioFim: rawFim || '14:00',
+  };
+};
+
 export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
   funcionarios,
   onReload,
   onNavigateToPlanner,
 }) => {
   const { postoId, userProfile } = useAuth();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+
   const [imagemPreview, setImagemPreview] = useState<string | null>(null);
   const [imagemMimeType, setImagemMimeType] = useState('image/jpeg');
+  const [nomeArquivo, setNomeArquivo] = useState<string>('');
+  const [tamanhoArquivo, setTamanhoArquivo] = useState<string>('');
   const [processando, setProcessando] = useState(false);
   const [tituloDocumento, setTituloDocumento] = useState('');
   const [colaboradoresDetectados, setColaboradoresDetectados] = useState<ColaboradorReconhecido[]>([]);
@@ -97,24 +197,78 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
   const [erroProcessamento, setErroProcessamento] = useState('');
   const [salvandoNoPlanner, setSalvandoNoPlanner] = useState(false);
   const [sucessoSalvo, setSucessoSalvo] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  const carregarArquivoImagem = (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      setErroProcessamento('Por favor, selecione um arquivo de imagem válido (JPG, PNG, WEBP).');
+      return;
+    }
+    setNomeArquivo(file.name || 'imagem-escala.jpg');
+    const sizeInKb = (file.size / 1024).toFixed(1);
+    setTamanhoArquivo(`${sizeInKb} KB`);
+    setImagemMimeType(file.type || 'image/jpeg');
+    const reader = new FileReader();
+    reader.onload = () => {
+      setImagemPreview(reader.result as string);
+      setColaboradoresDetectados([]);
+      setItensEscala([]);
+      setMensagemStatus('');
+      setErroProcessamento('');
+      setSucessoSalvo(false);
+    };
+    reader.readAsDataURL(file);
+  };
 
   // Manipulador de upload de arquivo ou foto da câmera
   const handleUploadFoto = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setImagemMimeType(file.type || 'image/jpeg');
-      const reader = new FileReader();
-      reader.onload = () => {
-        setImagemPreview(reader.result as string);
-        setColaboradoresDetectados([]);
-        setItensEscala([]);
-        setMensagemStatus('');
-        setErroProcessamento('');
-        setSucessoSalvo(false);
-      };
-      reader.readAsDataURL(file);
+      carregarArquivoImagem(file);
+    }
+    // Reseta o input para permitir selecionar o mesmo arquivo novamente se desejar
+    e.target.value = '';
+  };
+
+  // Suporte a arrastar e soltar (drag and drop)
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      carregarArquivoImagem(file);
     }
   };
+
+  // Suporte a colar print/screenshot da área de transferência (Ctrl+V / Cmd+V)
+  React.useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+          const blob = items[i].getAsFile();
+          if (blob) {
+            carregarArquivoImagem(blob);
+            break;
+          }
+        }
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, []);
 
   // Gerador de imagem demonstrativa realista de escala de posto
   const handleCarregarExemploEscala = () => {
@@ -181,32 +335,32 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
       {
         nome: funcionarios[0]?.nome || 'Carlos Eduardo Silva',
         cargo: 'Frentista',
-        turno: '06h - 14h',
-        dias: ['T', 'T', 'T', 'T', 'T', 'T', 'FOLGA'],
+        turno: 'Turno 2 (06h-14h)',
+        dias: ['T2', 'T2', 'T2', 'T2', 'T2', 'T2', 'FOLGA'],
       },
       {
         nome: funcionarios[1]?.nome || 'Juliana Mendes Santos',
         cargo: 'Caixa',
-        turno: '14h - 22h',
-        dias: ['T', 'T', 'FOLGA', 'T', 'T', 'T', 'T'],
+        turno: 'Turno 3 (14h-22h)',
+        dias: ['T3', 'T3', 'FOLGA', 'T3', 'T3', 'T3', 'T3'],
       },
       {
         nome: 'Lucas Andrade',
-        cargo: 'Frentista',
-        turno: '22h - 06h',
-        dias: ['T', 'T', 'T', 'T', 'FOLGA', 'T', 'T'],
+        cargo: 'Frentista Noturno',
+        turno: 'Turno 4 (22h-06h)',
+        dias: ['T4', 'T4', 'T4', 'T4', 'FOLGA', 'T4', 'T4'],
       },
       {
         nome: 'Marcos Vinicius',
         cargo: 'Frentista',
-        turno: '06h - 14h',
-        dias: ['FOLGA', 'T', 'T', 'T', 'T', 'T', 'FOLGA'],
+        turno: 'Turno 2 (06h-14h)',
+        dias: ['FOLGA', 'T2', 'T2', 'T2', 'T2', 'T2', 'FOLGA'],
       },
       {
         nome: 'Aline Ferreira',
         cargo: 'Atendente Caixa',
-        turno: '10h - 18h',
-        dias: ['T', 'FOLGA', 'T', 'T', 'T', 'T', 'FOLGA'],
+        turno: 'Turno 3 (14h-22h)',
+        dias: ['T3', 'FOLGA', 'T3', 'T3', 'T3', 'T3', 'FOLGA'],
       },
     ];
 
@@ -229,7 +383,7 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
       x += cols[1].width;
 
       ctx.fillStyle = '#2563eb';
-      ctx.font = '11px monospace';
+      ctx.font = 'bold 10px monospace';
       ctx.fillText(row.turno, x + 8, y + 26);
       x += cols[2].width;
 
@@ -245,7 +399,7 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
     const footY = canvas.height - 45;
     ctx.fillStyle = '#64748b';
     ctx.font = 'italic 11px system-ui, sans-serif';
-    ctx.fillText('LEGENDA: T = Trabalho em Pista/Caixa • FOLGA = Descanso Semanal Remunerado (DSR)', 36, footY);
+    ctx.fillText('TURNOS DO POSTO: T2 = Turno 2 (06h-14h) • T3 = Turno 3 (14h-22h) • T4 = Turno 4 (22h-06h) • FOLGA = DSR', 36, footY);
     ctx.fillText('GERENTE RESPONSÁVEL: ___________________________', canvas.width - 340, footY);
 
     const dataUrl = canvas.toDataURL('image/png');
@@ -308,6 +462,7 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
               funcionarioId: match.id,
             };
           } else {
+            const turnoNorm = normalizarTurno(colab.sugestaoCadastroPrevio?.turnoPreferencial || '');
             return {
               nomeOriginal: colab.nomeOriginal,
               jaCadastrado: false,
@@ -316,7 +471,7 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
                 nome: colab.sugestaoCadastroPrevio?.nome || colab.nomeOriginal,
                 cargo: colab.sugestaoCadastroPrevio?.cargo || 'Frentista',
                 funcao: colab.sugestaoCadastroPrevio?.funcao || 'Atendimento de Pista',
-                turnoPreferencial: colab.sugestaoCadastroPrevio?.turnoPreferencial || 'Manhã (06h - 14h)',
+                turnoPreferencial: turnoNorm.turno,
                 cpf: `000.${Math.floor(100 + Math.random() * 900)}.${Math.floor(100 + Math.random() * 900)}-00`,
               },
             };
@@ -338,14 +493,16 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
         else if (stUpper.includes('ATEST') || stUpper.includes('AFAST')) statusVal = 'AFASTADO';
         else if (stUpper.includes('FERIA')) statusVal = 'FERIAS';
 
+        const turnoNorm = normalizarTurno(item.turno, item.horarioInicio, item.horarioFim);
+
         return {
           tempId: `item-${Date.now()}-${idx}`,
           funcionarioNome: item.funcionarioNome,
           funcionarioId: funcMatch?.id || colab?.funcionarioId || '',
           data: normalizarDataParaIso(item.data),
-          turno: item.turno || 'Manhã (06h - 14h)',
-          horarioInicio: item.horarioInicio || '06:00',
-          horarioFim: item.horarioFim || '14:00',
+          turno: turnoNorm.turno,
+          horarioInicio: turnoNorm.horarioInicio,
+          horarioFim: turnoNorm.horarioFim,
           status: statusVal,
           observacao: item.observacao || 'Importado por OCR Gemini',
         };
@@ -395,7 +552,7 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
         nome: n.split(' (')[0],
         cargo: n.includes('Caixa') ? 'Operador de Caixa' : 'Frentista',
         funcao: 'Atendimento e Abastecimento',
-        turnoPreferencial: n.includes('Noturno') ? 'Noite (22h - 06h)' : 'Manhã (06h - 14h)',
+        turnoPreferencial: n.includes('Noturno') ? 'Turno 4 (22h - 06h)' : 'Turno 2 (06h - 14h)',
         cpf: `123.${Math.floor(100 + Math.random() * 900)}.${Math.floor(100 + Math.random() * 900)}-10`,
       },
     }));
@@ -410,14 +567,28 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
         const dataStr = `${anoAtual}-${mesAtual}-${diaStr}`;
         const ehFolga = (dia + cIdx) % 6 === 0;
 
+        let turnoSelecionado = 'Turno 2 (06h - 14h)';
+        let hInicio = '06:00';
+        let hFim = '14:00';
+
+        if (cIdx % 3 === 1) {
+          turnoSelecionado = 'Turno 3 (14h - 22h)';
+          hInicio = '14:00';
+          hFim = '22:00';
+        } else if (cIdx % 3 === 2) {
+          turnoSelecionado = 'Turno 4 (22h - 06h)';
+          hInicio = '22:00';
+          hFim = '06:00';
+        }
+
         itens.push({
           tempId: `heuristica-${cIdx}-${dia}`,
           funcionarioNome: c.nomeOriginal,
           funcionarioId: c.funcionarioId || '',
           data: dataStr,
-          turno: cIdx % 2 === 0 ? 'Manhã (06h - 14h)' : 'Tarde (14h - 22h)',
-          horarioInicio: cIdx % 2 === 0 ? '06:00' : '14:00',
-          horarioFim: cIdx % 2 === 0 ? '14:00' : '22:00',
+          turno: turnoSelecionado,
+          horarioInicio: hInicio,
+          horarioFim: hFim,
           status: ehFolga ? 'FOLGA' : 'TRABALHO',
           observacao: 'Extraído da foto da escala',
         });
@@ -509,6 +680,23 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
     );
   };
 
+  // Alterar turno de um item na tabela de conferência
+  const handleAlterarTurnoItem = (tempId: string, novoTurno: string) => {
+    const norm = normalizarTurno(novoTurno);
+    setItensEscala((prev) =>
+      prev.map((i) =>
+        i.tempId === tempId
+          ? {
+              ...i,
+              turno: norm.turno,
+              horarioInicio: norm.horarioInicio,
+              horarioFim: norm.horarioFim,
+            }
+          : i
+      )
+    );
+  };
+
   // Aprovar e gravar no Planner de Escalas oficial
   const handleAprovarEGravarNoPlanner = async () => {
     if (itensEscala.length === 0) return;
@@ -542,7 +730,7 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
             fId = `func-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
             const nomeFinal = colab.sugestaoCadastroPrevio?.nome || colab.nomeOriginal;
             const cargoFinal = colab.sugestaoCadastroPrevio?.cargo || 'Frentista';
-            const turnoFinal = colab.sugestaoCadastroPrevio?.turnoPreferencial || 'Manhã (06h - 14h)';
+            const turnoFinal = colab.sugestaoCadastroPrevio?.turnoPreferencial || 'Turno 2 (06h - 14h)';
 
             const novoFunc: Funcionario = {
               id: fId,
@@ -681,61 +869,135 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
               1. Foto da Escala ou Quadro de Avisos
             </h3>
 
-            <div className="border-2 border-dashed border-slate-300 rounded-xl p-6 text-center hover:bg-slate-50 transition relative">
+            {/* Inputs Ocultos de Arquivo e Câmera */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/jpg,image/webp,image/heic,image/*"
+              onChange={handleUploadFoto}
+              className="hidden"
+            />
+            <input
+              ref={cameraInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={handleUploadFoto}
+              className="hidden"
+            />
+
+            <div
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              className={`border-2 border-dashed rounded-xl p-5 text-center transition relative ${
+                isDragOver
+                  ? 'border-purple-500 bg-purple-50/80 ring-4 ring-purple-100'
+                  : 'border-slate-300 hover:border-purple-300 bg-slate-50/50'
+              }`}
+            >
               {imagemPreview ? (
                 <div className="space-y-3">
-                  <img
-                    src={imagemPreview}
-                    alt="Foto da escala"
-                    className="max-h-64 mx-auto rounded-lg shadow-sm object-contain"
-                  />
-                  <div className="flex justify-center gap-3">
+                  <div className="relative inline-block max-w-full">
+                    <img
+                      src={imagemPreview}
+                      alt="Foto da escala selecionada"
+                      className="max-h-64 mx-auto rounded-lg shadow-md object-contain border border-slate-200 bg-white"
+                    />
+                    {nomeArquivo && (
+                      <span className="absolute bottom-2 left-2 bg-slate-900/80 backdrop-blur-xs text-white text-[10px] font-mono px-2 py-0.5 rounded-md">
+                        {nomeArquivo} {tamanhoArquivo && `(${tamanhoArquivo})`}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
                     <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-lg shadow-2xs transition"
+                    >
+                      <FolderOpen className="w-3.5 h-3.5 text-slate-500" />
+                      Escolher outro arquivo
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => cameraInputRef.current?.click()}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-lg shadow-2xs transition"
+                    >
+                      <Camera className="w-3.5 h-3.5 text-purple-600" />
+                      Tirar outra foto
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => {
                         setImagemPreview(null);
+                        setNomeArquivo('');
+                        setTamanhoArquivo('');
                         setColaboradoresDetectados([]);
                         setItensEscala([]);
                         setSucessoSalvo(false);
                       }}
-                      className="text-xs text-red-600 font-semibold hover:underline"
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs text-red-600 font-semibold hover:bg-red-50 rounded-lg transition"
                     >
-                      Remover foto e selecionar outra
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Remover
                     </button>
                   </div>
                 </div>
               ) : (
-                <div className="space-y-3 py-6">
-                  <div className="w-12 h-12 rounded-full bg-purple-50 text-purple-600 flex items-center justify-center mx-auto">
-                    <Upload className="w-6 h-6" />
+                <div className="space-y-4 py-4">
+                  <div className="w-12 h-12 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center mx-auto shadow-2xs">
+                    <FileImage className="w-6 h-6" />
                   </div>
                   <div>
-                    <p className="text-xs font-semibold text-slate-800">
-                      Tire uma foto ou arraste a imagem da escala
+                    <p className="text-sm font-bold text-slate-800">
+                      Envie a imagem ou foto da escala
                     </p>
-                    <p className="text-[11px] text-slate-400 mt-1">
-                      Aceita foto de celular, quadro branco, planilha impressa ou PDF escaneado (JPG, PNG)
+                    <p className="text-xs text-slate-500 mt-1">
+                      Arraste um arquivo de imagem para aqui ou use os botões abaixo:
                     </p>
                   </div>
-                  <div className="pt-2">
+
+                  {/* Botões de Ação de Seleção */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-sm mx-auto">
                     <button
                       type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleCarregarExemploEscala();
-                      }}
-                      className="relative z-10 inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition border border-slate-200 shadow-2xs"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold transition shadow-xs"
+                    >
+                      <FolderOpen className="w-4 h-4" />
+                      Enviar Arquivo de Imagem
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => cameraInputRef.current?.click()}
+                      className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-bold transition shadow-2xs"
+                    >
+                      <Camera className="w-4 h-4 text-purple-600" />
+                      Tirar Foto com Câmera
+                    </button>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-center gap-2 text-[11px] text-slate-400 pt-1">
+                    <span className="inline-flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                      JPG, PNG, WEBP
+                    </span>
+                    <span>•</span>
+                    <span className="inline-flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                      Atalho: <strong className="text-slate-600 font-mono">Ctrl + V</strong> para colar print
+                    </span>
+                  </div>
+
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={handleCarregarExemploEscala}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition border border-slate-200 shadow-2xs"
                     >
                       <Sparkles className="w-3.5 h-3.5 text-purple-600" />
                       Carregar Exemplo de Escala de Posto (Demo)
                     </button>
                   </div>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    onChange={handleUploadFoto}
-                    className="absolute inset-0 opacity-0 cursor-pointer"
-                  />
                 </div>
               )}
             </div>
@@ -912,6 +1174,28 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
               )}
             </div>
 
+            {/* Banner de Turnos Padronizados do Posto */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2.5 text-xs">
+              <div className="flex items-center gap-2 font-bold text-slate-700">
+                <Clock className="w-4 h-4 text-purple-600 shrink-0" />
+                <span>Padrão de Turnos do Posto:</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                <span className="inline-flex items-center gap-1.5 bg-white border border-amber-200 text-amber-900 px-2.5 py-1 rounded-md font-semibold shadow-2xs">
+                  <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                  <strong>Turno 2:</strong> 06:00 às 14:00
+                </span>
+                <span className="inline-flex items-center gap-1.5 bg-white border border-blue-200 text-blue-900 px-2.5 py-1 rounded-md font-semibold shadow-2xs">
+                  <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                  <strong>Turno 3:</strong> 14:00 às 22:00
+                </span>
+                <span className="inline-flex items-center gap-1.5 bg-white border border-indigo-200 text-indigo-900 px-2.5 py-1 rounded-md font-semibold shadow-2xs">
+                  <span className="w-2 h-2 rounded-full bg-indigo-600"></span>
+                  <strong>Turno 4:</strong> 22:00 às 06:00
+                </span>
+              </div>
+            </div>
+
             {sucessoSalvo ? (
               <div className="p-6 bg-emerald-50 border border-emerald-200 rounded-xl text-center space-y-3">
                 <CheckCircle2 className="w-10 h-10 text-emerald-600 mx-auto" />
@@ -950,7 +1234,7 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
                   <tbody className="divide-y divide-slate-100">
                     {itensEscala.map((item) => (
                       <tr key={item.tempId} className="hover:bg-slate-50">
-                        <td className="py-2 px-3 font-mono font-medium text-slate-800">{item.data}</td>
+                        <td className="py-2 px-3 font-mono font-medium text-slate-800 whitespace-nowrap">{item.data}</td>
                         <td className="py-2 px-3 font-medium text-slate-900">
                           {item.funcionarioNome}
                           {!item.funcionarioId && (
@@ -959,10 +1243,20 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
                             </span>
                           )}
                         </td>
-                        <td className="py-2 px-3 text-slate-600">
-                          <div>{item.turno}</div>
-                          <div className="text-[10px] text-slate-400 font-mono">
-                            {item.horarioInicio} - {item.horarioFim}
+                        <td className="py-2 px-3">
+                          <select
+                            value={item.turno}
+                            onChange={(e) => handleAlterarTurnoItem(item.tempId, e.target.value)}
+                            className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-[11px] font-medium text-slate-800 focus:ring-1 focus:ring-purple-500 focus:outline-none"
+                          >
+                            <option value="Turno 2 (06h - 14h)">Turno 2 (06h - 14h)</option>
+                            <option value="Turno 3 (14h - 22h)">Turno 3 (14h - 22h)</option>
+                            <option value="Turno 4 (22h - 06h)">Turno 4 (22h - 06h)</option>
+                            <option value="Intermediário (10h - 18h)">Intermediário (10h - 18h)</option>
+                            <option value="12x36 (07h - 19h)">12x36 (07h - 19h)</option>
+                          </select>
+                          <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                            {item.horarioInicio} às {item.horarioFim}
                           </div>
                         </td>
                         <td className="py-2 px-3">
@@ -971,7 +1265,7 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
                             onChange={(e) =>
                               handleAlterarStatusItem(item.tempId, e.target.value as EscalaStatus)
                             }
-                            className={`px-2 py-0.5 rounded text-[11px] font-bold border-0 cursor-pointer ${
+                            className={`px-2 py-1 rounded text-[11px] font-bold border-0 cursor-pointer ${
                               item.status === 'TRABALHO'
                                 ? 'bg-emerald-100 text-emerald-800'
                                 : item.status === 'FOLGA'

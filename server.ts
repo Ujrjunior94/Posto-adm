@@ -1,23 +1,33 @@
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
+
+let aiClient: GoogleGenAI | null = null;
+function getAIClient(): GoogleGenAI {
+  if (!aiClient) {
+    const key = process.env.GEMINI_API_KEY;
+    if (!key) {
+      throw new Error('A chave de API GEMINI_API_KEY não está configurada no ambiente.');
+    }
+    aiClient = new GoogleGenAI({
+      apiKey: key,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    });
+  }
+  return aiClient;
+}
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
   app.use(express.json({ limit: '20mb' }));
-
-  // Cliente compartilhado do Gemini no servidor conforme especificações do SKILL.md
-  const ai = new GoogleGenAI({
-    apiKey: process.env.GEMINI_API_KEY,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      },
-    },
-  });
 
   // Rotas de API PRIMEIRO
   app.get('/api/health', (req, res) => {
@@ -38,6 +48,7 @@ async function startServer() {
         return res.status(400).json({ error: 'Nenhuma imagem foi enviada.' });
       }
 
+      const ai = getAIClient();
       const cleanBase64 = imageBase64.replace(/^data:image\/[a-zA-Z+]+;base64,/, '');
 
       const prompt = `Você é um assistente especialista em postos de combustíveis e RH operacional.
@@ -46,11 +57,32 @@ Analise a fotografia fornecida contendo uma escala de trabalho, quadro de turnos
 Colaboradores atualmente cadastrados no posto para conciliação:
 ${JSON.stringify(funcionariosCadastrados.map((f: { id: string; nome: string; matricula: string; cargo: string }) => ({ id: f.id, nome: f.nome, matricula: f.matricula, cargo: f.cargo })))}
 
-Diretrizes:
-1. Extraia o nome dos colaboradores que aparecem na imagem.
-2. Compare com a lista de colaboradores já cadastrados (considere variações normais de nomes, abreviações ou apelidos operacionais).
-3. Se um colaborador estiver presente na imagem mas NÃO constar nos cadastrados, marque "jaCadastrado": false e preencha "sugestaoCadastroPrevio" com nome, cargo estimado (ex: 'Frentista', 'Operador de Caixa', 'Lava-rápido'), função estimada e turno preferencial.
-4. Extraia para cada dia da escala os itens com: nome do colaborador, data no formato YYYY-MM-DD (se o ano/mês não estiver explícito na imagem, utilize o mês atual do calendário 2026), turno (ex: 'Manhã (06h - 14h)', 'Tarde (14h - 22h)', 'Noite (22h - 06h)', '12x36'), horários de início e término, e status ('TRABALHO', 'FOLGA', 'ATESTADO', 'FERIAS').`;
+DIRETRIZES CRÍTICAS DE RECONHECIMENTO DE TURNOS (PADRÃO OPERACIONAL DO POSTO):
+1. TABELA DE TURNOS DO POSTO:
+   - TURNO 2: 06h às 14h (06:00 - 14:00) -> Padronizar como "Turno 2 (06h - 14h)", horarioInicio: "06:00", horarioFim: "14:00".
+     * Sinônimos/Abreviações na imagem: "2", "T2", "Turno 2", "06-14", "06h às 14h", "Manhã", "M".
+   - TURNO 3: 14h às 22h (14:00 - 22:00) -> Padronizar como "Turno 3 (14h - 22h)", horarioInicio: "14:00", horarioFim: "22:00".
+     * Sinônimos/Abreviações na imagem: "3", "T3", "Turno 3", "14-22", "14h às 22h", "Tarde", "T".
+   - TURNO 4: 22h às 06h (22:00 - 06:00) -> Padronizar como "Turno 4 (22h - 06h)", horarioInicio: "22:00", horarioFim: "06:00".
+     * Sinônimos/Abreviações na imagem: "4", "T4", "Turno 4", "22-06", "22h às 06h", "Noite", "Noturno", "N".
+   - Demais marcações:
+     * "F", "FOLGA", "DSR", "OFF" -> status: "FOLGA", turno: "Folga", horarioInicio: "00:00", horarioFim: "00:00"
+     * "AT", "ATEST", "AFAS", "MED" -> status: "AFASTADO"
+     * "FER", "FERIAS" -> status: "FERIAS"
+
+2. IDENTIFICAÇÃO DE COLABORADORES:
+   - Extraia o nome de cada colaborador que aparece na escala.
+   - Compare com a lista de colaboradores já cadastrados (considere variações normais de nomes, abreviações ou apelidos operacionais).
+   - Se um colaborador estiver na imagem mas NÃO constar nos cadastrados, marque "jaCadastrado": false e preencha "sugestaoCadastroPrevio" com nome, cargo estimado (ex: 'Frentista', 'Operador de Caixa'), função estimada e turno preferencial ("Turno 2 (06h - 14h)", "Turno 3 (14h - 22h)" ou "Turno 4 (22h - 06h)").
+
+3. GRADE DE DIAS E TURNOS:
+   - Extraia para cada dia da escala os itens com:
+     * funcionarioNome: Nome do colaborador
+     * data: Formato YYYY-MM-DD (se o ano/mês não estiver explícito na imagem, utilize o mês atual do calendário 2026)
+     * turno: "Turno 2 (06h - 14h)", "Turno 3 (14h - 22h)", "Turno 4 (22h - 06h)" ou "Folga"
+     * horarioInicio: "06:00", "14:00", "22:00" (ou correspondente)
+     * horarioFim: "14:00", "22:00", "06:00" (ou correspondente)
+     * status: 'TRABALHO', 'FOLGA', 'AFASTADO' ou 'FERIAS'`;
 
       const contents = {
         parts: [
@@ -238,4 +270,7 @@ Diretrizes:
   });
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error('Fatal error during server startup:', err);
+  process.exit(1);
+});

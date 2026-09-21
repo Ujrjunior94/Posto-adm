@@ -177,6 +177,22 @@ export const PlannerView: React.FC<PlannerProps> = ({
     if (!func) return;
 
     const id = `escala-${func.id}-${data}`;
+    let hInicio = '06:00';
+    let hFim = '14:00';
+    if (modalTurno.includes('Turno 3') || modalTurno.includes('14h') || modalTurno.includes('14:00') || modalTurno.includes('Tarde')) {
+      hInicio = '14:00';
+      hFim = '22:00';
+    } else if (modalTurno.includes('Turno 4') || modalTurno.includes('22h') || modalTurno.includes('22:00') || modalTurno.includes('Noite')) {
+      hInicio = '22:00';
+      hFim = '06:00';
+    } else if (modalTurno.includes('10h') || modalTurno.includes('Intermed')) {
+      hInicio = '10:00';
+      hFim = '18:00';
+    } else if (modalTurno.includes('12x36')) {
+      hInicio = '07:00';
+      hFim = '19:00';
+    }
+
     const novaEscala: Escala = {
       id,
       postoId,
@@ -184,8 +200,8 @@ export const PlannerView: React.FC<PlannerProps> = ({
       funcionarioNome: func.nome,
       data,
       turno: modalTurno,
-      horarioInicio: '06:00',
-      horarioFim: '14:00',
+      horarioInicio: hInicio,
+      horarioFim: hFim,
       status: modalStatus,
       criadoEm: new Date().toISOString(),
       atualizadoEm: new Date().toISOString(),
@@ -306,32 +322,36 @@ export const PlannerView: React.FC<PlannerProps> = ({
         </div>
       </div>
 
-      {/* Barra de Legenda dos Status */}
+      {/* Barra de Legenda dos Status e Turnos */}
       <div className="bg-white px-4 py-3 rounded-xl border border-slate-200 shadow-2xs flex flex-wrap items-center justify-between gap-3 text-xs">
-        <span className="font-bold text-slate-700 uppercase text-[11px]">Legenda da Grade:</span>
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="inline-flex items-center gap-1.5">
-            <span className="w-5 h-5 rounded border bg-emerald-50 border-emerald-300 text-emerald-700 font-bold flex items-center justify-center text-[10px]">T</span>
-            <span className="text-slate-600 font-medium">Trabalho (Pista/Caixa)</span>
+        <span className="font-bold text-slate-700 uppercase text-[11px]">Legenda de Turnos & Status:</span>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <span className="inline-flex items-center gap-1">
+            <span className="w-6 h-5 rounded border bg-amber-100 border-amber-300 text-amber-900 font-bold flex items-center justify-center text-[10px]">T2</span>
+            <span className="text-slate-700 font-semibold">Turno 2 (06h-14h)</span>
           </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span className="w-5 h-5 rounded border bg-slate-100 border-slate-200 text-slate-600 font-bold flex items-center justify-center text-[10px]">F</span>
-            <span className="text-slate-600 font-medium">Folga / DSR</span>
+          <span className="inline-flex items-center gap-1">
+            <span className="w-6 h-5 rounded border bg-blue-100 border-blue-300 text-blue-900 font-bold flex items-center justify-center text-[10px]">T3</span>
+            <span className="text-slate-700 font-semibold">Turno 3 (14h-22h)</span>
           </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span className="w-5 h-5 rounded border bg-blue-50 border-blue-200 text-blue-700 font-bold flex items-center justify-center text-[10px]">FER</span>
-            <span className="text-slate-600 font-medium">Férias</span>
+          <span className="inline-flex items-center gap-1">
+            <span className="w-6 h-5 rounded border bg-purple-100 border-purple-300 text-purple-900 font-bold flex items-center justify-center text-[10px]">T4</span>
+            <span className="text-slate-700 font-semibold">Turno 4 (22h-06h)</span>
           </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span className="w-5 h-5 rounded border bg-amber-50 border-amber-300 text-amber-700 font-bold flex items-center justify-center text-[10px]">AFAS</span>
-            <span className="text-slate-600 font-medium">Afastado / Atestado</span>
+          <span className="inline-flex items-center gap-1">
+            <span className="w-6 h-5 rounded border bg-slate-100 border-slate-200 text-slate-600 font-bold flex items-center justify-center text-[10px]">F</span>
+            <span className="text-slate-600">Folga</span>
           </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span className="w-5 h-5 rounded border bg-red-50 border-red-300 text-red-700 font-bold flex items-center justify-center text-[10px]">AUS</span>
-            <span className="text-slate-600 font-medium">Ausente / Falta</span>
+          <span className="inline-flex items-center gap-1">
+            <span className="w-6 h-5 rounded border bg-red-100 border-red-300 text-red-800 font-bold flex items-center justify-center text-[10px]">AUS</span>
+            <span className="text-red-700 font-bold">Falta ("X Faltou")</span>
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="w-6 h-5 rounded border bg-sky-50 border-sky-200 text-sky-700 font-bold flex items-center justify-center text-[10px]">FER</span>
+            <span className="text-slate-600">Férias</span>
           </span>
         </div>
-        <span className="text-slate-400 text-[11px]">Clique em qualquer célula para alterar</span>
+        <span className="text-slate-400 text-[11px]">Clique em qualquer dia para alterar turno</span>
       </div>
 
       {/* Proposta & Conflitos Modal / Banner */}
@@ -405,19 +425,38 @@ export const PlannerView: React.FC<PlannerProps> = ({
                     const escala = escalas.find((e) => e.funcionarioId === func.id && e.data === dataStr);
                     const status = escala ? escala.status : 'FOLGA';
 
-                    let badgeColor = 'bg-slate-100 text-slate-600 border-slate-200';
+                    let badgeColor = 'bg-slate-100 text-slate-500 border-slate-200';
                     let label = 'F';
+
                     if (status === 'TRABALHO') {
-                      badgeColor = 'bg-emerald-50 text-emerald-700 border-emerald-300 font-bold';
-                      label = 'T';
+                      const t = (escala?.turno || func.turnoPreferencial || '').toLowerCase();
+                      if (t.includes('2') || t.includes('06h') || t.includes('06:00') || t.includes('manha') || t.includes('manhã')) {
+                        badgeColor = 'bg-amber-100 text-amber-900 border-amber-300 font-bold';
+                        label = 'T2';
+                      } else if (t.includes('3') || t.includes('14h') || t.includes('14:00') || t.includes('tarde')) {
+                        badgeColor = 'bg-blue-100 text-blue-900 border-blue-300 font-bold';
+                        label = 'T3';
+                      } else if (t.includes('4') || t.includes('22h') || t.includes('22:00') || t.includes('noite')) {
+                        badgeColor = 'bg-purple-100 text-purple-900 border-purple-300 font-bold';
+                        label = 'T4';
+                      } else if (t.includes('inter') || t.includes('10h')) {
+                        badgeColor = 'bg-teal-100 text-teal-900 border-teal-300 font-bold';
+                        label = 'INT';
+                      } else if (t.includes('12x36')) {
+                        badgeColor = 'bg-cyan-100 text-cyan-900 border-cyan-300 font-bold';
+                        label = '12x36';
+                      } else {
+                        badgeColor = 'bg-emerald-100 text-emerald-900 border-emerald-300 font-bold';
+                        label = 'T';
+                      }
                     } else if (status === 'FERIAS') {
-                      badgeColor = 'bg-blue-50 text-blue-700 border-blue-200';
+                      badgeColor = 'bg-sky-50 text-sky-700 border-sky-200 font-semibold';
                       label = 'FER';
                     } else if (status === 'AUSENTE') {
-                      badgeColor = 'bg-red-50 text-red-700 border-red-300 font-bold';
+                      badgeColor = 'bg-red-100 text-red-800 border-red-300 font-bold';
                       label = 'AUS';
                     } else if (status === 'AFASTADO') {
-                      badgeColor = 'bg-amber-50 text-amber-700 border-amber-300 font-bold';
+                      badgeColor = 'bg-rose-50 text-rose-700 border-rose-300 font-bold';
                       label = 'AFAS';
                     }
 
@@ -495,12 +534,112 @@ export const PlannerView: React.FC<PlannerProps> = ({
             </p>
 
             <div className="space-y-4">
+              {/* Botões Rápidos de 1 Clique */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1.5">
+                  Atalhos Rápidos de Turno:
+                </label>
+                <div className="grid grid-cols-3 gap-1.5 mb-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModalStatus('TRABALHO');
+                      setModalTurno('Turno 2 (06h - 14h)');
+                    }}
+                    className={`p-2 rounded-lg text-xs font-bold border transition text-center ${
+                      modalStatus === 'TRABALHO' && modalTurno.includes('2')
+                        ? 'bg-amber-100 border-amber-400 text-amber-900 ring-2 ring-amber-300'
+                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-amber-50'
+                    }`}
+                  >
+                    <div>Turno 2</div>
+                    <div className="text-[10px] font-normal text-slate-500">06h - 14h</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModalStatus('TRABALHO');
+                      setModalTurno('Turno 3 (14h - 22h)');
+                    }}
+                    className={`p-2 rounded-lg text-xs font-bold border transition text-center ${
+                      modalStatus === 'TRABALHO' && modalTurno.includes('3')
+                        ? 'bg-blue-100 border-blue-400 text-blue-900 ring-2 ring-blue-300'
+                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-blue-50'
+                    }`}
+                  >
+                    <div>Turno 3</div>
+                    <div className="text-[10px] font-normal text-slate-500">14h - 22h</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModalStatus('TRABALHO');
+                      setModalTurno('Turno 4 (22h - 06h)');
+                    }}
+                    className={`p-2 rounded-lg text-xs font-bold border transition text-center ${
+                      modalStatus === 'TRABALHO' && modalTurno.includes('4')
+                        ? 'bg-purple-100 border-purple-400 text-purple-900 ring-2 ring-purple-300'
+                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-purple-50'
+                    }`}
+                  >
+                    <div>Turno 4</div>
+                    <div className="text-[10px] font-normal text-slate-500">22h - 06h</div>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-3 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModalStatus('FOLGA');
+                    }}
+                    className={`p-1.5 rounded-lg text-xs font-semibold border transition text-center ${
+                      modalStatus === 'FOLGA'
+                        ? 'bg-slate-700 border-slate-800 text-white'
+                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    Folga / DSR
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModalStatus('AUSENTE');
+                    }}
+                    className={`p-1.5 rounded-lg text-xs font-bold border transition text-center ${
+                      modalStatus === 'AUSENTE'
+                        ? 'bg-red-600 border-red-700 text-white'
+                        : 'bg-red-50 border-red-200 text-red-700 hover:bg-red-100'
+                    }`}
+                  >
+                    Falta (X Faltou)
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModalStatus('FERIAS');
+                    }}
+                    className={`p-1.5 rounded-lg text-xs font-semibold border transition text-center ${
+                      modalStatus === 'FERIAS'
+                        ? 'bg-sky-600 border-sky-700 text-white'
+                        : 'bg-sky-50 border-sky-200 text-sky-700 hover:bg-sky-100'
+                    }`}
+                  >
+                    Férias
+                  </button>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Status do Dia</label>
                 <select
                   value={modalStatus}
                   onChange={(e) => setModalStatus(e.target.value as EscalaStatus)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold focus:ring-2 focus:ring-blue-500 focus:outline-none"
                 >
                   <option value="TRABALHO">Trabalho (Pista / Caixa)</option>
                   <option value="FOLGA">Folga</option>
@@ -516,13 +655,13 @@ export const PlannerView: React.FC<PlannerProps> = ({
                   <select
                     value={modalTurno}
                     onChange={(e) => setModalTurno(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold focus:ring-2 focus:ring-blue-500 focus:outline-none"
                   >
-                    <option value="Manhã (06h - 14h)">Manhã (06h - 14h)</option>
-                    <option value="Tarde (14h - 22h)">Tarde (14h - 22h)</option>
-                    <option value="Noite (22h - 06h)">Noite (22h - 06h)</option>
-                    <option value="Intermediário (10h - 18h)">Intermediário (10h - 18h)</option>
-                    <option value="12x36 (07h - 19h)">12x36 (07h - 19h)</option>
+                    <option value="Turno 2 (06h - 14h)">Turno 2 (06h às 14h)</option>
+                    <option value="Turno 3 (14h - 22h)">Turno 3 (14h às 22h)</option>
+                    <option value="Turno 4 (22h - 06h)">Turno 4 (22h às 06h)</option>
+                    <option value="Intermediário (10h - 18h)">Intermediário (10h às 18h)</option>
+                    <option value="12x36 (07h - 19h)">12x36 (07h às 19h)</option>
                   </select>
                 </div>
               )}

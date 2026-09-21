@@ -13,6 +13,10 @@ import {
 } from '../../repositories/firestoreRepository';
 import { useAuth } from '../../contexts/AuthContext';
 import { formatarMoeda } from '../../utils/calculations';
+import {
+  exportarFechamentoCaixaPDF,
+  exportarRelatorioFechamentosPDF,
+} from '../../utils/pdfGenerator';
 import { ModalNovoFechamento } from './ModalNovoFechamento';
 import { ModalDetalhesFechamento } from './ModalDetalhesFechamento';
 import {
@@ -32,6 +36,7 @@ import {
   QrCode,
   Building2,
   Printer,
+  Download,
 } from 'lucide-react';
 
 const repoOcorrencia = new PostoSubcollectionRepository<OcorrenciaCaixa>('ocorrenciasCaixa');
@@ -247,6 +252,22 @@ export const FechamentoCaixaView: React.FC<FechamentoProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => {
+              if (fechamentosFiltrados.length === 0) {
+                alert('Nenhum fechamento para exportar no período filtrado.');
+                return;
+              }
+              exportarRelatorioFechamentosPDF(fechamentosFiltrados, busca || filtroTurno !== 'TODOS' ? `${filtroTurno}` : 'Geral');
+            }}
+            className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm rounded-xl transition shadow-2xs hover:shadow-xs"
+            title="Exportar relatório consolidado de fechamentos em PDF"
+          >
+            <Download className="w-5 h-5" />
+            Relatório em PDF
+          </button>
+
           <button
             type="button"
             onClick={() => handleImprimirComprovante()}
@@ -470,12 +491,22 @@ export const FechamentoCaixaView: React.FC<FechamentoProps> = ({
                         <div className="flex items-center justify-center gap-1.5">
                           <button
                             type="button"
+                            onClick={() => exportarFechamentoCaixaPDF(f)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 rounded-lg text-xs font-semibold transition shadow-2xs"
+                            title="Exportar fechamento oficial em PDF formatado"
+                          >
+                            <Download className="w-3.5 h-3.5 text-teal-600" />
+                            PDF
+                          </button>
+
+                          <button
+                            type="button"
                             onClick={() => handleImprimirComprovante(f)}
                             className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-semibold transition shadow-2xs"
                             title="Imprimir comprovante deste fechamento"
                           >
                             <Printer className="w-3.5 h-3.5 text-emerald-600" />
-                            Imprimir Comprovante
+                            Imprimir
                           </button>
 
                           <button

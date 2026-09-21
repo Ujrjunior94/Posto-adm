@@ -27,7 +27,7 @@ export const FuncionariosView: React.FC<FuncionariosViewProps> = ({ funcionarios
   const [cargo, setCargo] = useState('Frentista');
   const [funcao, setFuncao] = useState('Abastecimento de Pista');
   const [status, setStatus] = useState<FuncionarioStatus>('ATIVO');
-  const [turnoPreferencial, setTurnoPreferencial] = useState('Manhã (06h - 14h)');
+  const [turnoPreferencial, setTurnoPreferencial] = useState('Turno 2 (06h - 14h)');
   const [observacoes, setObservacoes] = useState('');
   const [erroMsg, setErroMsg] = useState('');
 
@@ -42,7 +42,7 @@ export const FuncionariosView: React.FC<FuncionariosViewProps> = ({ funcionarios
     setCargo('Frentista');
     setFuncao('Abastecimento');
     setStatus('ATIVO');
-    setTurnoPreferencial('Manhã (06h - 14h)');
+    setTurnoPreferencial('Turno 2 (06h - 14h)');
     setObservacoes('');
     setErroMsg('');
     setIsModalOpen(true);
@@ -361,10 +361,10 @@ export const FuncionariosView: React.FC<FuncionariosViewProps> = ({ funcionarios
                   onChange={(e) => setTurnoPreferencial(e.target.value)}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
                 >
-                  <option value="Manhã (06h - 14h)">Manhã (06h - 14h)</option>
-                  <option value="Tarde (14h - 22h)">Tarde (14h - 22h)</option>
-                  <option value="Noite (22h - 06h)">Noite (22h - 06h)</option>
-                  <option value="Intermediário (10h - 18h)">Intermediário (10h - 18h)</option>
+                  <option value="Turno 2 (06h - 14h)">Turno 2 (06h às 14h)</option>
+                  <option value="Turno 3 (14h - 22h)">Turno 3 (14h às 22h)</option>
+                  <option value="Turno 4 (22h - 06h)">Turno 4 (22h às 06h)</option>
+                  <option value="Intermediário (10h - 18h)">Intermediário (10h às 18h)</option>
                   <option value="Escala 12x36">Escala 12x36</option>
                 </select>
               </div>

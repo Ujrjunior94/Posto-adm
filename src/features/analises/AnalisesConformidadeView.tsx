@@ -588,13 +588,13 @@ export const AnalisesConformidadeView: React.FC<AnalisesConformidadeProps> = ({
                 </p>
               </div>
 
-              {/* Seletor de Produto */}
+              {/* Seletor de Produto - Somente os 5 Combustíveis Principais Solicitados */}
               <div className="flex flex-wrap gap-1.5">
                 {(abaTeste === 'TESTE_PROVETA_GASOLINA'
-                  ? ['Gasolina Comum', 'Gasolina Aditivada', 'Gasolina Premium']
+                  ? ['Gasolina Comum', 'Gasolina Aditivada']
                   : abaTeste === 'TEOR_ALCOOLICO_ETANOL'
-                  ? ['Etanol Hidratado']
-                  : Object.keys(PADROES_ANP_2026)
+                  ? ['Etanol']
+                  : ['Gasolina Comum', 'Gasolina Aditivada', 'Etanol', 'Diesel S10', 'Diesel S500']
                 ).map((prod) => (
                   <button
                     key={prod}
@@ -602,18 +602,17 @@ export const AnalisesConformidadeView: React.FC<AnalisesConformidadeProps> = ({
                     onClick={() => {
                       setProduto(prod);
                       // Ajustar densidade típica para teste
-                      if (prod.includes('Gasolina Premium')) {
-                        setDensidadeObservada(0.7720);
-                        setTemperatura(20.0);
-                      } else if (prod.includes('Gasolina')) {
+                      if (prod.includes('Gasolina')) {
                         setDensidadeObservada(0.7420);
                         setTemperatura(25.0);
-                      } else if (prod.includes('Etanol')) {
-                        // Padrão regulamentar da comparação oficial NBR 5992
+                      } else if (prod === 'Etanol' || prod.includes('Etanol')) {
                         setDensidadeObservada(0.8040);
                         setTemperatura(26.8);
-                      } else if (prod.includes('Diesel')) {
+                      } else if (prod === 'Diesel S10' || prod.includes('S10') || prod.includes('S-10')) {
                         setDensidadeObservada(0.8350);
+                        setTemperatura(20.0);
+                      } else if (prod === 'Diesel S500' || prod.includes('S500') || prod.includes('S-500')) {
+                        setDensidadeObservada(0.8450);
                         setTemperatura(20.0);
                       }
                     }}

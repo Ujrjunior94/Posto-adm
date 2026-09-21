@@ -849,3 +849,214 @@ export function formatarMoeda(valor: number): string {
     currency: 'BRL',
   }).format(valor);
 }
+
+/**
+ * 5 COMBUSTÍVEIS PRINCIPAIS OFICIAIS
+ */
+export const COMBUSTIVEIS_PRINCIPAIS_SPECS: Record<
+  string,
+  {
+    nome: string;
+    densidade20CMin: number; // kg/m³
+    densidade20CMax: number; // kg/m³
+    teorEtanolMin?: number; // % (teste proveta)
+    teorEtanolMax?: number; // %
+    teorEtanolNominal?: number;
+    grauINPMMin?: number; // % massa para etanol
+    grauINPMMax?: number;
+    grauGLMin?: number; // % volume para etanol
+    grauGLMax?: number;
+    condutividadeMax?: number; // µS/m a 25°C
+    phMin?: number;
+    phMax?: number;
+    aspecto: string;
+    cor: string;
+    coeficienteTermico: number;
+    descricao: string;
+  }
+> = {
+  'Gasolina Comum': {
+    nome: 'Gasolina Comum',
+    densidade20CMin: 715.0,
+    densidade20CMax: 775.0,
+    teorEtanolMin: 26.0,
+    teorEtanolMax: 28.0,
+    teorEtanolNominal: 27.0,
+    aspecto: 'Límpido e isento de impurezas mecânicas e água livre',
+    cor: 'Incolor a amarelada',
+    coeficienteTermico: 0.00076,
+    descricao: 'Gasolina Tipo C Comum conforme Res. ANP 807/2020 e Portarias vigentes',
+  },
+  'Gasolina Aditivada': {
+    nome: 'Gasolina Aditivada',
+    densidade20CMin: 715.0,
+    densidade20CMax: 775.0,
+    teorEtanolMin: 26.0,
+    teorEtanolMax: 28.0,
+    teorEtanolNominal: 27.0,
+    aspecto: 'Límpido e isento de impurezas e água',
+    cor: 'Coloração característica da distribuidora (exceto azul)',
+    coeficienteTermico: 0.00076,
+    descricao: 'Gasolina Tipo C com aditivos detergentes/dispersantes para limpeza de bicos e válvulas',
+  },
+  'Etanol': {
+    nome: 'Etanol (Etanol Hidratado)',
+    densidade20CMin: 807.6,
+    densidade20CMax: 811.0,
+    grauINPMMin: 92.5,
+    grauINPMMax: 93.8,
+    grauGLMin: 94.5,
+    grauGLMax: 96.9,
+    condutividadeMax: 350,
+    phMin: 6.0,
+    phMax: 8.0,
+    aspecto: 'Límpido, translúcido e isento de impurezas',
+    cor: 'Límpido e Incolor',
+    coeficienteTermico: 0.00084,
+    descricao: 'Etanol Hidratado Combustível (EHC) conforme Resolução ANP nº 907/2022',
+  },
+  'Diesel S10': {
+    nome: 'Diesel S10 (Óleo Diesel S-10)',
+    densidade20CMin: 820.0,
+    densidade20CMax: 850.0,
+    aspecto: 'Límpido, translúcido e isento de impurezas e água livre',
+    cor: 'Incolor a levemente amarelado',
+    coeficienteTermico: 0.00070,
+    descricao: 'Óleo Diesel S-10 com teor máximo de enxofre de 10 mg/kg e mistura obrigatória de Biodiesel',
+  },
+  'Diesel S500': {
+    nome: 'Diesel S500 (Óleo Diesel S-500)',
+    densidade20CMin: 820.0,
+    densidade20CMax: 865.0,
+    aspecto: 'Límpido e isento de impurezas e água',
+    cor: 'Vermelha característica (corante obrigatório)',
+    coeficienteTermico: 0.00070,
+    descricao: 'Óleo Diesel S-500 com teor máximo de enxofre de 500 mg/kg para motores a diesel e maquinários',
+  },
+};
+
+/**
+ * CÁLCULO OFICIAL DO LMC (Livro de Movimentação de Combustíveis) - Portaria DNC/ANP
+ * Estoque Inicial + Entradas - Vendas - Aferições = Estoque Escritural
+ * Variação = Estoque Físico (Régua) - Estoque Escritural
+ * Tolerância ANP: ±0,6% sobre o volume de vendas/movimentação total
+ */
+export interface ResultadoCalculoLMC {
+  estoqueAbertura: number;
+  entradas: number;
+  vendas: number;
+  afericoes: number;
+  estoqueEscritural: number;
+  estoqueFisico: number;
+  variacaoLitros: number; // + sobra, - perda
+  variacaoPercentual: number;
+  toleranciaMaximaLitros: number; // 0.6% do volume movimentado
+  isConformeANP: boolean;
+  statusANP: 'CONFORME' | 'PERDA_EXCESSIVA' | 'SOBRA_EXCESSIVA';
+  mensagem: string;
+}
+
+export function calcularLMC(
+  estoqueAbertura: number,
+  entradas: number,
+  vendas: number,
+  afericoes: number,
+  estoqueFisico: number
+): ResultadoCalculoLMC {
+  const abert = Math.max(0, estoqueAbertura || 0);
+  const ent = Math.max(0, entradas || 0);
+  const vend = Math.max(0, vendas || 0);
+  const afer = Math.max(0, afericoes || 0);
+  const fis = Math.max(0, estoqueFisico || 0);
+
+  const estoqueEscritural = Math.round((abert + ent - vend - afer) * 100) / 100;
+  const variacaoLitros = Math.round((fis - estoqueEscritural) * 100) / 100;
+
+  // Volume base para tolerância: vendas do dia (ou abertura se não houver venda)
+  const volumeBase = vend > 0 ? vend : abert;
+  const toleranciaMaximaLitros = Math.round((volumeBase * 0.006) * 100) / 100; // 0,6% ANP
+
+  const variacaoPercentual =
+    volumeBase > 0 ? Number(((variacaoLitros / volumeBase) * 100).toFixed(3)) : 0;
+
+  let statusANP: 'CONFORME' | 'PERDA_EXCESSIVA' | 'SOBRA_EXCESSIVA' = 'CONFORME';
+  let isConformeANP = true;
+  let mensagem = 'Variação física dentro do limite de tolerância regulamentar da ANP (±0,6%).';
+
+  if (variacaoLitros < -toleranciaMaximaLitros && toleranciaMaximaLitros > 0) {
+    statusANP = 'PERDA_EXCESSIVA';
+    isConformeANP = false;
+    mensagem = `ALERTA ANP: Perda de ${Math.abs(variacaoLitros).toFixed(1)} L (${Math.abs(variacaoPercentual).toFixed(2)}%) excedeu a tolerância legal máxima de 0,6% (${toleranciaMaximaLitros.toFixed(1)} L).`;
+  } else if (variacaoLitros > toleranciaMaximaLitros && toleranciaMaximaLitros > 0) {
+    statusANP = 'SOBRA_EXCESSIVA';
+    isConformeANP = false;
+    mensagem = `ALERTA ANP: Sobra de +${variacaoLitros.toFixed(1)} L (${variacaoPercentual.toFixed(2)}%) excedeu a tolerância legal máxima de 0,6% (${toleranciaMaximaLitros.toFixed(1)} L).`;
+  }
+
+  return {
+    estoqueAbertura: abert,
+    entradas: ent,
+    vendas: vend,
+    afericoes: afer,
+    estoqueEscritural,
+    estoqueFisico: fis,
+    variacaoLitros,
+    variacaoPercentual,
+    toleranciaMaximaLitros,
+    isConformeANP,
+    statusANP,
+    mensagem,
+  };
+}
+
+/**
+ * CÁLCULO DE RATEIO DE SOBRAS E FALTAS POR TURNO (Vinculado à Escala)
+ */
+export interface ResultadoCalculoRateio {
+  valorTotal: number;
+  tipo: 'FALTA' | 'SOBRA' | 'SEM_DIFERENCA';
+  totalEscalados: number;
+  totalPresentes: number;
+  totalAusentes: number;
+  valorPorIntegrante: number;
+  distribuicao: {
+    funcionarioId: string;
+    funcionarioNome: string;
+    presente: boolean;
+    valor: number;
+  }[];
+}
+
+export function calcularRateioTurno(
+  valorTotal: number,
+  tipo: 'FALTA' | 'SOBRA' | 'SEM_DIFERENCA',
+  colaboradores: { id: string; nome: string; presente: boolean }[]
+): ResultadoCalculoRateio {
+  const total = Math.abs(valorTotal || 0);
+  const totalEscalados = colaboradores.length;
+  const presentes = colaboradores.filter((c) => c.presente);
+  const ausentes = colaboradores.filter((c) => !c.presente);
+
+  const totalPresentes = presentes.length;
+  const totalAusentes = ausentes.length;
+
+  const valorPorIntegrante =
+    totalPresentes > 0 ? Math.round((total / totalPresentes) * 100) / 100 : 0;
+
+  const distribuicao = colaboradores.map((c) => ({
+    funcionarioId: c.id,
+    funcionarioNome: c.nome,
+    presente: c.presente,
+    valor: c.presente ? valorPorIntegrante : 0,
+  }));
+
+  return {
+    valorTotal: total,
+    tipo,
+    totalEscalados,
+    totalPresentes,
+    totalAusentes,
+    valorPorIntegrante,
+    distribuicao,
+  };
+}
