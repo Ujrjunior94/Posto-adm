@@ -4,6 +4,7 @@ import { PostoSubcollectionRepository, registrarAuditoria } from '../../reposito
 import { useAuth } from '../../contexts/AuthContext';
 import {
   PADROES_ANP_2026,
+  obterPadraoANP,
   calcularDensidade20C,
   calcularDetalhesDensidadeOperacional,
   calcularTesteProvetaGasolina,
@@ -107,11 +108,129 @@ export const AnalisesConformidadeView: React.FC<AnalisesConformidadeProps> = ({
   const [checklistParaExcluir, setChecklistParaExcluir] = useState<Conformidade | null>(null);
   const [isModalExcluirChecklist, setIsModalExcluirChecklist] = useState(false);
   const [isModalLimparChecklist, setIsModalLimparChecklist] = useState(false);
+  const [cenarioTesteAtivo, setCenarioTesteAtivo] = useState<string | null>(null);
 
   const [processandoAcao, setProcessandoAcao] = useState(false);
 
+  // Cenários calibrados com dados reais de bancada e pátio para teste imediato
+  const cenariosTesteReal = [
+    {
+      id: 'gasolina-comum-25',
+      titulo: 'Gasolina Comum',
+      tag: '25°C • 0,7420 g/cm³',
+      esperado: 'D20: 745,8 kg/m³ (Conforme)',
+      conforme: true,
+      tipo: 'DENSIDADE_D20' as TipoTesteANP,
+      prod: 'Gasolina Comum',
+      temp: 25.0,
+      dens: 0.7420,
+      detalhe: 'Ensaio de rotina em pista. Norma ANP 807/2020: 715,0 a 775,0 kg/m³.'
+    },
+    {
+      id: 'gasolina-aditivada-23',
+      titulo: 'Gasolina Aditivada',
+      tag: '23,5°C • 0,7460 g/cm³',
+      esperado: 'D20: 748,7 kg/m³ (Conforme)',
+      conforme: true,
+      tipo: 'DENSIDADE_D20' as TipoTesteANP,
+      prod: 'Gasolina Aditivada',
+      temp: 23.5,
+      dens: 0.7460,
+      detalhe: 'Combustível com aditivo dispersante/detergente. Faixa: 715,0 a 775,0 kg/m³.'
+    },
+    {
+      id: 'proveta-d32-32pct',
+      titulo: 'Proveta D32 Gasolina',
+      tag: 'Vol. Aquoso: 65,5 ml',
+      esperado: '32,0% v/v Etanol (Conforme)',
+      conforme: true,
+      tipo: 'TESTE_PROVETA_GASOLINA' as TipoTesteANP,
+      prod: 'Gasolina Comum',
+      temp: 20.0,
+      dens: 0.7420,
+      volAquoso: 65.5,
+      detalhe: 'Determinação na proveta de 100ml: (% = (65,5 - 50) × 2 + 1 = 32,0% v/v). Tolerância D32: 31,0% a 33,0%.'
+    },
+    {
+      id: 'etanol-nbr-93inpm',
+      titulo: 'Etanol Hidratado',
+      tag: '26,8°C • 0,8040 g/cm³',
+      esperado: 'D20: 809,7 kg/m³ | 93,0° INPM',
+      conforme: true,
+      tipo: 'TEOR_ALCOOLICO_ETANOL' as TipoTesteANP,
+      prod: 'Etanol',
+      temp: 26.8,
+      dens: 0.8040,
+      cond: 180,
+      ph: 7.0,
+      detalhe: 'Conversão ABNT NBR 5992: D20 = 809,7 kg/m³, 93,0° INPM (faixa regulamentar: 92,5° a 93,8° INPM) e 95,4° GL.'
+    },
+    {
+      id: 'diesel-s10-24',
+      titulo: 'Diesel S10',
+      tag: '24,5°C • 0,8320 g/cm³',
+      esperado: 'D20: 835,2 kg/m³ (Conforme S10)',
+      conforme: true,
+      tipo: 'DENSIDADE_D20' as TipoTesteANP,
+      prod: 'Diesel S10',
+      temp: 24.5,
+      dens: 0.8320,
+      detalhe: 'Res. ANP 968/2024: Massa específica a 20°C entre 820,0 e 850,0 kg/m³.'
+    },
+    {
+      id: 'diesel-s500-22',
+      titulo: 'Diesel S500',
+      tag: '22,0°C • 0,8436 g/cm³',
+      esperado: 'D20: 845,0 kg/m³ (Conforme S500)',
+      conforme: true,
+      tipo: 'DENSIDADE_D20' as TipoTesteANP,
+      prod: 'Diesel S500',
+      temp: 22.0,
+      dens: 0.8436,
+      detalhe: 'Res. ANP 968/2024: Massa específica a 20°C entre 820,0 e 865,0 kg/m³.'
+    },
+    {
+      id: 'gasolina-adulterada-37pct',
+      titulo: 'Gasolina Adulterada (Proveta)',
+      tag: 'Vol. Aquoso: 68,0 ml',
+      esperado: 'Teor: 37,0% (Reprovada > 33%)',
+      conforme: false,
+      tipo: 'TESTE_PROVETA_GASOLINA' as TipoTesteANP,
+      prod: 'Gasolina Comum',
+      temp: 20.0,
+      dens: 0.7420,
+      volAquoso: 68.0,
+      detalhe: 'Excesso de etanol anidro: Volume aquoso lido de 68 ml resulta em 37,0% de etanol, violando o teto de 33,0%.'
+    },
+    {
+      id: 'etanol-molhado-814',
+      titulo: 'Etanol "Molhado" (Água)',
+      tag: '20,0°C • 0,8140 g/cm³',
+      esperado: 'D20: 814,0 kg/m³ | 91,3° INPM',
+      conforme: false,
+      tipo: 'TEOR_ALCOOLICO_ETANOL' as TipoTesteANP,
+      prod: 'Etanol',
+      temp: 20.0,
+      dens: 0.8140,
+      cond: 410,
+      ph: 5.6,
+      detalhe: 'Etanol hidratado adulterado com água: D20 alta (814,0 kg/m³) resulta em teor alcoólico de apenas 91,3° INPM (< 92,5°).'
+    },
+  ];
+
+  const handleExecutarTesteReal = (c: (typeof cenariosTesteReal)[number]) => {
+    setCenarioTesteAtivo(c.id);
+    setAbaTeste(c.tipo);
+    setProduto(c.prod);
+    setTemperatura(c.temp);
+    setDensidadeObservada(c.dens);
+    if (c.volAquoso !== undefined) setVolumeAquosoFinal(c.volAquoso);
+    if (c.cond !== undefined) setCondutividadeEletrica(c.cond);
+    if (c.ph !== undefined) setPhEtanol(c.ph);
+  };
+
   // Configuração e referências do produto selecionado segundo a ANP 2026
-  const padraoAtual = PADROES_ANP_2026[produto] || PADROES_ANP_2026['Gasolina Comum'];
+  const padraoAtual = obterPadraoANP(produto);
 
   // 1. Cálculos D20 com memória de cálculo detalhada para transparência operacional
   const detalhesDensidade = calcularDetalhesDensidadeOperacional(densidadeObservada, temperatura, produto);
@@ -151,7 +270,7 @@ export const AnalisesConformidadeView: React.FC<AnalisesConformidadeProps> = ({
     parecerTecnicoFinal = `${resultadoProveta.parecer} Teor apurado de ${resultadoProveta.teorEtanolApurado}% (Volume aquoso lido na proveta: ${volumeAquosoFinal} ml | Faixa exigida pela Resolução de Agosto/2026 D32: ${resultadoProveta.teorReferenciaMin}% a ${resultadoProveta.teorReferenciaMax}%).`;
   } else if (abaTeste === 'TEOR_ALCOOLICO_ETANOL') {
     statusFinalTeste = isEtanolTotalConforme ? 'CONFORME' : 'NAO_CONFORME';
-    parecerTecnicoFinal = `Conversão da D32 para teor alcoólico em massa: ${resultadoEtanol.grauINPM}° INPM (Padrão ANP: 92,5° a 95,4° INPM) | Teor em volume: ${resultadoEtanol.grauGL}° GL | Condutividade: ${condutividadeEletrica} µS/m | pH: ${phEtanol}. ${resultadoEtanol.parecer}`;
+    parecerTecnicoFinal = `Conversão para teor alcoólico em massa: ${resultadoEtanol.grauINPM}° INPM (Padrão ANP: 92,5° a 93,8° INPM) | Teor em volume: ${resultadoEtanol.grauGL}° GL | Condutividade: ${condutividadeEletrica} µS/m | pH: ${phEtanol}. ${resultadoEtanol.parecer}`;
   } else if (abaTeste === 'RECEBIMENTO_DESCARGA') {
     const conformeDescarga = isDensidadeConforme && lacreConferido;
     statusFinalTeste = conformeDescarga ? 'CONFORME' : 'NAO_CONFORME';
@@ -452,7 +571,7 @@ export const AnalisesConformidadeView: React.FC<AnalisesConformidadeProps> = ({
             Laboratório & Calculadora ANP de Combustíveis
           </h2>
           <p className="text-sm text-slate-500 mt-0.5">
-            Cálculo oficial de densidade a 20°C (D20), teste da proveta com tolerância D32, conversão da D32 para teor alcoólico em massa (92,5° a 95,4° INPM) e laudos.
+            Cálculo oficial de densidade a 20°C (D20), teste da proveta com tolerância D32, conversão para teor alcoólico em massa (92,5° a 93,8° INPM / 94,5° a 95,4° GL) e laudos.
           </p>
         </div>
 
@@ -487,9 +606,6 @@ export const AnalisesConformidadeView: React.FC<AnalisesConformidadeProps> = ({
             <button
               onClick={() => {
                 setAbaTeste('DENSIDADE_D20');
-                if (produto.includes('Etanol') || produto.includes('Diesel')) {
-                  setProduto('Gasolina Comum');
-                }
               }}
               className={`p-4 rounded-xl border text-left transition flex flex-col justify-between ${
                 abaTeste === 'DENSIDADE_D20'
@@ -531,8 +647,9 @@ export const AnalisesConformidadeView: React.FC<AnalisesConformidadeProps> = ({
             <button
               onClick={() => {
                 setAbaTeste('TEOR_ALCOOLICO_ETANOL');
-                setProduto('Etanol Hidratado');
-                setDensidadeObservada(0.798);
+                setProduto('Etanol');
+                setDensidadeObservada(0.8040);
+                setTemperatura(26.8);
               }}
               className={`p-4 rounded-xl border text-left transition flex flex-col justify-between ${
                 abaTeste === 'TEOR_ALCOOLICO_ETANOL'
@@ -542,11 +659,11 @@ export const AnalisesConformidadeView: React.FC<AnalisesConformidadeProps> = ({
             >
               <div className="flex items-center justify-between">
                 <TestTubes className={`w-5 h-5 ${abaTeste === 'TEOR_ALCOOLICO_ETANOL' ? 'text-teal-600' : 'text-slate-400'}`} />
-                <span className="text-[10px] font-bold uppercase bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">D32 → INPM</span>
+                <span className="text-[10px] font-bold uppercase bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">D20 → INPM</span>
               </div>
               <div className="mt-3">
                 <div className="font-bold text-sm text-slate-900">Etanol Hidratado</div>
-                <div className="text-xs text-slate-500">Conversão D32 para 92,5°-95,4° INPM</div>
+                <div className="text-xs text-slate-500">Conversão para 92,5°-93,8° INPM</div>
               </div>
             </button>
 
@@ -576,14 +693,14 @@ export const AnalisesConformidadeView: React.FC<AnalisesConformidadeProps> = ({
                 <h3 className="font-bold text-base text-slate-900">
                   {abaTeste === 'DENSIDADE_D20' && 'Calculadora Oficial de Densidade Relativa a 20°C (D20)'}
                   {abaTeste === 'TESTE_PROVETA_GASOLINA' && 'Determinação do Teor de Etanol na Gasolina (Teste da Proveta - Padrão D32)'}
-                  {abaTeste === 'TEOR_ALCOOLICO_ETANOL' && 'Conversão da D32 para teor alcoólico em massa (92,5° a 95,4° INPM)'}
+                  {abaTeste === 'TEOR_ALCOOLICO_ETANOL' && 'Conversão para teor alcoólico em massa (92,5° a 93,8° INPM)'}
                   {abaTeste === 'RECEBIMENTO_DESCARGA' && 'Boletim de Conformidade para Descarregamento de Caminhão-Tanque'}
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
                   {abaTeste === 'TESTE_PROVETA_GASOLINA'
                     ? 'Tolerância da gasolina seguindo a Resolução de Agosto de 2026 D32: 32% ± 1% (31,0% a 33,0%) para Gasolina Comum e Aditivada.'
                     : abaTeste === 'TEOR_ALCOOLICO_ETANOL'
-                    ? 'Conversão direta e precisa da D32 para teor alcoólico em massa conforme ABNT NBR 5992 (Faixa exigida: 92,5° a 95,4° INPM).'
+                    ? 'Conversão direta e precisa da D20 para teor alcoólico em massa conforme ABNT NBR 5992 (Faixa exigida: 92,5° a 93,8° INPM).'
                     : 'Parâmetros atualizados e fiscalizados pela Agência Nacional do Petróleo (ANP).'}
                 </p>
               </div>
@@ -601,6 +718,7 @@ export const AnalisesConformidadeView: React.FC<AnalisesConformidadeProps> = ({
                     type="button"
                     onClick={() => {
                       setProduto(prod);
+                      setCenarioTesteAtivo(null);
                       // Ajustar densidade típica para teste
                       if (prod.includes('Gasolina')) {
                         setDensidadeObservada(0.7420);
@@ -625,6 +743,73 @@ export const AnalisesConformidadeView: React.FC<AnalisesConformidadeProps> = ({
                     {prod}
                   </button>
                 ))}
+              </div>
+            </div>
+
+            {/* Barra de Testes Rápidos com Dados Reais Calibrados */}
+            <div className="bg-slate-50 border border-slate-200/90 rounded-xl p-3.5 space-y-2.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="flex h-2.5 w-2.5 relative">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-teal-600"></span>
+                  </span>
+                  <div>
+                    <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                      <FlaskConical className="w-3.5 h-3.5 text-teal-600" />
+                      Ensaios e Testes com Dados Reais de Bancada / Pátio:
+                    </span>
+                    <span className="text-[11px] text-slate-500">
+                      Clique em qualquer amostra real calibrada para carregar e validar os cálculos instantaneamente:
+                    </span>
+                  </div>
+                </div>
+                {cenarioTesteAtivo && (
+                  <span className="text-[10px] font-semibold text-teal-800 bg-teal-100 border border-teal-200 px-2 py-0.5 rounded-full shrink-0">
+                    Amostra Ativa na Calculadora
+                  </span>
+                )}
+              </div>
+
+              {/* Grid de Amostras Reais */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {cenariosTesteReal.map((c) => {
+                  const isAtivo = cenarioTesteAtivo === c.id;
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => handleExecutarTesteReal(c)}
+                      className={`p-2.5 rounded-lg border text-left transition flex flex-col justify-between ${
+                        isAtivo
+                          ? 'bg-teal-50 border-teal-500 shadow-xs ring-1 ring-teal-500'
+                          : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/80'
+                      }`}
+                      title={c.detalhe}
+                    >
+                      <div>
+                        <div className="flex items-center justify-between gap-1 mb-1">
+                          <span className="font-bold text-[11px] text-slate-900 truncate">
+                            {c.titulo}
+                          </span>
+                          <span
+                            className={`text-[9px] font-extrabold px-1.5 py-0.2 rounded uppercase ${
+                              c.conforme
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-red-100 text-red-800'
+                            }`}
+                          >
+                            {c.conforme ? 'OK' : 'ALERTA'}
+                          </span>
+                        </div>
+                        <div className="text-[10px] font-mono text-slate-500">{c.tag}</div>
+                      </div>
+                      <div className="mt-1.5 pt-1 border-t border-slate-100 text-[10px] font-semibold text-teal-700 truncate">
+                        {c.esperado}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -741,7 +926,7 @@ export const AnalisesConformidadeView: React.FC<AnalisesConformidadeProps> = ({
                           Teor em Massa Estimado: <span className="font-mono text-sm">{resultadoEtanol.grauINPM}° INPM</span>
                         </div>
                         <div className="text-[11px] opacity-80">
-                          Padrão ANP NBR 5992: 92,5° a 95,4° INPM (% m/m) • {resultadoEtanol.grauGL}° GL
+                          Padrão ANP NBR 5992: 92,5° a 93,8° INPM (% m/m) • {resultadoEtanol.grauGL}° GL
                         </div>
                       </div>
                     </div>
@@ -838,10 +1023,10 @@ export const AnalisesConformidadeView: React.FC<AnalisesConformidadeProps> = ({
 
                     <div className="p-2.5 bg-blue-50/90 border border-blue-200 rounded-lg text-xs text-blue-900">
                       <div className="font-bold flex items-center gap-1 text-[11px] text-blue-950">
-                        🧪 Conversão da D32 para teor alcoólico em massa:
+                        🧪 Conversão da D20 para teor alcoólico em massa:
                       </div>
                       <div className="text-[11px] text-blue-800 mt-0.5 leading-relaxed">
-                        Faixa regulamentar: <strong>92,5° a 95,4° INPM</strong> (% em massa) | Volume correspondente: <strong>94,5° a 96,9° GL</strong> a 20°C.
+                        Faixa regulamentar: <strong>92,5° a 93,8° INPM</strong> (% em massa) | Volume correspondente: <strong>94,5° a 96,9° GL</strong> a 20°C.
                       </div>
                     </div>
 
@@ -1004,7 +1189,7 @@ export const AnalisesConformidadeView: React.FC<AnalisesConformidadeProps> = ({
                     </div>
                     <p className="text-teal-800 leading-relaxed">
                       • <strong>Tolerância de Gasolina:</strong> Mistura padrão de etanol anidro fixada em <strong>32,0%</strong> (tolerância de <strong>31,0% a 33,0%</strong> para comum/aditivada e <strong>24,0% a 26,0%</strong> para premium).<br />
-                      • <strong>Conversão D32 do Etanol:</strong> Faixa de densidade reduzida a 20°C convertida para teor em massa de <strong>92,5° a 95,4° INPM</strong> (94,5° a 96,9° GL).
+                      • <strong>Especificação do Etanol:</strong> Faixa de densidade reduzida a 20°C convertida para teor em massa de <strong>92,5° a 93,8° INPM</strong> (94,5° a 96,9° GL).
                     </p>
                   </div>
                 </div>
@@ -1250,10 +1435,10 @@ export const AnalisesConformidadeView: React.FC<AnalisesConformidadeProps> = ({
                         <strong className="text-slate-800">{temperatura.toFixed(1)} °C</strong>
                       </div>
                       <div>
-                        <span className="text-slate-400 block text-[10px]">Fator Correção (α):</span>
+                        <span className="text-slate-400 block text-[10px]">Correção Térmica (ΔD):</span>
                         <strong className="text-teal-800">
                           {detalhesDensidade.fatorCorrecaoAplicado >= 0 ? '+' : ''}
-                          {detalhesDensidade.fatorCorrecaoAplicado.toFixed(4)}
+                          {detalhesDensidade.fatorCorrecaoAplicado.toFixed(4)} g/cm³
                         </strong>
                       </div>
                       <div>

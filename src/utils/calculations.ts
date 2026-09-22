@@ -386,6 +386,18 @@ export const PADROES_ANP_2026: Record<string, PadraoCombustivelANP> = {
     aspectoEsperado: 'Límpido e isento de impurezas',
     corEsperada: 'Incolor a levemente colorido',
   },
+  'Diesel S10': {
+    produto: 'Diesel S10',
+    normaANP: 'Res. ANP 968/2024',
+    densidade20CMin: 0.8200, // 820,0 a 850,0 kg/m³
+    densidade20CMax: 0.8500,
+    coeficienteTermico: 0.00070,
+    requisitosMistura: 'Biodiesel B15 (14%-15%)',
+    enxofreMax: '10 mg/kg',
+    statusRegulatorio: 'Conforme 2026',
+    aspectoEsperado: 'Límpido, translúcido e isento de impurezas',
+    corEsperada: 'Incolor a levemente amarelado',
+  },
   'Diesel S-10': {
     produto: 'Diesel S-10',
     normaANP: 'Res. ANP 968/2024',
@@ -421,6 +433,18 @@ export const PADROES_ANP_2026: Record<string, PadraoCombustivelANP> = {
     statusRegulatorio: 'Conforme 2026',
     aspectoEsperado: 'Límpido, translúcido e isento de impurezas',
     corEsperada: 'Incolor a levemente amarelado',
+  },
+  'Diesel S500': {
+    produto: 'Diesel S500',
+    normaANP: 'Res. ANP 968/2024',
+    densidade20CMin: 0.8200, // 820,0 a 865,0 kg/m³
+    densidade20CMax: 0.8650,
+    coeficienteTermico: 0.00070,
+    requisitosMistura: 'Biodiesel B15 (Agro/Frota)',
+    enxofreMax: '500 mg/kg',
+    statusRegulatorio: 'Conforme 2026',
+    aspectoEsperado: 'Límpido e isento de impurezas',
+    corEsperada: 'Avermelhada',
   },
   'Diesel S-500': {
     produto: 'Diesel S-500',
@@ -473,6 +497,26 @@ export const PADROES_ANP_2026: Record<string, PadraoCombustivelANP> = {
 };
 
 /**
+ * Busca resiliente de padrão ANP por nome de produto (aceita aliases e variações)
+ */
+export function obterPadraoANP(produto: string): PadraoCombustivelANP {
+  if (PADROES_ANP_2026[produto]) return PADROES_ANP_2026[produto];
+  const p = (produto || '').toLowerCase().replace(/[-_\s]/g, '');
+  for (const [key, val] of Object.entries(PADROES_ANP_2026)) {
+    const k = key.toLowerCase().replace(/[-_\s]/g, '');
+    if (k === p) return val;
+  }
+  // Correspondência parcial
+  if (p.includes('etanol') || p.includes('alcool')) return PADROES_ANP_2026['Etanol'];
+  if (p.includes('diesels10') || p.includes('s10')) return PADROES_ANP_2026['Diesel S10'];
+  if (p.includes('diesels500') || p.includes('s500')) return PADROES_ANP_2026['Diesel S500'];
+  if (p.includes('premium')) return PADROES_ANP_2026['Gasolina Premium'];
+  if (p.includes('aditivada')) return PADROES_ANP_2026['Gasolina Aditivada'];
+  if (p.includes('gasolina')) return PADROES_ANP_2026['Gasolina Comum'];
+  return PADROES_ANP_2026['Gasolina Comum'];
+}
+
+/**
  * Estrutura detalhada e transparente do cálculo operacional de densidade
  */
 export interface DetalhesCalculoDensidade {
@@ -501,7 +545,7 @@ export function calcularDetalhesDensidadeOperacional(
   temperatura: number,
   produto: string
 ): DetalhesCalculoDensidade {
-  const padrao = PADROES_ANP_2026[produto] || PADROES_ANP_2026['Gasolina Comum'];
+  const padrao = obterPadraoANP(produto);
   let coef = padrao.coeficienteTermico || 0.00076;
   const prodUpper = produto.toUpperCase();
   if (prodUpper.includes('ETANOL') || prodUpper.includes('ÁLCOOL')) {
@@ -740,7 +784,7 @@ export function gerarMatrizNBR5992(
   linhas: LinhaMatrizNBR5992[];
   padrao: PadraoCombustivelANP;
 } {
-  const padrao = PADROES_ANP_2026[produto] || PADROES_ANP_2026['Etanol'];
+  const padrao = obterPadraoANP(produto);
   const temperaturas = [15, 18, 20, 22, 25, 28];
 
   // Base rows based on fuel type

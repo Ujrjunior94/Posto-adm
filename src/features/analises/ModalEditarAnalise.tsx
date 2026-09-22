@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { RegistroDensidade, Funcionario, TipoTesteANP } from '../../types';
 import {
   PADROES_ANP_2026,
+  obterPadraoANP,
   calcularDetalhesDensidadeOperacional,
   calcularTesteProvetaGasolina,
   calcularTeorAlcoolicoEtanol,
@@ -85,7 +86,7 @@ export const ModalEditarAnalise: React.FC<ModalEditarAnaliseProps> = ({
 
   if (!isOpen || !analise) return null;
 
-  const padraoAtual = PADROES_ANP_2026[produto] || PADROES_ANP_2026['Gasolina Comum'];
+  const padraoAtual = obterPadraoANP(produto);
 
   // 1. Cálculos de densidade operacional a 20°C
   const detalhesDensidade = calcularDetalhesDensidadeOperacional(densidadeObservada, temperatura, produto);
