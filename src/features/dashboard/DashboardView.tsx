@@ -65,13 +65,11 @@ export const DashboardView: React.FC<DashboardProps> = ({
   const hoje = new Date().toISOString().slice(0, 10);
   const horaAtual = new Date().getHours();
 
-  // Determinar turno operacional corrente com base no horário
+  // Determinar turno operacional corrente com base no horário (Turno 1 = Manhã, Turno 2 = Tarde)
   const turnoAtual =
-    horaAtual >= 6 && horaAtual < 14
-      ? { nome: 'Turno 2 (Manhã)', horario: '06h00 às 14h00', icone: Sunrise, cor: 'text-amber-500 bg-amber-50 border-amber-200' }
-      : horaAtual >= 14 && horaAtual < 22
-      ? { nome: 'Turno 3 (Tarde)', horario: '14h00 às 22h00', icone: Sun, cor: 'text-orange-500 bg-orange-50 border-orange-200' }
-      : { nome: 'Turno 4 (Noite)', horario: '22h00 às 06h00', icone: Moon, cor: 'text-indigo-400 bg-indigo-950/40 border-indigo-800' };
+    horaAtual < 14
+      ? { nome: 'Turno 1 — Manhã', horario: '06h00 às 14h00', icone: Sunrise, cor: 'text-amber-500 bg-amber-50 border-amber-200' }
+      : { nome: 'Turno 2 — Tarde', horario: '14h00 às 22h00', icone: Sun, cor: 'text-blue-500 bg-blue-50 border-blue-200' };
 
   const TurnoIcone = turnoAtual.icone;
 
@@ -278,21 +276,21 @@ export const DashboardView: React.FC<DashboardProps> = ({
             </div>
           </button>
 
-          {/* Ação 4: Bicos & Aferições */}
+          {/* Ação 4: Bicos & Aferições (Diagrama da Bomba) */}
           <button
             onClick={() => onNavigate('afericoes')}
-            className="group p-4 bg-white hover:bg-slate-50 border border-slate-200 hover:border-cyan-400 rounded-2xl shadow-xs transition text-left flex items-start gap-3.5 active:scale-98"
+            className="group p-4 bg-white hover:bg-slate-50 border border-slate-200 hover:border-amber-400 rounded-2xl shadow-xs transition text-left flex items-start gap-3.5 active:scale-98"
           >
-            <div className="w-11 h-11 rounded-xl bg-cyan-100 text-cyan-700 group-hover:bg-cyan-600 group-hover:text-white transition flex items-center justify-center shrink-0">
+            <div className="w-11 h-11 rounded-xl bg-amber-100 text-amber-800 group-hover:bg-amber-600 group-hover:text-white transition flex items-center justify-center shrink-0">
               <Gauge className="w-5 h-5" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="font-bold text-sm text-slate-900 group-hover:text-cyan-700 transition flex items-center justify-between">
-                <span>Aferição 20L Inmetro</span>
-                <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-cyan-600 group-hover:translate-x-0.5 transition" />
+              <div className="font-bold text-sm text-slate-900 group-hover:text-amber-700 transition flex items-center justify-between">
+                <span>Diagrama Bombas 20L</span>
+                <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-amber-600 group-hover:translate-x-0.5 transition" />
               </div>
               <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">
-                Registro metrológico diário de balde aferidor de 20 litros por bico e bomba.
+                Mapa visual Lado A e B das bombas, diagnóstico da última aferição de 20L e preços.
               </p>
             </div>
           </button>
@@ -315,7 +313,7 @@ export const DashboardView: React.FC<DashboardProps> = ({
             </div>
           </div>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold text-slate-900 font-mono">
+            <span className="text-3xl font-extrabold text-slate-900 font-mono tabular-nums">
               {frentistasAtivos.length}
             </span>
             <span className="text-xs text-slate-500 font-medium">ativos</span>
@@ -343,7 +341,7 @@ export const DashboardView: React.FC<DashboardProps> = ({
             </div>
           </div>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold text-slate-900 font-mono">
+            <span className="text-3xl font-extrabold text-slate-900 font-mono tabular-nums">
               {fechamentosHoje.length}
             </span>
             <span className="text-xs text-slate-500 font-medium">turnos apurados</span>
@@ -371,28 +369,28 @@ export const DashboardView: React.FC<DashboardProps> = ({
         {/* Aferições Inmetro */}
         <div
           onClick={() => onNavigate('afericoes')}
-          className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs hover:border-cyan-400 hover:shadow-md transition cursor-pointer group"
+          className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs hover:border-amber-400 hover:shadow-md transition cursor-pointer group"
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">
               Aferições 20L
             </span>
-            <div className="w-9 h-9 rounded-xl bg-cyan-50 text-cyan-600 group-hover:bg-cyan-600 group-hover:text-white transition flex items-center justify-center">
+            <div className="w-9 h-9 rounded-xl bg-amber-50 text-amber-700 group-hover:bg-amber-600 group-hover:text-white transition flex items-center justify-center">
               <Gauge className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold text-slate-900 font-mono">
+            <span className="text-3xl font-extrabold text-slate-900 font-mono tabular-nums">
               {afericoesConformes}/{afericoesHoje.length}
             </span>
-            <span className="text-xs text-slate-500 font-medium">conformes</span>
+            <span className="text-xs text-slate-500 font-medium">conformes hoje</span>
           </div>
           <div className="mt-2.5 pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs">
-            <span className="text-cyan-700 font-medium flex items-center gap-1">
+            <span className="text-amber-700 font-semibold flex items-center gap-1">
               <ShieldCheck className="w-3.5 h-3.5" />
-              Tolerância ±100ml
+              Mapa Lado A/B ({bicos.length} bicos)
             </span>
-            <span className="text-slate-400 font-medium">Inmetro</span>
+            <span className="text-slate-400 font-medium">±100ml</span>
           </div>
         </div>
 
@@ -410,7 +408,7 @@ export const DashboardView: React.FC<DashboardProps> = ({
             </div>
           </div>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold text-slate-900 font-mono">
+            <span className="text-3xl font-extrabold text-slate-900 font-mono tabular-nums">
               {pendenciasConformidade}
             </span>
             <span className="text-xs text-slate-500 font-medium">
@@ -421,9 +419,111 @@ export const DashboardView: React.FC<DashboardProps> = ({
             <span className="text-teal-700 font-medium">
               {densidadesConformes} testes aprovados
             </span>
-            <span className="text-slate-400 font-medium">D32 / ANP</span>
+            <span className="text-slate-400 font-medium">D32 / Diesel</span>
           </div>
         </div>
+      </div>
+
+      {/* 3.5. Visão Rápida do Diagrama de Bombas & Última Aferição 20L por Bico (Lado A e Lado B) */}
+      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pb-3 border-b border-slate-100">
+          <div>
+            <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <Gauge className="w-5 h-5 text-amber-600" />
+              Diagnóstico Visual dos Bicos & Bombas (Lado A e Lado B)
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Status da última aferição de 20L por bico — clique para abrir o diagrama interativo da bomba e realizar diagnóstico
+            </p>
+          </div>
+          <button
+            onClick={() => onNavigate('afericoes')}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-xs font-bold transition whitespace-nowrap"
+          >
+            <span>Abrir Diagrama Completo da Bomba</span>
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
+
+        {bicos.length === 0 ? (
+          <div className="py-6 text-center space-y-2">
+            <p className="text-xs text-slate-500">
+              Nenhum bico cadastrado ainda. Acesse a tela de Bicos & Aferições para gerar o mapa visual das bombas com 1 clique.
+            </p>
+            <button
+              onClick={() => onNavigate('afericoes')}
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold hover:bg-slate-800 transition"
+            >
+              <Gauge className="w-3.5 h-3.5 text-amber-400" />
+              Ir para Diagrama de Bombas & Aferições
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5">
+            {[...bicos]
+              .sort((a, b) => a.numero - b.numero)
+              .map((b) => {
+                const ult = afericoes
+                  .filter((af) => af.bicoId === b.id)
+                  .sort((x, y) => `${y.data}T${y.hora}`.localeCompare(`${x.data}T${x.hora}`))[0];
+                const ml = ult ? Math.round(ult.diferenca * 1000) : null;
+                const tol = ult ? Math.round((ult.toleranciaConfigurada || 0.1) * 1000) : 100;
+                const isFora = ml !== null && Math.abs(ml) > tol;
+                const isDeriva = ml !== null && !isFora && Math.abs(ml) >= 65;
+
+                return (
+                  <button
+                    key={b.id}
+                    type="button"
+                    onClick={() => onNavigate('afericoes')}
+                    className={`p-3 rounded-xl border text-left transition flex flex-col justify-between hover:shadow-sm ${
+                      isFora
+                        ? 'bg-red-50/70 border-red-300'
+                        : isDeriva
+                        ? 'bg-amber-50/70 border-amber-300'
+                        : ult
+                        ? 'bg-emerald-50/40 border-emerald-200'
+                        : 'bg-slate-50 border-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="font-mono font-extrabold text-xs text-slate-900">
+                        Bico #{String(b.numero).padStart(2, '0')}
+                      </span>
+                      <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded bg-white border border-slate-200 text-slate-700">
+                        Lado {b.lado}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-slate-500 truncate mt-1 font-medium">
+                      {b.produto}
+                    </div>
+                    <div className="mt-2 pt-1.5 border-t border-slate-200/60 flex items-center justify-between font-mono text-[11px] font-bold tabular-nums">
+                      {ml !== null ? (
+                        <>
+                          <span
+                            className={
+                              isFora
+                                ? 'text-red-700'
+                                : isDeriva
+                                ? 'text-amber-700'
+                                : 'text-emerald-700'
+                            }
+                          >
+                            {ml > 0 ? `+${ml}` : ml}ml
+                          </span>
+                          <span className="text-[9px] font-sans uppercase text-slate-400">
+                            {isFora ? 'CRÍTICO' : isDeriva ? 'DERIVA' : 'OK'}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-[10px] font-sans text-slate-400">Pendente</span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+          </div>
+        )}
       </div>
 
       {/* 4. Situação Ilustrada dos Tanques (Visual Liquid Level Tank Gauges) */}

@@ -14,6 +14,7 @@ import {
   AuditLog,
   LMCRegistro,
   RateioTurno,
+  UserRole,
 } from './types';
 import { PostoSubcollectionRepository, testConnection, registrarAuditoria } from './repositories/firestoreRepository';
 import { DashboardView } from './features/dashboard/DashboardView';
@@ -201,7 +202,17 @@ const MENU_CATEGORIES: MenuCategoryDef[] = [
 const ALL_MENU_ITEMS: MenuItemDef[] = MENU_CATEGORIES.flatMap((c) => c.items);
 
 const MainApp: React.FC = () => {
-  const { currentUser, userProfile, postoId, signInDemo, signInWithGoogle, signOut } = useAuth();
+  const {
+    currentUser,
+    userProfile,
+    postoId,
+    usuariosCadastrados,
+    signInDemo,
+    signInWithGoogle,
+    signInWithCredentials,
+    registerAccess,
+    signOut,
+  } = useAuth();
   const { isOnline, syncState, pendingCount, syncNow } = useSync();
 
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -209,6 +220,17 @@ const MainApp: React.FC = () => {
   const [modalLimpezaAberto, setModalLimpezaAberto] = useState(false);
   const [limpandoDados, setLimpandoDados] = useState(false);
   const [toastSucesso, setToastSucesso] = useState('');
+
+  // Estados da tela simplificada de Login e Cadastro de Acesso
+  const [modoAcesso, setModoAcesso] = useState<'LOGIN' | 'CADASTRO'>('LOGIN');
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginSenha, setLoginSenha] = useState('');
+  const [cadastroNome, setCadastroNome] = useState('');
+  const [cadastroEmail, setCadastroEmail] = useState('');
+  const [cadastroSenha, setCadastroSenha] = useState('');
+  const [cadastroRole, setCadastroRole] = useState<UserRole>('GERENTE');
+  const [erroAuth, setErroAuth] = useState('');
+  const [autenticando, setAutenticando] = useState(false);
 
   // States dos dados operacionais reais em tempo real
   const [funcionarios, setFuncionarios] = useState<Funcionario[]>([]);
@@ -222,14 +244,12 @@ const MainApp: React.FC = () => {
   const [conformidades, setConformidades] = useState<Conformidade[]>([]);
   const [auditoria, setAuditoria] = useState<AuditLog[]>([]);
 
-  // Turno operacional ao vivo baseado no relógio
+  // Turno operacional ao vivo baseado no relógio (Turno 1 = Manhã, Turno 2 = Tarde)
   const horaAtual = new Date().getHours();
   const turnoAtual =
-    horaAtual >= 6 && horaAtual < 14
-      ? { nome: 'Turno 2 (Manhã)', icone: Sunrise, cor: 'text-amber-400 bg-amber-950/40 border-amber-800/60' }
-      : horaAtual >= 14 && horaAtual < 22
-      ? { nome: 'Turno 3 (Tarde)', icone: Sun, cor: 'text-orange-400 bg-orange-950/40 border-orange-800/60' }
-      : { nome: 'Turno 4 (Noite)', icone: Moon, cor: 'text-indigo-400 bg-indigo-950/40 border-indigo-800/60' };
+    horaAtual < 14
+      ? { nome: 'Turno 1 — Manhã', icone: Sunrise, cor: 'text-amber-400 bg-amber-950/40 border-amber-800/60' }
+      : { nome: 'Turno 2 — Tarde', icone: Sun, cor: 'text-blue-400 bg-blue-950/40 border-blue-800/60' };
 
   const TurnoIcone = turnoAtual.icone;
 
@@ -251,6 +271,227 @@ const MainApp: React.FC = () => {
 
   const carregarDados = async () => {
     await carregarDadosLocais();
+  };
+
+  // Função prática para popular pista completa (Tanques, Bombas Lado A/B, Aferições 20L e Equipe)
+  const handlePopularDadosExemplo = async () => {
+    setLimpandoDados(true);
+    try {
+      const hoje = new Date().toISOString().slice(0, 10);
+      const ontem = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+
+      // 1. Tanques
+      const tanquesPadrao: Tanque[] = [
+        {
+          id: 'tq-01',
+          postoId,
+          codigo: 'TQ-01',
+          produto: 'Gasolina Comum',
+          capacidadeNominal: 30000,
+          capacidadeOperacional: 28500,
+          unidade: 'Litros',
+          formato: 'CILINDRICO_HORIZONTAL',
+          ativo: true,
+          tabelaRegua: [
+            { altura: 20, volume: 2100 },
+            { altura: 50, volume: 6300 },
+            { altura: 100, volume: 15000 },
+            { altura: 150, volume: 24000 },
+            { altura: 200, volume: 30000 },
+          ],
+          criadoEm: new Date().toISOString(),
+          atualizadoEm: new Date().toISOString(),
+        },
+        {
+          id: 'tq-02',
+          postoId,
+          codigo: 'TQ-02',
+          produto: 'Gasolina Aditivada',
+          capacidadeNominal: 20000,
+          capacidadeOperacional: 19000,
+          unidade: 'Litros',
+          formato: 'CILINDRICO_HORIZONTAL',
+          ativo: true,
+          tabelaRegua: [
+            { altura: 20, volume: 1500 },
+            { altura: 50, volume: 4500 },
+            { altura: 100, volume: 10000 },
+            { altura: 150, volume: 16000 },
+            { altura: 200, volume: 20000 },
+          ],
+          criadoEm: new Date().toISOString(),
+          atualizadoEm: new Date().toISOString(),
+        },
+        {
+          id: 'tq-03',
+          postoId,
+          codigo: 'TQ-03',
+          produto: 'Etanol Hidratado',
+          capacidadeNominal: 20000,
+          capacidadeOperacional: 19000,
+          unidade: 'Litros',
+          formato: 'CILINDRICO_HORIZONTAL',
+          ativo: true,
+          tabelaRegua: [
+            { altura: 20, volume: 1500 },
+            { altura: 50, volume: 4500 },
+            { altura: 100, volume: 10000 },
+            { altura: 150, volume: 16000 },
+            { altura: 200, volume: 20000 },
+          ],
+          criadoEm: new Date().toISOString(),
+          atualizadoEm: new Date().toISOString(),
+        },
+        {
+          id: 'tq-04',
+          postoId,
+          codigo: 'TQ-04',
+          produto: 'Diesel S10',
+          capacidadeNominal: 30000,
+          capacidadeOperacional: 28500,
+          unidade: 'Litros',
+          formato: 'CILINDRICO_HORIZONTAL',
+          ativo: true,
+          tabelaRegua: [
+            { altura: 20, volume: 2100 },
+            { altura: 50, volume: 6300 },
+            { altura: 100, volume: 15000 },
+            { altura: 150, volume: 24000 },
+            { altura: 200, volume: 30000 },
+          ],
+          criadoEm: new Date().toISOString(),
+          atualizadoEm: new Date().toISOString(),
+        },
+      ];
+
+      for (const t of tanquesPadrao) {
+        await repoTanques.save(postoId, t);
+      }
+
+      // 2. Funcionários
+      const funcsPadrao: Funcionario[] = [
+        {
+          id: 'func-01',
+          postoId,
+          nome: 'Carlos Eduardo Silva',
+          cpf: '12345678909',
+          matricula: 'FR-101',
+          telefone: '(11) 98877-6655',
+          cargo: 'Chefe de Pista',
+          funcao: 'Chefe de Pista',
+          status: 'ATIVO',
+          dataAdmissao: '2023-03-10',
+          turnoPreferencial: 'Turno 1 - Manhã (06h - 14h)',
+          criadoEm: new Date().toISOString(),
+          atualizadoEm: new Date().toISOString(),
+        },
+        {
+          id: 'func-02',
+          postoId,
+          nome: 'Mariana Costa Souza',
+          cpf: '98765432100',
+          matricula: 'FR-102',
+          telefone: '(11) 97766-5544',
+          cargo: 'Frentista Caixa',
+          funcao: 'Frentista / Caixa',
+          status: 'ATIVO',
+          dataAdmissao: '2024-01-15',
+          turnoPreferencial: 'Turno 2 - Tarde (14h - 22h)',
+          criadoEm: new Date().toISOString(),
+          atualizadoEm: new Date().toISOString(),
+        },
+        {
+          id: 'func-03',
+          postoId,
+          nome: 'Roberto Almeida Santos',
+          cpf: '45678912300',
+          matricula: 'FR-103',
+          telefone: '(11) 96655-4433',
+          cargo: 'Frentista',
+          funcao: 'Frentista Horista',
+          status: 'ATIVO',
+          dataAdmissao: '2024-06-01',
+          turnoPreferencial: 'Turno Horista',
+          criadoEm: new Date().toISOString(),
+          atualizadoEm: new Date().toISOString(),
+        },
+      ];
+
+      for (const f of funcsPadrao) {
+        await repoFunc.save(postoId, f);
+      }
+
+      // 3. Bicos & Aferições (Bomba 01 Lado A e B, Bomba 02 Lado A e B)
+      const configBicos: Array<{
+        num: number;
+        bomba: string;
+        lado: 'A' | 'B';
+        prod: string;
+        tq: string;
+        preco: number;
+        leituras: [number, number];
+      }> = [
+        { num: 1, bomba: 'Bomba 01 (Ilha Principal)', lado: 'A', prod: 'Gasolina Comum', tq: 'tq-01', preco: 5.89, leituras: [20.015, 20.010] },
+        { num: 2, bomba: 'Bomba 01 (Ilha Principal)', lado: 'A', prod: 'Gasolina Aditivada', tq: 'tq-02', preco: 6.09, leituras: [19.985, 19.990] },
+        { num: 3, bomba: 'Bomba 01 (Ilha Principal)', lado: 'A', prod: 'Etanol Hidratado', tq: 'tq-03', preco: 3.99, leituras: [20.075, 20.045] },
+        { num: 4, bomba: 'Bomba 01 (Ilha Principal)', lado: 'B', prod: 'Gasolina Comum', tq: 'tq-01', preco: 5.89, leituras: [20.000, 20.005] },
+        { num: 5, bomba: 'Bomba 01 (Ilha Principal)', lado: 'B', prod: 'Gasolina Aditivada', tq: 'tq-02', preco: 6.09, leituras: [20.025, 20.015] },
+        { num: 6, bomba: 'Bomba 01 (Ilha Principal)', lado: 'B', prod: 'Etanol Hidratado', tq: 'tq-03', preco: 3.99, leituras: [19.875, 19.935] },
+        { num: 7, bomba: 'Bomba 02 (Ilha Diesel)', lado: 'A', prod: 'Diesel S10', tq: 'tq-04', preco: 6.19, leituras: [20.010, 20.000] },
+        { num: 8, bomba: 'Bomba 02 (Ilha Diesel)', lado: 'B', prod: 'Diesel S500', tq: 'tq-04', preco: 5.99, leituras: [19.990, 19.995] },
+      ];
+
+      for (const item of configBicos) {
+        const bId = `bico-padrao-${item.num}`;
+        await repoBicos.save(postoId, {
+          id: bId,
+          postoId,
+          numero: item.num,
+          bomba: item.bomba,
+          tanqueId: item.tq,
+          produto: item.prod,
+          lado: item.lado,
+          status: 'ATIVO',
+          precoBase: item.preco,
+          precoLitro: item.preco,
+          temDesconto: false,
+          criadoEm: new Date().toISOString(),
+          atualizadoEm: new Date().toISOString(),
+        });
+
+        for (let idx = 0; idx < item.leituras.length; idx++) {
+          const vol = item.leituras[idx];
+          const diff = Math.round((vol - 20.0) * 1000) / 1000;
+          const isOk = Math.abs(Math.round(diff * 1000)) <= 100;
+          await repoAfericoes.save(postoId, {
+            id: `af-padrao-${item.num}-${idx}`,
+            postoId,
+            bicoId: bId,
+            tanqueId: item.tq,
+            produto: item.prod,
+            funcionarioId: 'func-01',
+            data: idx === 0 ? hoje : ontem,
+            hora: idx === 0 ? '08:20' : '15:40',
+            volumeNominal: 20.0,
+            volumeAferido: vol,
+            diferenca: diff,
+            toleranciaConfigurada: 0.1,
+            resultado: isOk ? 'CONFORME' : 'NAO_CONFORME',
+            equipamento: 'Medidor Padrão 20L Inmetro',
+            observacao: idx === 0 ? 'Aferição matinal de pista' : 'Aferição do turno anterior',
+            criadoEm: new Date().toISOString(),
+          });
+        }
+      }
+
+      await carregarDados();
+      setToastSucesso('Pista carregada com Bombas (Lado A e B), Tanques, Equipe e Aferições 20L!');
+      setTimeout(() => setToastSucesso(''), 5000);
+    } catch (err) {
+      console.error('Erro ao popular dados de exemplo:', err);
+    } finally {
+      setLimpandoDados(false);
+    }
   };
 
   // Função para remover todos os dados de demonstração e resetar o posto
@@ -355,143 +596,259 @@ const MainApp: React.FC = () => {
     };
   }, [postoId, currentUser, userProfile]);
 
-  // Tela de Acesso e Login Ilustrada & Direta
+  // Tela de Login Simplificada com Cadastro de Acesso Habilitado
   if (!userProfile) {
+    const handleSubmeterLogin = async (e: React.FormEvent) => {
+      e.preventDefault();
+      setErroAuth('');
+      setAutenticando(true);
+      try {
+        await signInWithCredentials(loginEmail, loginSenha);
+      } catch (err: unknown) {
+        setErroAuth(err instanceof Error ? err.message : 'Erro ao entrar.');
+      } finally {
+        setAutenticando(false);
+      }
+    };
+
+    const handleSubmeterCadastro = async (e: React.FormEvent) => {
+      e.preventDefault();
+      setErroAuth('');
+      setAutenticando(true);
+      try {
+        await registerAccess({
+          nome: cadastroNome,
+          email: cadastroEmail,
+          senha: cadastroSenha,
+          role: cadastroRole,
+        });
+      } catch (err: unknown) {
+        setErroAuth(err instanceof Error ? err.message : 'Erro ao cadastrar acesso.');
+      } finally {
+        setAutenticando(false);
+      }
+    };
+
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex flex-col items-center justify-center p-4 text-white relative overflow-hidden font-sans">
-        {/* Gráfico decorativo de fundo */}
-        <div className="absolute top-1/4 -left-20 w-96 h-96 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-1/4 -right-20 w-96 h-96 bg-emerald-600/10 rounded-full blur-3xl pointer-events-none" />
-
-        <div className="max-w-xl w-full bg-slate-900/90 backdrop-blur-md border border-slate-800 p-8 rounded-3xl shadow-2xl space-y-6 relative z-10">
-          {/* Cabeçalho Ilustrado */}
-          <div className="text-center space-y-2">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-600 to-cyan-500 text-white shadow-xl shadow-blue-500/20 mb-2">
-              <Fuel className="w-8 h-8" />
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 text-white font-sans">
+        <div className="max-w-md w-full bg-slate-900 border border-slate-800 p-6 sm:p-7 rounded-2xl shadow-2xl space-y-5">
+          {/* Cabeçalho Enxuto */}
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-md shrink-0">
+              <Fuel className="w-6 h-6" />
             </div>
-            <h1 className="text-3xl font-extrabold tracking-tight text-white flex items-center justify-center gap-2">
-              <span>MEU POSTO</span>
-              <span className="text-xs font-black px-2 py-0.5 rounded-md bg-blue-600 text-white tracking-widest uppercase">
-                2.0
-              </span>
-            </h1>
-            <p className="text-xs md:text-sm text-slate-400 max-w-sm mx-auto">
-              Centro de Gestão Operacional de Pista, Pátio, Escalas e Caixa
-            </p>
-          </div>
-
-          {/* Destaques Técnicos Rápidos */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 py-2">
-            <div className="p-2.5 rounded-xl bg-slate-800/60 border border-slate-700/50 text-center space-y-1">
-              <Sparkles className="w-4 h-4 text-indigo-400 mx-auto" />
-              <div className="text-[11px] font-semibold text-slate-200">Escala IA</div>
-              <div className="text-[10px] text-slate-400">OCR Gemini 3.8</div>
-            </div>
-            <div className="p-2.5 rounded-xl bg-slate-800/60 border border-slate-700/50 text-center space-y-1">
-              <DollarSign className="w-4 h-4 text-emerald-400 mx-auto" />
-              <div className="text-[11px] font-semibold text-slate-200">Caixa & Rateio</div>
-              <div className="text-[10px] text-slate-400">Sem divergências</div>
-            </div>
-            <div className="p-2.5 rounded-xl bg-slate-800/60 border border-slate-700/50 text-center space-y-1">
-              <Gauge className="w-4 h-4 text-amber-400 mx-auto" />
-              <div className="text-[11px] font-semibold text-slate-200">Régua & LMC</div>
-              <div className="text-[10px] text-slate-400">Padrão ANP</div>
-            </div>
-            <div className="p-2.5 rounded-xl bg-slate-800/60 border border-slate-700/50 text-center space-y-1">
-              <Wifi className="w-4 h-4 text-cyan-400 mx-auto" />
-              <div className="text-[11px] font-semibold text-slate-200">Offline-First</div>
-              <div className="text-[10px] text-slate-400">Nunca trava</div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl font-extrabold tracking-tight text-white">MEU POSTO</h1>
+                <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-blue-600 text-white uppercase">
+                  2.0
+                </span>
+              </div>
+              <p className="text-xs text-slate-400">Acesso ao Sistema Operacional</p>
             </div>
           </div>
 
-          {/* Seletor Direto de Papéis Operacionais */}
-          <div className="space-y-3">
-            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider text-center">
-              Escolha seu perfil para entrada imediata
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {/* Gerente Geral */}
-              <button
-                onClick={() => signInDemo('GERENTE')}
-                className="p-3 bg-slate-800/80 hover:bg-slate-750 hover:border-blue-500/80 border border-slate-700/80 rounded-xl transition text-left flex items-start gap-3 group active:scale-98"
-              >
-                <div className="w-9 h-9 rounded-lg bg-blue-500/20 text-blue-400 group-hover:bg-blue-600 group-hover:text-white transition flex items-center justify-center shrink-0">
-                  <ShieldCheck className="w-5 h-5" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-bold text-xs text-white group-hover:text-blue-300 transition">
-                    Gerente Geral
-                  </div>
-                  <div className="text-[10px] text-slate-400">
-                    Controle total, LMC, rateios e relatórios
-                  </div>
-                </div>
-              </button>
-
-              {/* Supervisor de Pista */}
-              <button
-                onClick={() => signInDemo('SUPERVISOR')}
-                className="p-3 bg-slate-800/80 hover:bg-slate-750 hover:border-emerald-500/80 border border-slate-700/80 rounded-xl transition text-left flex items-start gap-3 group active:scale-98"
-              >
-                <div className="w-9 h-9 rounded-lg bg-emerald-500/20 text-emerald-400 group-hover:bg-emerald-600 group-hover:text-white transition flex items-center justify-center shrink-0">
-                  <Calendar className="w-5 h-5" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-bold text-xs text-white group-hover:text-emerald-300 transition">
-                    Supervisor de Pista
-                  </div>
-                  <div className="text-[10px] text-slate-400">
-                    Planner, escalas, aferições e equipe
-                  </div>
-                </div>
-              </button>
-
-              {/* Operador de Caixa */}
-              <button
-                onClick={() => signInDemo('OPERADOR')}
-                className="p-3 bg-slate-800/80 hover:bg-slate-750 hover:border-amber-500/80 border border-slate-700/80 rounded-xl transition text-left flex items-start gap-3 group active:scale-98"
-              >
-                <div className="w-9 h-9 rounded-lg bg-amber-500/20 text-amber-400 group-hover:bg-amber-600 group-hover:text-white transition flex items-center justify-center shrink-0">
-                  <DollarSign className="w-5 h-5" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-bold text-xs text-white group-hover:text-amber-300 transition">
-                    Operador de Caixa
-                  </div>
-                  <div className="text-[10px] text-slate-400">
-                    Fechamento de turno e sangrias
-                  </div>
-                </div>
-              </button>
-
-              {/* Auditor Master */}
-              <button
-                onClick={() => signInDemo('MASTER')}
-                className="p-3 bg-slate-800/80 hover:bg-slate-750 hover:border-purple-500/80 border border-slate-700/80 rounded-xl transition text-left flex items-start gap-3 group active:scale-98"
-              >
-                <div className="w-9 h-9 rounded-lg bg-purple-500/20 text-purple-400 group-hover:bg-purple-600 group-hover:text-white transition flex items-center justify-center shrink-0">
-                  <Sparkles className="w-5 h-5" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-bold text-xs text-white group-hover:text-purple-300 transition">
-                    Auditor Master
-                  </div>
-                  <div className="text-[10px] text-slate-400">
-                    ANP, qualidade, conformidade e logs
-                  </div>
-                </div>
-              </button>
-            </div>
-          </div>
-
-          <div className="pt-2 border-t border-slate-800">
+          {/* Alternador Entrar / Cadastrar Acesso */}
+          <div className="grid grid-cols-2 p-1 bg-slate-950 rounded-xl border border-slate-800">
             <button
-              onClick={signInWithGoogle}
-              className="w-full py-2.5 px-4 bg-white hover:bg-slate-100 text-slate-900 font-semibold text-xs rounded-xl transition shadow-md flex items-center justify-center gap-2"
+              type="button"
+              onClick={() => {
+                setModoAcesso('LOGIN');
+                setErroAuth('');
+              }}
+              className={`py-2 text-xs font-bold rounded-lg transition cursor-pointer ${
+                modoAcesso === 'LOGIN'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
             >
-              <span>Autenticar com Google Workspace / Firebase</span>
+              Entrar
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setModoAcesso('CADASTRO');
+                setErroAuth('');
+              }}
+              className={`py-2 text-xs font-bold rounded-lg transition cursor-pointer ${
+                modoAcesso === 'CADASTRO'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Cadastrar Acesso
+            </button>
+          </div>
+
+          {/* Alerta de Erro */}
+          {erroAuth && (
+            <div className="p-3 rounded-xl bg-red-950/70 border border-red-800 text-red-200 text-xs flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+              <span>{erroAuth}</span>
+            </div>
+          )}
+
+          {modoAcesso === 'LOGIN' ? (
+            <form onSubmit={handleSubmeterLogin} className="space-y-3.5">
+              {usuariosCadastrados.length > 0 && (
+                <div className="space-y-1.5">
+                  <span className="block text-[10px] font-bold text-slate-400 uppercase">
+                    Acessos Cadastrados (clique para preencher):
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {usuariosCadastrados.slice(0, 4).map((u) => (
+                      <button
+                        key={u.uid}
+                        type="button"
+                        onClick={() => {
+                          setLoginEmail(u.email);
+                          setErroAuth('');
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition cursor-pointer ${
+                          loginEmail.toLowerCase() === u.email.toLowerCase()
+                            ? 'bg-blue-600/20 border-blue-500 text-blue-300'
+                            : 'bg-slate-800/80 border-slate-700 text-slate-300 hover:bg-slate-800'
+                        }`}
+                      >
+                        {u.nome} ({u.role})
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">E-mail</label>
+                <input
+                  type="email"
+                  required
+                  value={loginEmail}
+                  onChange={(e) => setLoginEmail(e.target.value)}
+                  placeholder="seu@email.com"
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Senha</label>
+                <input
+                  type="password"
+                  required
+                  value={loginSenha}
+                  onChange={(e) => setLoginSenha(e.target.value)}
+                  placeholder="Digite sua senha"
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={autenticando}
+                className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm rounded-xl transition shadow-md disabled:opacity-50 cursor-pointer"
+              >
+                {autenticando ? 'Entrando...' : 'Entrar no Sistema'}
+              </button>
+
+              <button
+                type="button"
+                onClick={signInWithGoogle}
+                className="w-full py-2.5 px-4 bg-white hover:bg-slate-100 text-slate-900 font-semibold text-xs rounded-xl transition flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <span>Entrar com Conta Google</span>
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleSubmeterCadastro} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Nome Completo</label>
+                <input
+                  type="text"
+                  required
+                  value={cadastroNome}
+                  onChange={(e) => setCadastroNome(e.target.value)}
+                  placeholder="Ex: Carlos Eduardo"
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">E-mail de Acesso</label>
+                <input
+                  type="email"
+                  required
+                  value={cadastroEmail}
+                  onChange={(e) => setCadastroEmail(e.target.value)}
+                  placeholder="carlos@meuposto.com"
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Função / Perfil</label>
+                  <select
+                    value={cadastroRole}
+                    onChange={(e) => setCadastroRole(e.target.value as UserRole)}
+                    className="w-full px-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs font-semibold text-white focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="GERENTE">Gerente Geral</option>
+                    <option value="SUPERVISOR">Supervisor de Pista</option>
+                    <option value="OPERADOR">Operador / Caixa</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Criar Senha</label>
+                  <input
+                    type="password"
+                    required
+                    minLength={4}
+                    value={cadastroSenha}
+                    onChange={(e) => setCadastroSenha(e.target.value)}
+                    placeholder="Mín. 4 dígitos"
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={autenticando}
+                className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm rounded-xl transition shadow-md disabled:opacity-50 cursor-pointer"
+              >
+                {autenticando ? 'Cadastrando...' : 'Criar Acesso e Entrar'}
+              </button>
+            </form>
+          )}
+
+          {/* Barra Compacta de Acesso Rápido sem Senha */}
+          <div className="pt-3 border-t border-slate-800 space-y-2">
+            <div className="text-[10px] font-bold text-slate-500 uppercase text-center">
+              Acesso Rápido de Pista (1 Clique)
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => signInDemo('GERENTE')}
+                className="py-2 px-2 bg-slate-800/80 hover:bg-slate-800 border border-slate-700 rounded-lg text-xs font-semibold text-slate-200 transition cursor-pointer"
+              >
+                Gerente
+              </button>
+              <button
+                type="button"
+                onClick={() => signInDemo('SUPERVISOR')}
+                className="py-2 px-2 bg-slate-800/80 hover:bg-slate-800 border border-slate-700 rounded-lg text-xs font-semibold text-slate-200 transition cursor-pointer"
+              >
+                Supervisor
+              </button>
+              <button
+                type="button"
+                onClick={() => signInDemo('OPERADOR')}
+                className="py-2 px-2 bg-slate-800/80 hover:bg-slate-800 border border-slate-700 rounded-lg text-xs font-semibold text-slate-200 transition cursor-pointer"
+              >
+                Operador
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -736,9 +1093,33 @@ const MainApp: React.FC = () => {
 
           {/* Atalhos Rápidos Diretos (1-Clique) */}
           <div className="flex items-center gap-2">
+            {bicos.length === 0 && (
+              <button
+                onClick={handlePopularDadosExemplo}
+                disabled={limpandoDados}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white transition shadow-xs whitespace-nowrap"
+                title="Carregar bombas, bicos Lado A/B, tanques e aferições de exemplo"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <span>Popular Pista Exemplo</span>
+              </button>
+            )}
+
+            <button
+              onClick={() => setActiveTab('afericoes')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap ${
+                activeTab === 'afericoes'
+                  ? 'bg-amber-600 text-white shadow-xs'
+                  : 'bg-slate-100 hover:bg-amber-50 text-slate-700 hover:text-amber-800 border border-slate-200'
+              }`}
+            >
+              <Gauge className="w-3.5 h-3.5" />
+              <span>Diagrama Bombas 20L</span>
+            </button>
+
             <button
               onClick={() => setActiveTab('fechamento')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap ${
                 activeTab === 'fechamento'
                   ? 'bg-emerald-600 text-white shadow-xs'
                   : 'bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 border border-slate-200'
@@ -749,39 +1130,27 @@ const MainApp: React.FC = () => {
             </button>
 
             <button
-              onClick={() => setActiveTab('ia-escala')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
-                activeTab === 'ia-escala'
-                  ? 'bg-indigo-600 text-white shadow-xs'
-                  : 'bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border border-slate-200'
+              onClick={() => setActiveTab('analises')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap ${
+                activeTab === 'analises'
+                  ? 'bg-teal-600 text-white shadow-xs'
+                  : 'bg-slate-100 hover:bg-teal-50 text-slate-700 hover:text-teal-700 border border-slate-200'
               }`}
             >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Ler Escala (IA)</span>
+              <TestTubes className="w-3.5 h-3.5" />
+              <span>Qualidade ANP</span>
             </button>
 
             <button
               onClick={() => setActiveTab('tanques')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap ${
                 activeTab === 'tanques'
-                  ? 'bg-amber-600 text-white shadow-xs'
-                  : 'bg-slate-100 hover:bg-amber-50 text-slate-700 hover:text-amber-700 border border-slate-200'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border border-slate-200'
               }`}
             >
               <Fuel className="w-3.5 h-3.5" />
               <span>Régua</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('afericoes')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
-                activeTab === 'afericoes'
-                  ? 'bg-cyan-600 text-white shadow-xs'
-                  : 'bg-slate-100 hover:bg-cyan-50 text-slate-700 hover:text-cyan-700 border border-slate-200'
-              }`}
-            >
-              <Gauge className="w-3.5 h-3.5" />
-              <span>Aferição 20L</span>
             </button>
           </div>
         </header>
@@ -959,6 +1328,76 @@ const MainApp: React.FC = () => {
             />
           )}
         </main>
+
+        {/* Barra de Navegação Inferior Rápida (Mobile / Tablet de Pista) */}
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900 border-t border-slate-800 px-2 py-1.5 flex items-center justify-around print:hidden">
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('dashboard');
+              setMobileMenuOpen(false);
+            }}
+            className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-lg text-[10px] font-semibold ${
+              activeTab === 'dashboard' ? 'text-blue-400' : 'text-slate-400'
+            }`}
+          >
+            <LayoutDashboard className="w-4 h-4" />
+            <span>Início</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('afericoes');
+              setMobileMenuOpen(false);
+            }}
+            className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-lg text-[10px] font-semibold ${
+              activeTab === 'afericoes' ? 'text-amber-400' : 'text-slate-400'
+            }`}
+          >
+            <Gauge className="w-4 h-4" />
+            <span>Bombas 20L</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('fechamento');
+              setMobileMenuOpen(false);
+            }}
+            className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-lg text-[10px] font-semibold ${
+              activeTab === 'fechamento' ? 'text-emerald-400' : 'text-slate-400'
+            }`}
+          >
+            <DollarSign className="w-4 h-4" />
+            <span>Caixa</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('analises');
+              setMobileMenuOpen(false);
+            }}
+            className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-lg text-[10px] font-semibold ${
+              activeTab === 'analises' ? 'text-teal-400' : 'text-slate-400'
+            }`}
+          >
+            <TestTubes className="w-4 h-4" />
+            <span>Qualidade</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-lg text-[10px] font-semibold ${
+              mobileMenuOpen ? 'text-white' : 'text-slate-400'
+            }`}
+          >
+            <Menu className="w-4 h-4" />
+            <span>Menu</span>
+          </button>
+        </nav>
       </div>
     </div>
   );

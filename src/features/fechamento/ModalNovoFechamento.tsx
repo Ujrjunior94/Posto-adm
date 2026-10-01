@@ -454,11 +454,9 @@ export const ModalNovoFechamento: React.FC<ModalNovoFechamentoProps> = ({
                 onChange={(e) => setTurno(e.target.value)}
                 className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs bg-white focus:ring-2 focus:ring-emerald-500"
               >
-                <option value="Turno 1 - Manhã (06h - 14h)">Turno 1 - Manhã (06h - 14h)</option>
-                <option value="Turno 2 - Tarde (14h - 22h)">Turno 2 - Tarde (14h - 22h)</option>
-                <option value="Turno 3 - Noite (22h - 06h)">Turno 3 - Noite (22h - 06h)</option>
-                <option value="Turno Especial 12x36 (07h - 19h)">Turno Especial 12x36 (07h - 19h)</option>
-                <option value="Fechamento Diário Geral">Fechamento Diário Geral</option>
+                <option value="Turno 1 - Manhã (06h - 14h)">Turno 1 — Manhã (06h - 14h)</option>
+                <option value="Turno 2 - Tarde (14h - 22h)">Turno 2 — Tarde (14h - 22h)</option>
+                <option value="Turno Horista">Turno Horista</option>
               </select>
             </div>
             <div>

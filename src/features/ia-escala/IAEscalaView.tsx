@@ -167,13 +167,52 @@ export const normalizarTurno = (
     };
   }
 
-  // Turno 2: 06h às 14h
+  // Turno Horista: Flexível / Por Hora
+  if (
+    t === 'h' ||
+    t === 'hor' ||
+    t.includes('horista') ||
+    t.includes('flex') ||
+    t.includes('intermed') ||
+    t.includes('int')
+  ) {
+    return {
+      turno: 'Turno Horista',
+      horarioInicio: rawInicio || '08:00',
+      horarioFim: rawFim || '14:00',
+    };
+  }
+
+  // Turno 2: Tarde (14h às 22h)
   if (
     t === '2' ||
     t === 't2' ||
     t === 't02' ||
     t.includes('turno 2') ||
     t.includes('turno2') ||
+    t.includes('turno dois') ||
+    t.includes('14-22') ||
+    t.includes('14h') ||
+    t.includes('14:00') ||
+    t.includes('tarde') ||
+    t === 't' ||
+    t === 'tar'
+  ) {
+    return {
+      turno: 'Turno 2 - Tarde (14h - 22h)',
+      horarioInicio: '14:00',
+      horarioFim: '22:00',
+    };
+  }
+
+  // Turno 1: Manhã (06h às 14h)
+  if (
+    t === '1' ||
+    t === 't1' ||
+    t === 't01' ||
+    t.includes('turno 1') ||
+    t.includes('turno1') ||
+    t.includes('turno um') ||
     t.includes('06-14') ||
     t.includes('06h') ||
     t.includes('06:00') ||
@@ -184,89 +223,14 @@ export const normalizarTurno = (
     t === 'm1'
   ) {
     return {
-      turno: 'Turno 2 (06h - 14h)',
+      turno: 'Turno 1 - Manhã (06h - 14h)',
       horarioInicio: '06:00',
       horarioFim: '14:00',
     };
   }
 
-  // Turno 3: 14h às 22h
-  if (
-    t === '3' ||
-    t === 't3' ||
-    t === 't03' ||
-    t.includes('turno 3') ||
-    t.includes('turno3') ||
-    t.includes('14-22') ||
-    t.includes('14h') ||
-    t.includes('14:00') ||
-    t.includes('tarde') ||
-    t === 't' ||
-    t === 'tar' ||
-    t === 't1'
-  ) {
-    return {
-      turno: 'Turno 3 (14h - 22h)',
-      horarioInicio: '14:00',
-      horarioFim: '22:00',
-    };
-  }
-
-  // Turno 4: 22h às 06h
-  if (
-    t === '4' ||
-    t === 't4' ||
-    t === 't04' ||
-    t.includes('turno 4') ||
-    t.includes('turno4') ||
-    t.includes('22-06') ||
-    t.includes('22h') ||
-    t.includes('22:00') ||
-    t.includes('noite') ||
-    t.includes('noturno') ||
-    t === 'n' ||
-    t === 'not'
-  ) {
-    return {
-      turno: 'Turno 4 (22h - 06h)',
-      horarioInicio: '22:00',
-      horarioFim: '06:00',
-    };
-  }
-
-  if (t.includes('10h') || t.includes('10-18') || t.includes('intermed') || t.includes('int')) {
-    return {
-      turno: 'Intermediário (10h - 18h)',
-      horarioInicio: '10:00',
-      horarioFim: '18:00',
-    };
-  }
-
-  if (t.includes('12x36')) {
-    if (t.includes('noturn') || t.includes('noite') || t.includes('19-07')) {
-      return {
-        turno: '12x36 Noturno (19h - 07h)',
-        horarioInicio: '19:00',
-        horarioFim: '07:00',
-      };
-    }
-    return {
-      turno: '12x36 (07h - 19h)',
-      horarioInicio: '07:00',
-      horarioFim: '19:00',
-    };
-  }
-
-  if (t.includes('adm') || t.includes('08-17') || t.includes('comercial')) {
-    return {
-      turno: 'Administrativo (08h - 17h)',
-      horarioInicio: '08:00',
-      horarioFim: '17:00',
-    };
-  }
-
   return {
-    turno: rawTurno || 'Turno 2 (06h - 14h)',
+    turno: 'Turno 1 - Manhã (06h - 14h)',
     horarioInicio: rawInicio || '06:00',
     horarioFim: rawFim || '14:00',
   };
@@ -525,7 +489,7 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
 
     ctx.fillStyle = '#475569';
     ctx.font = '13px system-ui, -apple-system, sans-serif';
-    ctx.fillText(`MÊS DE REFERÊNCIA: ${mesAnoReferencia} • REGIME DE TURNOS OPERACIONAIS (T2, T3, T4)`, 36, 78);
+    ctx.fillText(`MÊS DE REFERÊNCIA: ${mesAnoReferencia} • REGIME DE TURNOS OPERACIONAIS (T1 MANHÃ, T2 TARDE E HORISTA)`, 36, 78);
 
     ctx.strokeStyle = '#94a3b8';
     ctx.lineWidth = 1;
@@ -571,32 +535,32 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
       {
         nome: funcionarios[0]?.nome || 'Carlos Eduardo Silva',
         cargo: 'Frentista',
-        turno: 'Turno 2 (06h-14h)',
-        dias: ['T2', 'T2', 'T2', 'T2', 'T2', 'T2', 'FOLGA', 'T2', 'T2', 'T2', 'T2', 'T2', 'T2', 'FOLGA'],
+        turno: 'Turno 1 - Manhã',
+        dias: ['T1', 'T1', 'T1', 'T1', 'T1', 'T1', 'FOLGA', 'T1', 'T1', 'T1', 'T1', 'T1', 'T1', 'FOLGA'],
       },
       {
         nome: funcionarios[1]?.nome || 'Juliana Mendes Santos',
         cargo: 'Caixa',
-        turno: 'Turno 3 (14h-22h)',
-        dias: ['T3', 'T3', 'FOLGA', 'T3', 'T3', 'T3', 'T3', 'T3', 'T3', 'FOLGA', 'T3', 'T3', 'T3', 'T3'],
+        turno: 'Turno 2 - Tarde',
+        dias: ['T2', 'T2', 'FOLGA', 'T2', 'T2', 'T2', 'T2', 'T2', 'T2', 'FOLGA', 'T2', 'T2', 'T2', 'T2'],
       },
       {
         nome: 'Lucas Andrade',
-        cargo: 'Frentista Noturno',
-        turno: 'Turno 4 (22h-06h)',
-        dias: ['T4', 'T4', 'T4', 'T4', 'FOLGA', 'T4', 'T4', 'T4', 'T4', 'T4', 'T4', 'FOLGA', 'T4', 'T4'],
+        cargo: 'Frentista Horista',
+        turno: 'Turno Horista',
+        dias: ['HOR', 'HOR', 'HOR', 'HOR', 'FOLGA', 'HOR', 'HOR', 'HOR', 'HOR', 'HOR', 'HOR', 'FOLGA', 'HOR', 'HOR'],
       },
       {
         nome: 'Marcos Vinicius',
         cargo: 'Frentista',
-        turno: 'Turno 2 (06h-14h)',
-        dias: ['FOLGA', 'T2', 'T2', 'T2', 'T2', 'T2', 'FOLGA', 'T2', 'T2', 'T2', 'T2', 'T2', 'FOLGA', 'T2'],
+        turno: 'Turno 1 - Manhã',
+        dias: ['FOLGA', 'T1', 'T1', 'T1', 'T1', 'T1', 'FOLGA', 'T1', 'T1', 'T1', 'T1', 'T1', 'FOLGA', 'T1'],
       },
       {
         nome: 'Aline Ferreira',
         cargo: 'Atendente Caixa',
-        turno: 'Turno 3 (14h-22h)',
-        dias: ['T3', 'FOLGA', 'T3', 'T3', 'T3', 'T3', 'FOLGA', 'T3', 'FOLGA', 'T3', 'T3', 'T3', 'T3', 'FOLGA'],
+        turno: 'Turno 2 - Tarde',
+        dias: ['T2', 'FOLGA', 'T2', 'T2', 'T2', 'T2', 'FOLGA', 'T2', 'FOLGA', 'T2', 'T2', 'T2', 'T2', 'FOLGA'],
       },
     ];
 
@@ -635,7 +599,7 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
     const footY = canvas.height - 40;
     ctx.fillStyle = '#64748b';
     ctx.font = 'italic 11px system-ui, sans-serif';
-    ctx.fillText('LEGENDA OPERACIONAL: T2 = 06h-14h • T3 = 14h-22h • T4 = 22h-06h • FOLGA = DSR Semanal (14 Dias Completos)', 36, footY);
+    ctx.fillText('LEGENDA OPERACIONAL: T1 = Manhã (06h-14h) • T2 = Tarde (14h-22h) • HOR = Turno Horista • FOLGA = DSR Semanal', 36, footY);
 
     const dataUrl = canvas.toDataURL('image/png');
     setNomeArquivo('escala-operacional-demo.png');
@@ -842,9 +806,9 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
       const turnoTrabalho = itensColab.find((i) => i.status === 'TRABALHO')?.turno;
       let turnoPadrao = turnoTrabalho || c.sugestaoCadastroPrevio?.turnoPreferencial;
       if (!turnoPadrao) {
-        if (cIdx % 3 === 0) turnoPadrao = 'Turno 2 (06h - 14h)';
-        else if (cIdx % 3 === 1) turnoPadrao = 'Turno 3 (14h - 22h)';
-        else turnoPadrao = 'Turno 4 (22h - 06h)';
+        if (cIdx % 3 === 0) turnoPadrao = 'Turno 1 - Manhã (06h - 14h)';
+        else if (cIdx % 3 === 1) turnoPadrao = 'Turno 2 - Tarde (14h - 22h)';
+        else turnoPadrao = 'Turno Horista';
       }
 
       const turnoNorm = normalizarTurno(turnoPadrao);
@@ -902,7 +866,7 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
       motivoCorrespondencia: 'Colaborador ativo do posto',
     }));
 
-    const novosNomes = ['Lucas Andrade (Frentista Noturno)', 'Marcos Vinicius (Caixa Manhã)'];
+    const novosNomes = ['Lucas Andrade (Frentista Horista)', 'Marcos Vinicius (Caixa Manhã)'];
     const naoCadastrados = novosNomes.map((n) => ({
       nomeOriginal: n,
       jaCadastrado: false,
@@ -912,7 +876,7 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
         nome: n.split(' (')[0],
         cargo: n.includes('Caixa') ? 'Operador de Caixa' : 'Frentista',
         funcao: 'Atendimento de Pista',
-        turnoPreferencial: n.includes('Noturno') ? 'Turno 4 (22h - 06h)' : 'Turno 2 (06h - 14h)',
+        turnoPreferencial: n.includes('Horista') ? 'Turno Horista' : 'Turno 1 - Manhã (06h - 14h)',
         cpf: `123.${Math.floor(100 + Math.random() * 900)}.${Math.floor(100 + Math.random() * 900)}-10`,
       },
     }));
@@ -927,18 +891,18 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
         const dataStr = `${ano}-${mes}-${diaStr}`;
         const ehFolga = (dia + cIdx * 2) % 7 === 0;
 
-        let turnoSelecionado = 'Turno 2 (06h - 14h)';
+        let turnoSelecionado = 'Turno 1 - Manhã (06h - 14h)';
         let hInicio = '06:00';
         let hFim = '14:00';
 
         if (cIdx % 3 === 1) {
-          turnoSelecionado = 'Turno 3 (14h - 22h)';
+          turnoSelecionado = 'Turno 2 - Tarde (14h - 22h)';
           hInicio = '14:00';
           hFim = '22:00';
         } else if (cIdx % 3 === 2) {
-          turnoSelecionado = 'Turno 4 (22h - 06h)';
-          hInicio = '22:00';
-          hFim = '06:00';
+          turnoSelecionado = 'Turno Horista';
+          hInicio = '08:00';
+          hFim = '14:00';
         }
 
         const dt = new Date(`${dataStr}T12:00:00`);
@@ -985,7 +949,7 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
       telefone: '(11) 98765-4321',
       cargo: colab.sugestaoCadastroPrevio.cargo,
       funcao: colab.sugestaoCadastroPrevio.funcao || 'Operacional de Pista',
-      turnoPreferencial: colab.sugestaoCadastroPrevio.turnoPreferencial || 'Turno 2 (06h - 14h)',
+      turnoPreferencial: colab.sugestaoCadastroPrevio.turnoPreferencial || 'Turno 1 - Manhã (06h - 14h)',
       dataAdmissao: new Date().toISOString().slice(0, 10),
       status: 'ATIVO',
       observacoes: 'Cadastrado previamente via Reconhecimento de Imagem de Escala',
@@ -1056,7 +1020,7 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
           return {
             ...i,
             status: 'TRABALHO',
-            turno: 'Turno 2 (06h - 14h)',
+            turno: 'Turno 1 - Manhã (06h - 14h)',
             horarioInicio: '06:00',
             horarioFim: '14:00',
           };
@@ -1089,9 +1053,9 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
     setItensEscala((prev) => {
       const idx = prev.findIndex((i) => i.funcionarioNome === nome && i.data === dataIso);
       const opcoes: Array<{ turno: string; inicio: string; fim: string; status: EscalaStatus }> = [
-        { turno: 'Turno 2 (06h - 14h)', inicio: '06:00', fim: '14:00', status: 'TRABALHO' },
-        { turno: 'Turno 3 (14h - 22h)', inicio: '14:00', fim: '22:00', status: 'TRABALHO' },
-        { turno: 'Turno 4 (22h - 06h)', inicio: '22:00', fim: '06:00', status: 'TRABALHO' },
+        { turno: 'Turno 1 - Manhã (06h - 14h)', inicio: '06:00', fim: '14:00', status: 'TRABALHO' },
+        { turno: 'Turno 2 - Tarde (14h - 22h)', inicio: '14:00', fim: '22:00', status: 'TRABALHO' },
+        { turno: 'Turno Horista', inicio: '08:00', fim: '14:00', status: 'TRABALHO' },
         { turno: 'Folga', inicio: '00:00', fim: '00:00', status: 'FOLGA' },
       ];
 
@@ -1099,15 +1063,13 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
         const itemAtual = prev[idx];
         let proxIdx = 0;
         if (itemAtual.status === 'FOLGA' || itemAtual.turno === 'Folga') {
-          proxIdx = 0; // Vai para Turno 2
-        } else if (itemAtual.turno.includes('Turno 2') || itemAtual.turno.includes('06h')) {
-          proxIdx = 1; // Vai para Turno 3
-        } else if (itemAtual.turno.includes('Turno 3') || itemAtual.turno.includes('14h')) {
-          proxIdx = 2; // Vai para Turno 4
-        } else if (itemAtual.turno.includes('Turno 4') || itemAtual.turno.includes('22h')) {
-          proxIdx = 3; // Vai para Folga
+          proxIdx = 0; // Vai para Turno 1 (Manhã)
+        } else if (itemAtual.turno.includes('Turno 1') || itemAtual.turno.includes('Manhã') || itemAtual.turno.includes('06h')) {
+          proxIdx = 1; // Vai para Turno 2 (Tarde)
+        } else if (itemAtual.turno.includes('Turno 2') || itemAtual.turno.includes('Tarde') || itemAtual.turno.includes('14h')) {
+          proxIdx = 2; // Vai para Turno Horista
         } else {
-          proxIdx = 3; // Folga
+          proxIdx = 3; // Vai para Folga
         }
 
         const prox = opcoes[proxIdx];
@@ -1130,7 +1092,7 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
             funcionarioId: funcMatch?.id || '',
             data: dataIso,
             diaSemana: '',
-            turno: 'Turno 2 (06h - 14h)',
+            turno: 'Turno 1 - Manhã (06h - 14h)',
             horarioInicio: '06:00',
             horarioFim: '14:00',
             status: 'TRABALHO',
@@ -1173,7 +1135,7 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
             fId = `func-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
             const nomeFinal = colab.sugestaoCadastroPrevio?.nome || colab.nomeOriginal;
             const cargoFinal = colab.sugestaoCadastroPrevio?.cargo || 'Frentista';
-            const turnoFinal = colab.sugestaoCadastroPrevio?.turnoPreferencial || 'Turno 2 (06h - 14h)';
+            const turnoFinal = colab.sugestaoCadastroPrevio?.turnoPreferencial || 'Turno 1 - Manhã (06h - 14h)';
 
             const novoFunc: Funcionario = {
               id: fId,
@@ -1319,14 +1281,14 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
     const totalItens = itensEscala.length;
     const totalTrabalho = itensEscala.filter((i) => i.status === 'TRABALHO').length;
     const totalFolga = itensEscala.filter((i) => i.status === 'FOLGA').length;
+    const totalT1 = itensEscala.filter(
+      (i) => i.status === 'TRABALHO' && (i.turno.includes('Turno 1') || i.turno.includes('Manhã') || i.turno.includes('06h'))
+    ).length;
     const totalT2 = itensEscala.filter(
-      (i) => i.status === 'TRABALHO' && (i.turno.includes('Turno 2') || i.turno.includes('06h'))
+      (i) => i.status === 'TRABALHO' && (i.turno.includes('Turno 2') || i.turno.includes('Tarde') || i.turno.includes('14h'))
     ).length;
-    const totalT3 = itensEscala.filter(
-      (i) => i.status === 'TRABALHO' && (i.turno.includes('Turno 3') || i.turno.includes('14h'))
-    ).length;
-    const totalT4 = itensEscala.filter(
-      (i) => i.status === 'TRABALHO' && (i.turno.includes('Turno 4') || i.turno.includes('22h'))
+    const totalHorista = itensEscala.filter(
+      (i) => i.status === 'TRABALHO' && i.turno.includes('Horista')
     ).length;
 
     // Extrair lista ordenada de dias únicos da escala
@@ -1362,9 +1324,9 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
       totalItens,
       totalTrabalho,
       totalFolga,
+      totalT1,
       totalT2,
-      totalT3,
-      totalT4,
+      totalHorista,
       totalDias: diasUnicos.length,
       diasUnicos,
       listaColabs,
@@ -1775,16 +1737,16 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
             </div>
             <div className="grid grid-cols-1 gap-1 text-[11px] text-slate-600">
               <div className="flex items-center justify-between p-1.5 bg-amber-50/70 rounded border border-amber-100">
-                <span className="font-bold text-amber-900">Turno 2 (Manhã):</span>
-                <span className="font-mono font-semibold">06:00 às 14:00 (T2, 2, M)</span>
+                <span className="font-bold text-amber-900">Turno 1 (Manhã):</span>
+                <span className="font-mono font-semibold">06:00 às 14:00 (T1, 1, M)</span>
               </div>
               <div className="flex items-center justify-between p-1.5 bg-blue-50/70 rounded border border-blue-100">
-                <span className="font-bold text-blue-900">Turno 3 (Tarde):</span>
-                <span className="font-mono font-semibold">14:00 às 22:00 (T3, 3, T)</span>
+                <span className="font-bold text-blue-900">Turno 2 (Tarde):</span>
+                <span className="font-mono font-semibold">14:00 às 22:00 (T2, 2, T)</span>
               </div>
-              <div className="flex items-center justify-between p-1.5 bg-indigo-50/70 rounded border border-indigo-100">
-                <span className="font-bold text-indigo-900">Turno 4 (Noturno):</span>
-                <span className="font-mono font-semibold">22:00 às 06:00 (T4, 4, N)</span>
+              <div className="flex items-center justify-between p-1.5 bg-teal-50/70 rounded border border-teal-100">
+                <span className="font-bold text-teal-900">Turno Horista:</span>
+                <span className="font-mono font-semibold">Flexível / Por Hora (HOR, H)</span>
               </div>
               <div className="flex items-center justify-between p-1.5 bg-slate-100 rounded border border-slate-200">
                 <span className="font-bold text-slate-800">Folga / DSR:</span>
@@ -1932,7 +1894,7 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
                   <p className="text-xs text-slate-500 mt-0.5 font-medium">{tituloDocumento}</p>
                 ) : (
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Mapeamento dia a dia de turnos operacionais (T2, T3, T4) e folgas por colaborador
+                    Mapeamento dia a dia de turnos operacionais (Turno 1 Manhã, Turno 2 Tarde e Horista) e folgas por colaborador
                   </p>
                 )}
               </div>
@@ -2009,9 +1971,9 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
                       {metricasEscala.totalTrabalho}
                     </div>
                     <div className="flex items-center gap-1.5 mt-1 text-[10px] text-slate-600 font-medium">
-                      <span className="px-1.5 py-0.2 bg-amber-100 text-amber-900 rounded font-bold">T2: {metricasEscala.totalT2}</span>
-                      <span className="px-1.5 py-0.2 bg-blue-100 text-blue-900 rounded font-bold">T3: {metricasEscala.totalT3}</span>
-                      <span className="px-1.5 py-0.2 bg-purple-100 text-purple-900 rounded font-bold">T4: {metricasEscala.totalT4}</span>
+                      <span className="px-1.5 py-0.2 bg-amber-100 text-amber-900 rounded font-bold">T1: {metricasEscala.totalT1}</span>
+                      <span className="px-1.5 py-0.2 bg-blue-100 text-blue-900 rounded font-bold">T2: {metricasEscala.totalT2}</span>
+                      <span className="px-1.5 py-0.2 bg-teal-100 text-teal-900 rounded font-bold">HOR: {metricasEscala.totalHorista}</span>
                     </div>
                   </div>
 
@@ -2233,10 +2195,9 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
                                 }
 
                                 const isFolga = item.status === 'FOLGA' || item.turno === 'Folga';
-                                const isT2 = item.status === 'TRABALHO' && (item.turno.includes('Turno 2') || item.turno.includes('06h'));
-                                const isT3 = item.status === 'TRABALHO' && (item.turno.includes('Turno 3') || item.turno.includes('14h'));
-                                const isT4 = item.status === 'TRABALHO' && (item.turno.includes('Turno 4') || item.turno.includes('22h'));
-                                const isInt = item.status === 'TRABALHO' && (item.turno.includes('Intermediário') || item.turno.includes('10h'));
+                                const isHorista = item.status === 'TRABALHO' && item.turno.includes('Horista');
+                                const isT2 = item.status === 'TRABALHO' && (item.turno.includes('Turno 2') || item.turno.includes('Tarde') || item.turno.includes('14h'));
+                                const isT1 = item.status === 'TRABALHO' && !isHorista && !isT2;
 
                                 return (
                                   <td key={diaIso} className="p-1 text-center border-r border-slate-100">
@@ -2249,41 +2210,32 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
                                       >
                                         FOLGA
                                       </button>
+                                    ) : isHorista ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleAlternarTurnoCelulaMatriz(colab.nome, diaIso)}
+                                        title="Turno Horista — Clique para alternar"
+                                        className="w-full h-8 px-1 bg-teal-100 hover:bg-teal-200 border border-teal-300 text-teal-900 font-extrabold text-[10px] rounded transition flex items-center justify-center shadow-2xs cursor-pointer"
+                                      >
+                                        HOR
+                                      </button>
                                     ) : isT2 ? (
                                       <button
                                         type="button"
                                         onClick={() => handleAlternarTurnoCelulaMatriz(colab.nome, diaIso)}
-                                        title="Turno 2 (06h - 14h) — Clique para alternar"
-                                        className="w-full h-8 px-1 bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-900 font-extrabold text-[11px] rounded transition flex items-center justify-center shadow-2xs cursor-pointer"
+                                        title="Turno 2 - Tarde (14h - 22h) — Clique para alternar"
+                                        className="w-full h-8 px-1 bg-blue-100 hover:bg-blue-200 border border-blue-300 text-blue-900 font-extrabold text-[11px] rounded transition flex items-center justify-center shadow-2xs cursor-pointer"
                                       >
                                         T2
                                       </button>
-                                    ) : isT3 ? (
+                                    ) : isT1 ? (
                                       <button
                                         type="button"
                                         onClick={() => handleAlternarTurnoCelulaMatriz(colab.nome, diaIso)}
-                                        title="Turno 3 (14h - 22h) — Clique para alternar"
-                                        className="w-full h-8 px-1 bg-blue-100 hover:bg-blue-200 border border-blue-300 text-blue-900 font-extrabold text-[11px] rounded transition flex items-center justify-center shadow-2xs cursor-pointer"
+                                        title="Turno 1 - Manhã (06h - 14h) — Clique para alternar"
+                                        className="w-full h-8 px-1 bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-900 font-extrabold text-[11px] rounded transition flex items-center justify-center shadow-2xs cursor-pointer"
                                       >
-                                        T3
-                                      </button>
-                                    ) : isT4 ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleAlternarTurnoCelulaMatriz(colab.nome, diaIso)}
-                                        title="Turno 4 (22h - 06h) — Clique para alternar"
-                                        className="w-full h-8 px-1 bg-purple-100 hover:bg-purple-200 border border-purple-300 text-purple-900 font-extrabold text-[11px] rounded transition flex items-center justify-center shadow-2xs cursor-pointer"
-                                      >
-                                        T4
-                                      </button>
-                                    ) : isInt ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleAlternarTurnoCelulaMatriz(colab.nome, diaIso)}
-                                        title="Intermediário (10h - 18h) — Clique para alternar"
-                                        className="w-full h-8 px-1 bg-teal-100 hover:bg-teal-200 border border-teal-300 text-teal-900 font-extrabold text-[10px] rounded transition flex items-center justify-center shadow-2xs cursor-pointer"
-                                      >
-                                        INT
+                                        T1
                                       </button>
                                     ) : (
                                       <button
@@ -2309,16 +2261,13 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-slate-500 font-semibold text-[11px]">Legenda de Turnos:</span>
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-100 border border-amber-300 text-amber-900 rounded text-[10px] font-bold">
-                          T2: 06h às 14h
+                          T1: Manhã (06h às 14h)
                         </span>
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-100 border border-blue-300 text-blue-900 rounded text-[10px] font-bold">
-                          T3: 14h às 22h
-                        </span>
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-100 border border-purple-300 text-purple-900 rounded text-[10px] font-bold">
-                          T4: 22h às 06h
+                          T2: Tarde (14h às 22h)
                         </span>
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-teal-100 border border-teal-300 text-teal-900 rounded text-[10px] font-bold">
-                          INT: 10h às 18h
+                          HOR: Turno Horista
                         </span>
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 border border-slate-300 text-slate-700 rounded text-[10px] font-bold">
                           FOLGA: Descanso
@@ -2326,7 +2275,7 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
                       </div>
 
                       <div className="text-[11px] text-slate-400 italic">
-                        💡 Dica: Clique sobre qualquer célula para alternar instantaneamente entre T2 ➔ T3 ➔ T4 ➔ Folga.
+                        💡 Dica: Clique sobre qualquer célula para alternar instantaneamente entre T1 ➔ T2 ➔ Horista ➔ Folga.
                       </div>
                     </div>
                   </div>
@@ -2372,13 +2321,9 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
                                   onChange={(e) => handleAlterarTurnoItem(item.tempId, e.target.value)}
                                   className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-[11px] font-medium text-slate-800 focus:ring-1 focus:ring-purple-500 focus:outline-none"
                                 >
-                                  <option value="Turno 2 (06h - 14h)">Turno 2 (06h - 14h)</option>
-                                  <option value="Turno 3 (14h - 22h)">Turno 3 (14h - 22h)</option>
-                                  <option value="Turno 4 (22h - 06h)">Turno 4 (22h - 06h)</option>
-                                  <option value="Intermediário (10h - 18h)">Intermediário (10h - 18h)</option>
-                                  <option value="12x36 (07h - 19h)">12x36 (07h - 19h)</option>
-                                  <option value="12x36 Noturno (19h - 07h)">12x36 Noturno (19h - 07h)</option>
-                                  <option value="Administrativo (08h - 17h)">Administrativo (08h - 17h)</option>
+                                  <option value="Turno 1 - Manhã (06h - 14h)">Turno 1 — Manhã (06h - 14h)</option>
+                                  <option value="Turno 2 - Tarde (14h - 22h)">Turno 2 — Tarde (14h - 22h)</option>
+                                  <option value="Turno Horista">Turno Horista (Flexível / Por Hora)</option>
                                   <option value="Folga">Folga</option>
                                 </select>
                                 <div className="text-[10px] text-slate-400 font-mono mt-0.5">

@@ -27,11 +27,20 @@ export const FuncionariosView: React.FC<FuncionariosViewProps> = ({ funcionarios
   const [cargo, setCargo] = useState('Frentista');
   const [funcao, setFuncao] = useState('Abastecimento de Pista');
   const [status, setStatus] = useState<FuncionarioStatus>('ATIVO');
-  const [turnoPreferencial, setTurnoPreferencial] = useState('Turno 2 (06h - 14h)');
+  const [turnoPreferencial, setTurnoPreferencial] = useState('Turno 1 - Manhã (06h - 14h)');
   const [observacoes, setObservacoes] = useState('');
   const [erroMsg, setErroMsg] = useState('');
 
   const podeGerenciar = userProfile?.role === 'MASTER' || userProfile?.role === 'GERENTE' || userProfile?.role === 'SUPERVISOR';
+
+  const normalizarTurnoFuncionario = (t?: string) => {
+    const val = (t || '').toLowerCase();
+    if (val.includes('horista') || val === 'hor') return 'Turno Horista';
+    if (val.includes('tarde') || val.includes('14h') || val.includes('turno 2 - tarde') || val === 'turno 2') {
+      return 'Turno 2 - Tarde (14h - 22h)';
+    }
+    return 'Turno 1 - Manhã (06h - 14h)';
+  };
 
   const abrirNovo = () => {
     setEditingFuncionario(null);
@@ -42,7 +51,7 @@ export const FuncionariosView: React.FC<FuncionariosViewProps> = ({ funcionarios
     setCargo('Frentista');
     setFuncao('Abastecimento');
     setStatus('ATIVO');
-    setTurnoPreferencial('Turno 2 (06h - 14h)');
+    setTurnoPreferencial('Turno 1 - Manhã (06h - 14h)');
     setObservacoes('');
     setErroMsg('');
     setIsModalOpen(true);
@@ -57,7 +66,7 @@ export const FuncionariosView: React.FC<FuncionariosViewProps> = ({ funcionarios
     setCargo(f.cargo);
     setFuncao(f.funcao);
     setStatus(f.status);
-    setTurnoPreferencial(f.turnoPreferencial);
+    setTurnoPreferencial(normalizarTurnoFuncionario(f.turnoPreferencial));
     setObservacoes(f.observacoes || '');
     setErroMsg('');
     setIsModalOpen(true);
@@ -228,7 +237,19 @@ export const FuncionariosView: React.FC<FuncionariosViewProps> = ({ funcionarios
                       <span className="font-medium text-slate-800">{f.cargo}</span>
                       <div className="text-xs text-slate-400">{f.funcao}</div>
                     </td>
-                    <td className="px-6 py-4 text-xs text-slate-600">{f.turnoPreferencial}</td>
+                    <td className="px-6 py-4 text-xs text-slate-600">
+                      <span
+                        className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold border ${
+                          normalizarTurnoFuncionario(f.turnoPreferencial).includes('Horista')
+                            ? 'bg-teal-50 text-teal-800 border-teal-200'
+                            : normalizarTurnoFuncionario(f.turnoPreferencial).includes('Turno 2')
+                            ? 'bg-blue-50 text-blue-800 border-blue-200'
+                            : 'bg-amber-50 text-amber-800 border-amber-200'
+                        }`}
+                      >
+                        {normalizarTurnoFuncionario(f.turnoPreferencial)}
+                      </span>
+                    </td>
                     <td className="px-6 py-4">
                       <span
                         className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
@@ -361,11 +382,9 @@ export const FuncionariosView: React.FC<FuncionariosViewProps> = ({ funcionarios
                   onChange={(e) => setTurnoPreferencial(e.target.value)}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
                 >
-                  <option value="Turno 2 (06h - 14h)">Turno 2 (06h às 14h)</option>
-                  <option value="Turno 3 (14h - 22h)">Turno 3 (14h às 22h)</option>
-                  <option value="Turno 4 (22h - 06h)">Turno 4 (22h às 06h)</option>
-                  <option value="Intermediário (10h - 18h)">Intermediário (10h às 18h)</option>
-                  <option value="Escala 12x36">Escala 12x36</option>
+                  <option value="Turno 1 - Manhã (06h - 14h)">Turno 1 — Manhã (06h às 14h)</option>
+                  <option value="Turno 2 - Tarde (14h - 22h)">Turno 2 — Tarde (14h às 22h)</option>
+                  <option value="Turno Horista">Turno Horista (Flexível / Por Hora)</option>
                 </select>
               </div>
 

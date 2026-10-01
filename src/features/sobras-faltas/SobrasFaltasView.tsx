@@ -43,28 +43,28 @@ const repoRateio = new PostoSubcollectionRepository<RateioTurno>('rateios');
 
 const TURNOS_OFICIAIS = [
   {
-    id: 'Turno 2 (06h - 14h)',
-    nome: 'Turno 2',
+    id: 'Turno 1 - Manhã (06h - 14h)',
+    nome: 'Turno 1',
     horario: '06:00 às 14:00',
     descricao: 'Manhã',
     badgeClass: 'bg-amber-100 text-amber-900 border-amber-300',
     iconColor: 'text-amber-600',
   },
   {
-    id: 'Turno 3 (14h - 22h)',
-    nome: 'Turno 3',
+    id: 'Turno 2 - Tarde (14h - 22h)',
+    nome: 'Turno 2',
     horario: '14:00 às 22:00',
     descricao: 'Tarde',
     badgeClass: 'bg-blue-100 text-blue-900 border-blue-300',
     iconColor: 'text-blue-600',
   },
   {
-    id: 'Turno 4 (22h - 06h)',
-    nome: 'Turno 4',
-    horario: '22:00 às 06:00',
-    descricao: 'Noite / Madrugada',
-    badgeClass: 'bg-purple-100 text-purple-900 border-purple-300',
-    iconColor: 'text-purple-600',
+    id: 'Turno Horista',
+    nome: 'Turno Horista',
+    horario: 'Flexível / Por Hora',
+    descricao: 'Horista',
+    badgeClass: 'bg-teal-100 text-teal-900 border-teal-300',
+    iconColor: 'text-teal-600',
   },
 ];
 
@@ -89,7 +89,7 @@ export const SobrasFaltasView: React.FC<SobrasFaltasViewProps> = ({
   // Filtros de visualização
   const hoje = new Date().toISOString().split('T')[0];
   const [dataSelecionada, setDataSelecionada] = useState(hoje);
-  const [turnoSelecionado, setTurnoSelecionado] = useState<string>('Turno 2 (06h - 14h)');
+  const [turnoSelecionado, setTurnoSelecionado] = useState<string>('Turno 1 - Manhã (06h - 14h)');
   const [visualizacao, setVisualizacao] = useState<'NOVO_RATEIO' | 'HISTORICO' | 'RECIBO_IMPRESSAO'>('NOVO_RATEIO');
   const [rateioParaImprimir, setRateioParaImprimir] = useState<RateioTurno | null>(null);
 
@@ -131,11 +131,21 @@ export const SobrasFaltasView: React.FC<SobrasFaltasViewProps> = ({
 
   // Sincroniza integrantes com a ESCALA do dia e turno selecionados
   useEffect(() => {
+    const isTurno1 = turnoSelecionado.includes('Turno 1') || turnoSelecionado.includes('Manhã');
+    const isTurno2 = turnoSelecionado.includes('Turno 2') || turnoSelecionado.includes('Tarde');
+    const isHorista = turnoSelecionado.includes('Horista');
+
+    const matchTurnoStr = (t?: string) => {
+      const val = (t || '').toLowerCase();
+      if (isHorista) return val.includes('horista') || val === 'hor';
+      if (isTurno2) return val.includes('tarde') || val.includes('14h') || val.includes('turno 2 - tarde') || val === 'turno 2';
+      if (isTurno1) return val.includes('manhã') || val.includes('manha') || val.includes('06h') || val.includes('turno 1');
+      return val === turnoSelecionado.toLowerCase();
+    };
+
     // 1. Procura escalas deste dia e turno
     const escalasTurno = escalas.filter(
-      (e) =>
-        e.data === dataSelecionada &&
-        (e.turno === turnoSelecionado || e.turno?.includes(turnoSelecionado.split(' ')[0]))
+      (e) => e.data === dataSelecionada && matchTurnoStr(e.turno)
     );
 
     if (escalasTurno.length > 0) {
@@ -172,9 +182,7 @@ export const SobrasFaltasView: React.FC<SobrasFaltasViewProps> = ({
 
     // 2. Tenta puxar a diferença do fechamento de caixa do turno caso exista
     const fechamento = fechamentos.find(
-      (f) =>
-        f.data === dataSelecionada &&
-        (f.turno === turnoSelecionado || f.turno?.includes(turnoSelecionado.split(' ')[0]))
+      (f) => f.data === dataSelecionada && matchTurnoStr(f.turno)
     );
     if (fechamento && fechamento.diferenca !== 0) {
       if (fechamento.diferenca < 0) {

@@ -389,86 +389,86 @@ export const PADROES_ANP_2026: Record<string, PadraoCombustivelANP> = {
   'Diesel S10': {
     produto: 'Diesel S10',
     normaANP: 'Res. ANP 968/2024',
-    densidade20CMin: 0.8200, // 820,0 a 850,0 kg/m³
-    densidade20CMax: 0.8500,
+    densidade20CMin: 0.8200, // 820,0 a 857,0 kg/m³ (Res. ANP 968/2024 c/ Biodiesel B14/B15)
+    densidade20CMax: 0.8570,
     coeficienteTermico: 0.00070,
     requisitosMistura: 'Biodiesel B15 (14%-15%)',
     enxofreMax: '10 mg/kg',
     statusRegulatorio: 'Conforme 2026',
-    aspectoEsperado: 'Límpido, translúcido e isento de impurezas',
-    corEsperada: 'Incolor a levemente amarelado',
+    aspectoEsperado: 'Límpido, translúcido e isento de impurezas e água livre',
+    corEsperada: 'Incolor a levemente amarelado (corante proibido)',
   },
   'Diesel S-10': {
     produto: 'Diesel S-10',
     normaANP: 'Res. ANP 968/2024',
-    densidade20CMin: 0.8200, // 820,0 a 850,0 kg/m³
-    densidade20CMax: 0.8500,
+    densidade20CMin: 0.8200, // 820,0 a 857,0 kg/m³
+    densidade20CMax: 0.8570,
     coeficienteTermico: 0.00070,
     requisitosMistura: 'Biodiesel B15 (14%-15%)',
     enxofreMax: '10 mg/kg',
     statusRegulatorio: 'Conforme 2026',
-    aspectoEsperado: 'Límpido, translúcido e isento de impurezas',
-    corEsperada: 'Incolor a levemente amarelado',
+    aspectoEsperado: 'Límpido, translúcido e isento de impurezas e água livre',
+    corEsperada: 'Incolor a levemente amarelado (corante proibido)',
   },
   'Óleo Diesel S10 Comum': {
     produto: 'Óleo Diesel S10 Comum',
     normaANP: 'Res. ANP 968/2024',
     densidade20CMin: 0.8200,
-    densidade20CMax: 0.8500,
+    densidade20CMax: 0.8570,
     coeficienteTermico: 0.00070,
     requisitosMistura: 'Biodiesel B15 (14%-15%)',
     enxofreMax: '10 mg/kg',
     statusRegulatorio: 'Conforme 2026',
-    aspectoEsperado: 'Límpido, translúcido e isento de impurezas',
-    corEsperada: 'Incolor a levemente amarelado',
+    aspectoEsperado: 'Límpido, translúcido e isento de impurezas e água livre',
+    corEsperada: 'Incolor a levemente amarelado (corante proibido)',
   },
   'Óleo Diesel S10 Aditivado': {
     produto: 'Óleo Diesel S10 Aditivado',
     normaANP: 'Res. ANP 968/2024',
     densidade20CMin: 0.8200,
-    densidade20CMax: 0.8500,
+    densidade20CMax: 0.8570,
     coeficienteTermico: 0.00070,
     requisitosMistura: 'Biodiesel B15 + Aditivo',
     enxofreMax: '10 mg/kg',
     statusRegulatorio: 'Conforme 2026',
-    aspectoEsperado: 'Límpido, translúcido e isento de impurezas',
-    corEsperada: 'Incolor a levemente amarelado',
+    aspectoEsperado: 'Límpido, translúcido e isento de impurezas e água livre',
+    corEsperada: 'Incolor a levemente amarelado (corante proibido)',
   },
   'Diesel S500': {
     produto: 'Diesel S500',
     normaANP: 'Res. ANP 968/2024',
-    densidade20CMin: 0.8200, // 820,0 a 865,0 kg/m³
-    densidade20CMax: 0.8650,
+    densidade20CMin: 0.8200, // 820,0 a 870,0 kg/m³ (Res. ANP 968/2024 c/ Biodiesel B14/B15)
+    densidade20CMax: 0.8700,
     coeficienteTermico: 0.00070,
     requisitosMistura: 'Biodiesel B15 (Agro/Frota)',
     enxofreMax: '500 mg/kg',
     statusRegulatorio: 'Conforme 2026',
-    aspectoEsperado: 'Límpido e isento de impurezas',
-    corEsperada: 'Avermelhada',
+    aspectoEsperado: 'Límpido e isento de impurezas e água livre',
+    corEsperada: 'Vermelha característica (corante obrigatório)',
   },
   'Diesel S-500': {
     produto: 'Diesel S-500',
     normaANP: 'Res. ANP 968/2024',
-    densidade20CMin: 0.8200, // 820,0 a 865,0 kg/m³
-    densidade20CMax: 0.8650,
+    densidade20CMin: 0.8200, // 820,0 a 870,0 kg/m³
+    densidade20CMax: 0.8700,
     coeficienteTermico: 0.00070,
     requisitosMistura: 'Biodiesel B15 (Agro/Frota)',
     enxofreMax: '500 mg/kg',
     statusRegulatorio: 'Conforme 2026',
-    aspectoEsperado: 'Límpido e isento de impurezas',
-    corEsperada: 'Avermelhada',
+    aspectoEsperado: 'Límpido e isento de impurezas e água livre',
+    corEsperada: 'Vermelha característica (corante obrigatório)',
   },
   'Óleo Diesel S500': {
     produto: 'Óleo Diesel S500',
     normaANP: 'Res. ANP 968/2024',
     densidade20CMin: 0.8200,
-    densidade20CMax: 0.8650,
+    densidade20CMax: 0.8700,
     coeficienteTermico: 0.00070,
     requisitosMistura: 'Biodiesel B15 (Agro/Frota)',
     enxofreMax: '500 mg/kg',
     statusRegulatorio: 'Conforme 2026',
-    aspectoEsperado: 'Límpido e isento de impurezas',
-    corEsperada: 'Avermelhada',
+    aspectoEsperado: 'Límpido e isento de impurezas e água livre',
+    corEsperada: 'Vermelha característica (corante obrigatório)',
   },
   'Querosene de Aviação (QAV-1)': {
     produto: 'Querosene de Aviação (QAV-1)',
@@ -510,6 +510,7 @@ export function obterPadraoANP(produto: string): PadraoCombustivelANP {
   if (p.includes('etanol') || p.includes('alcool')) return PADROES_ANP_2026['Etanol'];
   if (p.includes('diesels10') || p.includes('s10')) return PADROES_ANP_2026['Diesel S10'];
   if (p.includes('diesels500') || p.includes('s500')) return PADROES_ANP_2026['Diesel S500'];
+  if (p.includes('diesel')) return PADROES_ANP_2026['Diesel S10'];
   if (p.includes('premium')) return PADROES_ANP_2026['Gasolina Premium'];
   if (p.includes('aditivada')) return PADROES_ANP_2026['Gasolina Aditivada'];
   if (p.includes('gasolina')) return PADROES_ANP_2026['Gasolina Comum'];
@@ -547,19 +548,22 @@ export function calcularDetalhesDensidadeOperacional(
 ): DetalhesCalculoDensidade {
   const padrao = obterPadraoANP(produto);
   let coef = padrao.coeficienteTermico || 0.00076;
-  const prodUpper = produto.toUpperCase();
+  const prodUpper = (produto || '').toUpperCase();
   if (prodUpper.includes('ETANOL') || prodUpper.includes('ÁLCOOL')) {
     coef = 0.00084; // ABNT NBR 5992
-  } else if (prodUpper.includes('DIESEL')) {
-    coef = 0.00070; // ASTM D1250
+  } else if (prodUpper.includes('DIESEL') || prodUpper.includes('S10') || prodUpper.includes('S500') || prodUpper.includes('S-10') || prodUpper.includes('S-500')) {
+    coef = 0.00070; // ASTM D1250 / Res. ANP 894/2022
   } else if (prodUpper.includes('GASOLINA')) {
     coef = 0.00076; // ABNT NBR 5992 / ASTM D1250
   }
 
+  // Normalização automática caso o operador digite a densidade em kg/m³ (ex: 835 ou 835.0) em vez de g/cm³ (0.8350)
+  const densidadeEmGCm3 = densidadeObservada > 10 ? densidadeObservada / 1000 : densidadeObservada;
+
   const deltaT = Math.round((temperatura - 20) * 10) / 10;
-  // ABNT NBR 5992: D20 = Dt + coef * (T - 20)
+  // ABNT NBR 5992 / Res. ANP 894/2022: D20 = Dt + coef * (T - 20)
   const correcaoLinear = Math.round(coef * deltaT * 100000) / 100000;
-  const d20 = densidadeObservada ? Math.round((densidadeObservada + correcaoLinear) * 10000) / 10000 : 0;
+  const d20 = densidadeEmGCm3 ? Math.round((densidadeEmGCm3 + correcaoLinear) * 10000) / 10000 : 0;
   const dKgM3 = Math.round(d20 * 1000 * 10) / 10;
 
   const min = padrao.densidade20CMin;
@@ -567,15 +571,16 @@ export function calcularDetalhesDensidadeOperacional(
   const minKgM3 = Math.round(min * 1000 * 10) / 10;
   const maxKgM3 = Math.round(max * 1000 * 10) / 10;
 
-  const isConforme = d20 >= min && d20 <= max;
+  // Tolerância de 0.00005 para prevenir erros de precisão flutuante em JavaScript
+  const isConforme = d20 >= (min - 0.00005) && d20 <= (max + 0.00005);
   let desvio = 0;
   if (d20 < min) desvio = Math.round((min - d20) * 10000) / 10000;
   else if (d20 > max) desvio = Math.round((d20 - max) * 10000) / 10000;
 
   const sinalDelta = deltaT >= 0 ? `+${deltaT}` : `${deltaT}`;
-  const formulaExplicativa = `D20 = ${densidadeObservada.toFixed(4)} + (${coef} × (${sinalDelta})) = ${d20.toFixed(4)} g/cm³ (${dKgM3.toFixed(1)} kg/m³)`;
+  const formulaExplicativa = `D20 = ${densidadeEmGCm3.toFixed(4)} + (${coef} × (${sinalDelta})) = ${d20.toFixed(4)} g/cm³ (${dKgM3.toFixed(1)} kg/m³)`;
 
-  let parecerOperacional = `Dentro das especificações ANP (${minKgM3.toFixed(1)} - ${maxKgM3.toFixed(1)} kg/m³)`;
+  let parecerOperacional = `Dentro das especificações ANP (${minKgM3.toFixed(1)} - ${maxKgM3.toFixed(1)} kg/m³) - ${padrao.normaANP}`;
   if (!isConforme) {
     if (d20 < min) {
       parecerOperacional = `NÃO CONFORME: Densidade D20 de ${d20.toFixed(4)} g/cm³ (${dKgM3.toFixed(1)} kg/m³) abaixo da faixa regulamentar (${minKgM3.toFixed(1)} a ${maxKgM3.toFixed(1)} kg/m³).`;
@@ -585,7 +590,7 @@ export function calcularDetalhesDensidadeOperacional(
   }
 
   return {
-    densidadeObservada,
+    densidadeObservada: densidadeEmGCm3,
     temperaturaAmostra: temperatura,
     diferencaTemperatura20C: deltaT,
     coeficienteExpansaoTermica: coef,
@@ -613,18 +618,21 @@ export function calcularDensidade20C(
 ): number {
   if (!densidadeObservada || !temperatura) return 0;
 
+  // Normalização automática se em kg/m³
+  const densidadeEmGCm3 = densidadeObservada > 10 ? densidadeObservada / 1000 : densidadeObservada;
+
   let coef = 0.00076;
-  const prodUpper = produto.toUpperCase();
+  const prodUpper = (produto || '').toUpperCase();
   if (prodUpper.includes('ETANOL') || prodUpper.includes('ÁLCOOL')) {
     coef = 0.00084;
-  } else if (prodUpper.includes('DIESEL')) {
+  } else if (prodUpper.includes('DIESEL') || prodUpper.includes('S10') || prodUpper.includes('S500') || prodUpper.includes('S-10') || prodUpper.includes('S-500')) {
     coef = 0.00070;
   } else if (prodUpper.includes('GASOLINA')) {
     coef = 0.00076;
   }
 
   // D20 = Dt + coef * (T - 20)
-  const densidade20 = densidadeObservada + coef * (temperatura - 20);
+  const densidade20 = densidadeEmGCm3 + coef * (temperatura - 20);
   return Math.round(densidade20 * 10000) / 10000;
 }
 
@@ -962,20 +970,20 @@ export const COMBUSTIVEIS_PRINCIPAIS_SPECS: Record<
   'Diesel S10': {
     nome: 'Diesel S10 (Óleo Diesel S-10)',
     densidade20CMin: 820.0,
-    densidade20CMax: 850.0,
+    densidade20CMax: 857.0,
     aspecto: 'Límpido, translúcido e isento de impurezas e água livre',
-    cor: 'Incolor a levemente amarelado',
+    cor: 'Incolor a levemente amarelado (corante proibido)',
     coeficienteTermico: 0.00070,
-    descricao: 'Óleo Diesel S-10 com teor máximo de enxofre de 10 mg/kg e mistura obrigatória de Biodiesel',
+    descricao: 'Óleo Diesel S-10 com teor máximo de enxofre de 10 mg/kg e mistura de Biodiesel B14/B15 (Res. ANP 968/2024)',
   },
   'Diesel S500': {
     nome: 'Diesel S500 (Óleo Diesel S-500)',
     densidade20CMin: 820.0,
-    densidade20CMax: 865.0,
-    aspecto: 'Límpido e isento de impurezas e água',
+    densidade20CMax: 870.0,
+    aspecto: 'Límpido e isento de impurezas e água livre',
     cor: 'Vermelha característica (corante obrigatório)',
     coeficienteTermico: 0.00070,
-    descricao: 'Óleo Diesel S-500 com teor máximo de enxofre de 500 mg/kg para motores a diesel e maquinários',
+    descricao: 'Óleo Diesel S-500 com teor máximo de enxofre de 500 mg/kg e mistura de Biodiesel B14/B15 (Res. ANP 968/2024)',
   },
 };
 

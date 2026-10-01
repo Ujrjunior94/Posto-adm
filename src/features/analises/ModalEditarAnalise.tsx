@@ -116,10 +116,11 @@ export const ModalEditarAnalise: React.FC<ModalEditarAnaliseProps> = ({
         ? `APROVADO - Dentro das especificações ANP (${detalhesDensidade.faixaMinimaKgM3.toFixed(1)} - ${detalhesDensidade.faixaMaximaKgM3.toFixed(1)} kg/m³). D20: ${detalhesDensidade.densidadeKgM3.toFixed(1)} kg/m³ | Grau alcoólico: ${resultadoEtanol.grauINPM}% m/m.`
         : `NÃO CONFORME: Densidade D20 (${detalhesDensidade.densidadeKgM3.toFixed(1)} kg/m³) fora dos limites ANP (${detalhesDensidade.faixaMinimaKgM3.toFixed(1)} a ${detalhesDensidade.faixaMaximaKgM3.toFixed(1)} kg/m³).`;
     } else {
+      const isDiesel = produto.toLowerCase().includes('diesel');
       statusFinal = isDensidadeConforme ? 'CONFORME' : 'NAO_CONFORME';
       parecerTecnico = isDensidadeConforme
-        ? `Densidade D20 (${densidadeCalculada20.toFixed(4)} g/cm³ | ${detalhesDensidade.densidadeKgM3.toFixed(1)} kg/m³) dentro do padrão regulamentar ANP (${padraoAtual.densidade20CMin.toFixed(4)} a ${padraoAtual.densidade20CMax.toFixed(4)} g/cm³).`
-        : `NÃO CONFORME: Densidade D20 (${densidadeCalculada20.toFixed(4)} g/cm³ | ${detalhesDensidade.densidadeKgM3.toFixed(1)} kg/m³) fora dos limites ANP (${padraoAtual.densidade20CMin.toFixed(4)} a ${padraoAtual.densidade20CMax.toFixed(4)} g/cm³).`;
+        ? `${isDiesel ? 'ÓLEO DIESEL CONFORME (' + padraoAtual.normaANP + ')' : 'CONFORME (ANP)'}: Densidade D20 (${densidadeCalculada20.toFixed(4)} g/cm³ | ${detalhesDensidade.densidadeKgM3.toFixed(1)} kg/m³) dentro do padrão regulamentar (${(padraoAtual.densidade20CMin * 1000).toFixed(1)} a ${(padraoAtual.densidade20CMax * 1000).toFixed(1)} kg/m³).`
+        : `NÃO CONFORME: Densidade D20 (${densidadeCalculada20.toFixed(4)} g/cm³ | ${detalhesDensidade.densidadeKgM3.toFixed(1)} kg/m³) fora dos limites da ${padraoAtual.normaANP} (${(padraoAtual.densidade20CMin * 1000).toFixed(1)} a ${(padraoAtual.densidade20CMax * 1000).toFixed(1)} kg/m³).`;
     }
   } else if (tipoTeste === 'TESTE_PROVETA_GASOLINA') {
     statusFinal = resultadoProveta.isConforme ? 'CONFORME' : 'NAO_CONFORME';

@@ -121,8 +121,8 @@ export const ModalTabelaOficialANP: React.FC<ModalTabelaOficialANPProps> = ({
     {
       nome: 'Óleo Diesel S10 Comum',
       norma: 'Res. ANP 968/2024',
-      faixaGCm3: '0,8200 - 0,8500',
-      faixaKgM3: '820,0 - 850,0',
+      faixaGCm3: '0,8200 - 0,8570',
+      faixaKgM3: '820,0 - 857,0',
       requisitos: 'Biodiesel B15 (14%-15%)',
       enxofre: '10 mg/kg',
       status: 'Conforme 2026',
@@ -130,8 +130,8 @@ export const ModalTabelaOficialANP: React.FC<ModalTabelaOficialANPProps> = ({
     {
       nome: 'Óleo Diesel S10 Aditivado',
       norma: 'Res. ANP 968/2024',
-      faixaGCm3: '0,8200 - 0,8500',
-      faixaKgM3: '820,0 - 850,0',
+      faixaGCm3: '0,8200 - 0,8570',
+      faixaKgM3: '820,0 - 857,0',
       requisitos: 'Biodiesel B15 + Aditivo',
       enxofre: '10 mg/kg',
       status: 'Conforme 2026',
@@ -139,8 +139,8 @@ export const ModalTabelaOficialANP: React.FC<ModalTabelaOficialANPProps> = ({
     {
       nome: 'Óleo Diesel S500',
       norma: 'Res. ANP 968/2024',
-      faixaGCm3: '0,8200 - 0,8650',
-      faixaKgM3: '820,0 - 865,0',
+      faixaGCm3: '0,8200 - 0,8700',
+      faixaKgM3: '820,0 - 870,0',
       requisitos: 'Biodiesel B15 (Agro/Frota)',
       enxofre: '500 mg/kg',
       status: 'Conforme 2026',

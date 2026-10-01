@@ -167,7 +167,7 @@ export const AnalisesConformidadeView: React.FC<AnalisesConformidadeProps> = ({
     },
     {
       id: 'diesel-s10-24',
-      titulo: 'Diesel S10',
+      titulo: 'Diesel S10 (B14/B15)',
       tag: '24,5°C • 0,8320 g/cm³',
       esperado: 'D20: 835,2 kg/m³ (Conforme S10)',
       conforme: true,
@@ -175,7 +175,19 @@ export const AnalisesConformidadeView: React.FC<AnalisesConformidadeProps> = ({
       prod: 'Diesel S10',
       temp: 24.5,
       dens: 0.8320,
-      detalhe: 'Res. ANP 968/2024: Massa específica a 20°C entre 820,0 e 850,0 kg/m³.'
+      detalhe: 'Res. ANP 968/2024: Massa específica a 20°C entre 820,0 e 857,0 kg/m³ com Biodiesel B14/B15.'
+    },
+    {
+      id: 'diesel-s10-b15-real',
+      titulo: 'Diesel S10 Lote Real (B15)',
+      tag: '20,0°C • 0,8520 g/cm³',
+      esperado: 'D20: 852,0 kg/m³ (Conforme B15)',
+      conforme: true,
+      tipo: 'DENSIDADE_D20' as TipoTesteANP,
+      prod: 'Diesel S10',
+      temp: 20.0,
+      dens: 0.8520,
+      detalhe: 'Res. ANP 968/2024: Amostra real de Diesel B S10 com Biodiesel B15, perfeitamente conforme na faixa 820,0 a 857,0 kg/m³.'
     },
     {
       id: 'diesel-s500-22',
@@ -187,7 +199,7 @@ export const AnalisesConformidadeView: React.FC<AnalisesConformidadeProps> = ({
       prod: 'Diesel S500',
       temp: 22.0,
       dens: 0.8436,
-      detalhe: 'Res. ANP 968/2024: Massa específica a 20°C entre 820,0 e 865,0 kg/m³.'
+      detalhe: 'Res. ANP 968/2024: Massa específica a 20°C entre 820,0 e 870,0 kg/m³ com Biodiesel B14/B15.'
     },
     {
       id: 'gasolina-adulterada-37pct',
@@ -260,10 +272,11 @@ export const AnalisesConformidadeView: React.FC<AnalisesConformidadeProps> = ({
         ? `APROVADO - Dentro das especificações ANP (${detalhesDensidade.faixaMinimaKgM3.toFixed(1)} - ${detalhesDensidade.faixaMaximaKgM3.toFixed(1)} kg/m³). D20 calculada: ${detalhesDensidade.densidadeKgM3.toFixed(1)} kg/m³ | Grau alcoólico: ${resultadoEtanol.grauINPM}% m/m (mín. 92,5% m/m).`
         : `NÃO CONFORME: Densidade D20 (${detalhesDensidade.densidadeKgM3.toFixed(1)} kg/m³) fora dos limites ANP (${detalhesDensidade.faixaMinimaKgM3.toFixed(1)} a ${detalhesDensidade.faixaMaximaKgM3.toFixed(1)} kg/m³). Teor em massa apurado: ${resultadoEtanol.grauINPM}% m/m.`;
     } else {
+      const isDiesel = produto.toLowerCase().includes('diesel');
       statusFinalTeste = isDensidadeConforme ? 'CONFORME' : 'NAO_CONFORME';
       parecerTecnicoFinal = isDensidadeConforme
-        ? `Densidade D20 (${densidadeCalculada20.toFixed(4)} g/cm³ | ${detalhesDensidade.densidadeKgM3.toFixed(1)} kg/m³) dentro do padrão regulamentar ANP 2026 (${padraoAtual.densidade20CMin.toFixed(4)} a ${padraoAtual.densidade20CMax.toFixed(4)} g/cm³). Fator α: ${detalhesDensidade.coeficienteExpansaoTermica}.`
-        : `NÃO CONFORME: Densidade D20 (${densidadeCalculada20.toFixed(4)} g/cm³ | ${detalhesDensidade.densidadeKgM3.toFixed(1)} kg/m³) fora dos limites ANP 2026 (${padraoAtual.densidade20CMin.toFixed(4)} a ${padraoAtual.densidade20CMax.toFixed(4)} g/cm³).`;
+        ? `${isDiesel ? 'ÓLEO DIESEL CONFORME (' + padraoAtual.normaANP + ')' : 'CONFORME (ANP)'}: Densidade D20 (${densidadeCalculada20.toFixed(4)} g/cm³ | ${detalhesDensidade.densidadeKgM3.toFixed(1)} kg/m³) dentro do padrão regulamentar (${(padraoAtual.densidade20CMin * 1000).toFixed(1)} a ${(padraoAtual.densidade20CMax * 1000).toFixed(1)} kg/m³). Fator de correção α: ${detalhesDensidade.coeficienteExpansaoTermica}.`
+        : `NÃO CONFORME: Densidade D20 (${densidadeCalculada20.toFixed(4)} g/cm³ | ${detalhesDensidade.densidadeKgM3.toFixed(1)} kg/m³) fora dos limites regulamentares da ${padraoAtual.normaANP} (${(padraoAtual.densidade20CMin * 1000).toFixed(1)} a ${(padraoAtual.densidade20CMax * 1000).toFixed(1)} kg/m³).`;
     }
   } else if (abaTeste === 'TESTE_PROVETA_GASOLINA') {
     statusFinalTeste = resultadoProveta.isConforme ? 'CONFORME' : 'NAO_CONFORME';
@@ -275,8 +288,8 @@ export const AnalisesConformidadeView: React.FC<AnalisesConformidadeProps> = ({
     const conformeDescarga = isDensidadeConforme && lacreConferido;
     statusFinalTeste = conformeDescarga ? 'CONFORME' : 'NAO_CONFORME';
     parecerTecnicoFinal = conformeDescarga
-      ? `Descarga liberada: Lacres conferidos, D20 ${densidadeCalculada20.toFixed(4)} g/cm³ em conformidade com a NF ${numeroNotaFiscal || 'S/N'}.`
-      : `Descarga REPROVADA / BLOQUEADA: Falha de lacre ou desvio de densidade na amostra-testemunha.`;
+      ? `Descarga liberada: Lacres conferidos, D20 ${densidadeCalculada20.toFixed(4)} g/cm³ (${detalhesDensidade.densidadeKgM3.toFixed(1)} kg/m³) em conformidade com o padrão ANP (${(padraoAtual.densidade20CMin * 1000).toFixed(1)} a ${(padraoAtual.densidade20CMax * 1000).toFixed(1)} kg/m³) e NF ${numeroNotaFiscal || 'S/N'}.`
+      : `Descarga REPROVADA / BLOQUEADA: ${!lacreConferido ? 'Lacres violados ou divergentes. ' : ''}${!isDensidadeConforme ? `Desvio de densidade: ${detalhesDensidade.densidadeKgM3.toFixed(1)} kg/m³ fora do padrão ANP (${(padraoAtual.densidade20CMin * 1000).toFixed(1)} a ${(padraoAtual.densidade20CMax * 1000).toFixed(1)} kg/m³).` : ''}`;
   }
 
   // Gravar registro técnico no Firestore / Repositório Local
@@ -1343,6 +1356,36 @@ export const AnalisesConformidadeView: React.FC<AnalisesConformidadeProps> = ({
                         Grau alcoólico dentro do especificado (mín. 92.5% m/m - Res. ANP 907/2022)
                       </div>
                     </div>
+                  ) : produto.toLowerCase().includes('diesel') ? (
+                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-1.5">
+                      <div className="flex items-center justify-between text-xs font-bold text-slate-600 uppercase tracking-wide">
+                        <span>CONFORMIDADE DO DIESEL (RES. ANP 968/2024)</span>
+                        <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                          {padraoAtual.requisitosMistura}
+                        </span>
+                      </div>
+                      <div className="flex items-baseline gap-2">
+                        <span
+                          className={`text-2xl font-black font-mono ${
+                            isDensidadeConforme ? 'text-emerald-700' : 'text-red-700'
+                          }`}
+                        >
+                          {detalhesDensidade.densidadeKgM3.toFixed(1)} kg/m³
+                        </span>
+                        <span
+                          className={`text-xs font-bold px-2 py-0.5 rounded-sm ${
+                            isDensidadeConforme
+                              ? 'text-emerald-800 bg-emerald-100'
+                              : 'text-red-800 bg-red-100'
+                          }`}
+                        >
+                          [{isDensidadeConforme ? 'D20 APROVADA' : 'FORA DOS LIMITES'}]
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        Faixa ANP: {(padraoAtual.densidade20CMin * 1000).toFixed(1)} a {(padraoAtual.densidade20CMax * 1000).toFixed(1)} kg/m³ | Enxofre: {padraoAtual.enxofreMax} | Cor: {padraoAtual.corEsperada}
+                      </div>
+                    </div>
                   ) : abaTeste === 'TESTE_PROVETA_GASOLINA' ? (
                     <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-1.5">
                       <div className="flex items-center justify-between text-xs font-bold text-slate-600 uppercase tracking-wide">
@@ -1405,6 +1448,27 @@ export const AnalisesConformidadeView: React.FC<AnalisesConformidadeProps> = ({
                           <div className="flex justify-between py-0.5 border-b border-slate-50">
                             <span>Grau alcoólico (INPM) máx.:</span>
                             <strong className="font-mono text-slate-800">93,8% m/m</strong>
+                          </div>
+                        </>
+                      )}
+
+                      {produto.toLowerCase().includes('diesel') && (
+                        <>
+                          <div className="flex justify-between py-0.5 border-b border-slate-50">
+                            <span>Teor de Biodiesel mandatório:</span>
+                            <strong className="font-mono text-slate-800">{padraoAtual.requisitosMistura}</strong>
+                          </div>
+                          <div className="flex justify-between py-0.5 border-b border-slate-50">
+                            <span>Teor máx. de enxofre:</span>
+                            <strong className="font-mono text-slate-800">{padraoAtual.enxofreMax}</strong>
+                          </div>
+                          <div className="flex justify-between py-0.5 border-b border-slate-50">
+                            <span>Cor regulamentar:</span>
+                            <strong className="text-slate-800">{padraoAtual.corEsperada}</strong>
+                          </div>
+                          <div className="flex justify-between py-0.5 border-b border-slate-50">
+                            <span>Aspecto exigido ANP:</span>
+                            <strong className="text-slate-800">{padraoAtual.aspectoEsperado}</strong>
                           </div>
                         </>
                       )}

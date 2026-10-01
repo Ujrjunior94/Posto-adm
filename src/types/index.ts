@@ -39,7 +39,7 @@ export interface Escala {
   funcionarioId: string;
   funcionarioNome?: string;
   data: string; // YYYY-MM-DD
-  turno: string; // 'Manhã', 'Tarde', 'Noite', '12x36', etc.
+  turno: string; // 'Turno 1 - Manhã (06h - 14h)', 'Turno 2 - Tarde (14h - 22h)', 'Turno Horista'
   horarioInicio: string;
   horarioFim: string;
   status: EscalaStatus;

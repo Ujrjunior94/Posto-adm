@@ -26,11 +26,13 @@ import {
   Check,
   TrendingDown,
   RotateCcw,
+  Fuel,
 } from 'lucide-react';
 import { ModalEditarAfericao } from './ModalEditarAfericao';
 import { ModalConfigurarPrecoBico } from './ModalConfigurarPrecoBico';
 import { ModalAlternarPrecosLote } from './ModalAlternarPrecosLote';
 import { DesvioAfericaoGauge } from './DesvioAfericaoGauge';
+import { DiagramaBombaCombustivel } from './DiagramaBombaCombustivel';
 
 const repoBicos = new PostoSubcollectionRepository<Bico>('bicos');
 const repoAfericoes = new PostoSubcollectionRepository<Afericao>('afericoes');
@@ -52,8 +54,8 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
 }) => {
   const { postoId, userProfile } = useAuth();
 
-  // Controle de Abas
-  const [abaAtiva, setAbaAtiva] = useState<'PRECOS' | 'AFERICOES'>('PRECOS');
+  // Controle de Abas (Inicia no Mapa Visual de Bombas & Diagnóstico 20L)
+  const [abaAtiva, setAbaAtiva] = useState<'PRECOS' | 'AFERICOES'>('AFERICOES');
 
   // Modais de Preços e Descontos
   const [bicoParaPreco, setBicoParaPreco] = useState<Bico | null>(null);
@@ -479,21 +481,111 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
     }
   };
 
+  // Gerar Pista Padrão com 2 Bombas (Lado A e Lado B) e Aferições de Diagnóstico
+  const handleGerarPistaPadrao = async () => {
+    setProcessandoAcao(true);
+    try {
+      const hoje = new Date().toISOString().slice(0, 10);
+      const ontem = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+      const padraoBicos: Array<{
+        num: number;
+        bomba: string;
+        lado: 'A' | 'B';
+        prod: string;
+        preco: number;
+        leituras: number[];
+      }> = [
+        { num: 1, bomba: 'Bomba 01 (Ilha Principal)', lado: 'A', prod: 'Gasolina Comum', preco: 5.89, leituras: [20.015, 20.010] },
+        { num: 2, bomba: 'Bomba 01 (Ilha Principal)', lado: 'A', prod: 'Gasolina Aditivada', preco: 6.09, leituras: [19.980, 19.990] },
+        { num: 3, bomba: 'Bomba 01 (Ilha Principal)', lado: 'A', prod: 'Etanol Hidratado', preco: 3.99, leituras: [20.075, 20.040] },
+        { num: 4, bomba: 'Bomba 01 (Ilha Principal)', lado: 'B', prod: 'Gasolina Comum', preco: 5.89, leituras: [20.000, 20.005] },
+        { num: 5, bomba: 'Bomba 01 (Ilha Principal)', lado: 'B', prod: 'Gasolina Aditivada', preco: 6.09, leituras: [20.025, 20.020] },
+        { num: 6, bomba: 'Bomba 01 (Ilha Principal)', lado: 'B', prod: 'Etanol Hidratado', preco: 3.99, leituras: [19.875, 19.930] },
+        { num: 7, bomba: 'Bomba 02 (Ilha Diesel)', lado: 'A', prod: 'Diesel S10', preco: 6.19, leituras: [20.010, 20.000] },
+        { num: 8, bomba: 'Bomba 02 (Ilha Diesel)', lado: 'B', prod: 'Diesel S500', preco: 5.99, leituras: [19.990, 19.995] },
+      ];
+
+      for (const item of padraoBicos) {
+        const bId = `bico-padrao-${item.num}`;
+        const novoB: Bico = {
+          id: bId,
+          postoId,
+          numero: item.num,
+          bomba: item.bomba,
+          tanqueId: tanques[0]?.id || 'tanque-01',
+          produto: item.prod,
+          lado: item.lado,
+          status: 'ATIVO',
+          precoBase: item.preco,
+          precoLitro: item.preco,
+          temDesconto: false,
+          criadoEm: new Date().toISOString(),
+          atualizadoEm: new Date().toISOString(),
+        };
+        await repoBicos.save(postoId, novoB);
+
+        // Criar 2 aferições (ontem e hoje) para análise de tendência e diagnóstico
+        for (let idx = 0; idx < item.leituras.length; idx++) {
+          const vol = item.leituras[idx];
+          const calc = calcularAfericao(vol, 20.0, 0.1);
+          const afId = `af-padrao-${item.num}-${idx}`;
+          const novaAf: Afericao = {
+            id: afId,
+            postoId,
+            bicoId: bId,
+            tanqueId: novoB.tanqueId,
+            produto: item.prod,
+            funcionarioId: funcionarios[0]?.id || 'op-01',
+            data: idx === 0 ? hoje : ontem,
+            hora: idx === 0 ? '08:30' : '14:15',
+            volumeNominal: 20.0,
+            volumeAferido: vol,
+            diferenca: calc.diferenca,
+            toleranciaConfigurada: 0.1,
+            resultado: calc.resultado,
+            equipamento: 'Medidor Padrão 20L Inmetro',
+            observacao: idx === 0 ? 'Aferição matinal de rotina' : 'Conferência anterior',
+            criadoEm: new Date().toISOString(),
+          };
+          await repoAfericoes.save(postoId, novaAf);
+        }
+      }
+
+      onReload();
+    } catch (err) {
+      console.error('Erro ao gerar pista padrão:', err);
+    } finally {
+      setProcessandoAcao(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header Principal */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
         <div>
           <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-            <Gauge className="w-6 h-6 text-emerald-600" />
-            Gestão de Bicos, Preços & Aferições
+            <Gauge className="w-6 h-6 text-amber-600" />
+            Mapa Visual de Bombas, Diagnóstico 20L & Preços
           </h2>
           <p className="text-sm text-slate-500 mt-1">
-            Alternação de preços e descontos promocionais por bico específico, controle de bombas e aferições Inmetro.
+            Diagrama interativo de bombas (Lado A e Lado B), diagnóstico metrológico da última aferição de 20L e gestão de preços por bico.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {abaAtiva === 'AFERICOES' && bicos.length === 0 && (
+            <button
+              type="button"
+              onClick={handleGerarPistaPadrao}
+              disabled={processandoAcao}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-lg text-xs transition"
+            >
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              Gerar Bombas Exemplo
+            </button>
+          )}
+
           {abaAtiva === 'PRECOS' && (
             <button
               onClick={() => setIsModalPrecosLote(true)}
@@ -515,20 +607,34 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
             + Novo Bico
           </button>
 
-          {abaAtiva === 'AFERICOES' && (
-            <button
-              onClick={() => setIsModalAfericao(true)}
-              className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-lg transition shadow-sm text-xs"
-            >
-              <Plus className="w-4 h-4" />
-              Registrar Aferição
-            </button>
-          )}
+          <button
+            onClick={() => setIsModalAfericao(true)}
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-lg transition shadow-sm text-xs"
+          >
+            <Plus className="w-4 h-4" />
+            Registrar Aferição 20L
+          </button>
         </div>
       </div>
 
       {/* Abas de Navegação */}
-      <div className="flex border-b border-slate-200 gap-2 sm:gap-6 bg-white px-6 pt-3 rounded-t-xl border-t border-x">
+      <div className="flex flex-wrap border-b border-slate-200 gap-2 sm:gap-6 bg-white px-6 pt-3 rounded-t-xl border-t border-x">
+        <button
+          type="button"
+          onClick={() => setAbaAtiva('AFERICOES')}
+          className={`pb-3 px-2 text-sm font-bold flex items-center gap-2 border-b-2 transition ${
+            abaAtiva === 'AFERICOES'
+              ? 'border-amber-600 text-amber-700'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Fuel className="w-4 h-4" />
+          Diagrama da Bomba (Lado A / B) & Diagnóstico 20L
+          <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-900">
+            {bicos.length} bicos • {afericoes.length} aferições
+          </span>
+        </button>
+
         <button
           type="button"
           onClick={() => setAbaAtiva('PRECOS')}
@@ -545,22 +651,6 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
               {estatisticasPrecos.totalComDesconto} com desconto
             </span>
           )}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setAbaAtiva('AFERICOES')}
-          className={`pb-3 px-2 text-sm font-bold flex items-center gap-2 border-b-2 transition ${
-            abaAtiva === 'AFERICOES'
-              ? 'border-amber-600 text-amber-700'
-              : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <Gauge className="w-4 h-4" />
-          Aferições Regulatórias de Pista (20L)
-          <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-600">
-            {afericoes.length}
-          </span>
         </button>
       </div>
 
@@ -862,53 +952,31 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
         </div>
       )}
 
-      {/* CONTEÚDO DA ABA: AFERIÇÕES REGULATÓRIAS */}
+      {/* CONTEÚDO DA ABA: DIAGRAMA DA BOMBA & AFERIÇÕES REGULATÓRIAS */}
       {abaAtiva === 'AFERICOES' && (
         <div className="space-y-6">
-          {/* Grid Compacto de Bicos Cadastrados */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            {bicos.map((b) => {
-              const ultima = afericoes.filter((a) => a.bicoId === b.id)[0];
-              const resPreco = calcularPrecoEfetivoBico(b);
-              return (
-                <div
-                  key={b.id}
-                  className={`p-3 bg-white rounded-xl border shadow-xs flex flex-col justify-between ${
-                    resPreco.temDesconto ? 'border-emerald-300' : 'border-slate-200'
-                  }`}
-                >
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-800">Bico {b.numero}</span>
-                      <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono">
-                        Lado {b.lado}
-                      </span>
-                    </div>
-                    <div className="text-[11px] text-slate-500 truncate mt-1">{b.produto}</div>
-                    <div className="text-[10px] font-mono text-emerald-700 font-bold mt-0.5">
-                      {formatarPrecoLitro(resPreco.precoFinal, 2)}
-                      {resPreco.temDesconto && <span className="text-[9px] text-emerald-600 ml-1">(-desc)</span>}
-                    </div>
-                  </div>
-
-                  <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between text-[10px]">
-                    <span className="text-slate-400">Última:</span>
-                    {ultima ? (
-                      <span
-                        className={`font-bold ${
-                          ultima.resultado === 'CONFORME' ? 'text-emerald-600' : 'text-red-600'
-                        }`}
-                      >
-                        {ultima.resultado === 'CONFORME' ? 'OK' : 'FALHA'}
-                      </span>
-                    ) : (
-                      <span className="text-slate-400">Pendente</span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          {/* Diagrama Visual Interativo da Bomba de Combustível (Lado A e Lado B) + Diagnóstico */}
+          <DiagramaBombaCombustivel
+            bicos={bicos}
+            afericoes={afericoes}
+            tanques={tanques}
+            funcionarios={funcionarios}
+            selectedBicoId={bicoId || bicos[0]?.id || ''}
+            onSelectBico={(id) => setBicoId(id)}
+            onAbrirModalAfericao={(id) => {
+              setBicoId(id);
+              setIsModalAfericao(true);
+            }}
+            onAbrirModalPreco={(b) => {
+              setBicoParaPreco(b);
+              setIsModalPrecoBico(true);
+            }}
+            onAbrirModalNovoBico={() => {
+              setNumBico(bicos.length > 0 ? Math.max(...bicos.map((b) => b.numero)) + 1 : 1);
+              setIsModalBico(true);
+            }}
+            onGerarPistaPadrao={handleGerarPistaPadrao}
+          />
 
           {/* Tabela de Histórico de Aferições */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">

@@ -86,12 +86,9 @@ REGRAS INVIOLÁVEIS DE EXTRAÇÃO COMPLETA (CRÍTICO - NÃO TRUNQUE!):
 1. TODOS OS COLABORADORES: Identifique e extraia CADA UMA das linhas da tabela contendo funcionários. Se a folha tiver 3, 5, 8, 12 ou mais colaboradores, você DEVE extrair TODOS eles, sem omitir ninguém. É expressamente PROIBIDO retornar apenas 1 colaborador.
 2. TODOS OS DIAS DA TABELA: Para CADA colaborador, você DEVE extrair a linha horizontal COMPLETA da tabela (todos os dias presentes na folha, de D01 até o último dia da grade, cobrindo todo o período visível, ex: 1 a 31 ou 1 a 7). É expressamente PROIBIDO parar após 5 dias ou truncar a grade. Percorra todas as colunas de datas da esquerda para a direita.
 3. CADA CÉLULA = TURNO OU FOLGA:
-   - TURNO 2 (06:00 às 14:00): Células com "2", "T2", "T02", "Turno 2", "06-14", "06h às 14h", "06:00", "M", "MAN", "Manhã", "M1" -> turno="Turno 2 (06h - 14h)", horarioInicio="06:00", horarioFim="14:00", status="TRABALHO".
-   - TURNO 3 (14:00 às 22:00): Células com "3", "T3", "T03", "Turno 3", "14-22", "14h às 22h", "14:00", "T", "TAR", "Tarde", "T1" -> turno="Turno 3 (14h - 22h)", horarioInicio="14:00", horarioFim="22:00", status="TRABALHO".
-   - TURNO 4 (22:00 às 06:00 - Noturno): Células com "4", "T4", "T04", "Turno 4", "22-06", "22h às 06h", "22:00", "N", "NOT", "Noite", "Noturno" -> turno="Turno 4 (22h - 06h)", horarioInicio="22:00", horarioFim="06:00", status="TRABALHO".
-   - INTERMEDIÁRIO (10:00 às 18:00): "INT", "10-18", "10h" -> turno="Intermediário (10h - 18h)", horarioInicio="10:00", horarioFim="18:00", status="TRABALHO".
-   - 12x36 (07:00 às 19:00): "12x36", "07-19" -> turno="12x36 (07h - 19h)", horarioInicio="07:00", horarioFim="19:00", status="TRABALHO".
-   - 12x36 Noturno (19:00 às 07:00): "12x36 N", "19-07" -> turno="12x36 Noturno (19h - 07h)", horarioInicio="19:00", horarioFim="07:00", status="TRABALHO".
+   - TURNO 1 - MANHÃ (06:00 às 14:00): Células com "1", "T1", "T01", "Turno 1", "06-14", "06h às 14h", "06:00", "M", "MAN", "Manhã", "M1" -> turno="Turno 1 - Manhã (06h - 14h)", horarioInicio="06:00", horarioFim="14:00", status="TRABALHO".
+   - TURNO 2 - TARDE (14:00 às 22:00): Células com "2", "T2", "T02", "Turno 2", "14-22", "14h às 22h", "14:00", "T", "TAR", "Tarde" -> turno="Turno 2 - Tarde (14h - 22h)", horarioInicio="14:00", horarioFim="22:00", status="TRABALHO".
+   - TURNO HORISTA (Flexível / Por Hora): Células com "HOR", "H", "Horista", "Flex", "INT" -> turno="Turno Horista", horarioInicio="08:00", horarioFim="14:00", status="TRABALHO".
    - FOLGAS E DSR: "F", "FOL", "FOLGA", "DSR", "OFF", "DESC", traço ("-") -> status="FOLGA", turno="Folga", horarioInicio="00:00", horarioFim="00:00". NÃO OMITA AS FOLGAS!
    - AFASTADO / FÉRIAS: "AT", "MED", "LIC" -> status="AFASTADO"; "FE", "FER", "FERIAS" -> status="FERIAS".
 
@@ -168,7 +165,7 @@ Retorne os dados estruturados rigorosamente conforme o esquema JSON definido.`;
                       properties: {
                         dia: { type: Type.STRING, description: 'Número do dia (ex: "01", "02", ..., "31") ou data AAAA-MM-DD' },
                         diaSemana: { type: Type.STRING, description: 'DOM, SEG, TER, QUA, QUI, SEX, SAB' },
-                        turno: { type: Type.STRING, description: 'Turno: "Turno 2 (06h - 14h)", "Turno 3 (14h - 22h)", "Turno 4 (22h - 06h)", "Intermediário (10h - 18h)", "12x36 (07h - 19h)", "Folga"' },
+                        turno: { type: Type.STRING, description: 'Turno: "Turno 1 - Manhã (06h - 14h)", "Turno 2 - Tarde (14h - 22h)", "Turno Horista", "Folga"' },
                         horarioInicio: { type: Type.STRING, description: 'HH:MM (06:00, 14:00, 22:00, ou 00:00 para folga)' },
                         horarioFim: { type: Type.STRING, description: 'HH:MM (14:00, 22:00, 06:00, ou 00:00 para folga)' },
                         status: { type: Type.STRING, description: 'TRABALHO ou FOLGA ou AFASTADO ou FERIAS' },
@@ -274,7 +271,7 @@ Retorne os dados estruturados rigorosamente conforme o esquema JSON definido.`;
                   nome: colab.sugestaoCadastroPrevio?.nome || nomeOriginal,
                   cargo: colab.cargo || colab.sugestaoCadastroPrevio?.cargo || 'Frentista',
                   funcao: colab.sugestaoCadastroPrevio?.funcao || 'Operacional de Pista',
-                  turnoPreferencial: colab.sugestaoCadastroPrevio?.turnoPreferencial || 'Turno 2 (06h - 14h)',
+                  turnoPreferencial: colab.sugestaoCadastroPrevio?.turnoPreferencial || 'Turno 1 - Manhã (06h - 14h)',
                 },
           };
 
@@ -318,19 +315,17 @@ Retorne os dados estruturados rigorosamente conforme o esquema JSON definido.`;
             let horarioInicio = d.horarioInicio || (isFolga ? '00:00' : '06:00');
             let horarioFim = d.horarioFim || (isFolga ? '00:00' : '14:00');
             let status = isFolga ? 'FOLGA' : 'TRABALHO';
+            let turnoPadronizado = 'Turno 1 - Manhã (06h - 14h)';
 
-            if (turnoTexto.includes('14h') || turnoTexto.includes('14-22') || turnoTexto.includes('Turno 3')) {
+            const tLower = turnoTexto.toLowerCase();
+            if (tLower.includes('horista') || tLower === 'hor' || tLower === 'h') {
+              turnoPadronizado = 'Turno Horista';
+              horarioInicio = d.horarioInicio || '08:00';
+              horarioFim = d.horarioFim || '14:00';
+            } else if (tLower.includes('tarde') || tLower.includes('14h') || tLower.includes('14-22') || tLower.includes('turno 2') || tLower === 't2' || tLower === '2') {
+              turnoPadronizado = 'Turno 2 - Tarde (14h - 22h)';
               horarioInicio = '14:00';
               horarioFim = '22:00';
-            } else if (turnoTexto.includes('22h') || turnoTexto.includes('22-06') || turnoTexto.includes('Turno 4')) {
-              horarioInicio = '22:00';
-              horarioFim = '06:00';
-            } else if (turnoTexto.includes('10h') || turnoTexto.includes('10-18') || turnoTexto.includes('Intermediário')) {
-              horarioInicio = '10:00';
-              horarioFim = '18:00';
-            } else if (turnoTexto.includes('12x36')) {
-              horarioInicio = turnoTexto.includes('Noturno') ? '19:00' : '07:00';
-              horarioFim = turnoTexto.includes('Noturno') ? '07:00' : '19:00';
             }
 
             // Determinar dia da semana caso não tenha vindo
@@ -349,7 +344,7 @@ Retorne os dados estruturados rigorosamente conforme o esquema JSON definido.`;
               funcionarioId: colabObj.funcionarioId || '',
               data: dataIso,
               diaSemana: diaSemana || '',
-              turno: isFolga ? 'Folga' : (turnoTexto || 'Turno 2 (06h - 14h)'),
+              turno: isFolga ? 'Folga' : turnoPadronizado,
               horarioInicio: isFolga ? '00:00' : horarioInicio,
               horarioFim: isFolga ? '00:00' : horarioFim,
               status,

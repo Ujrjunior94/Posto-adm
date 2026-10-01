@@ -34,10 +34,19 @@ export const PlannerView: React.FC<PlannerProps> = ({
   const { postoId, userProfile } = useAuth();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedCell, setSelectedCell] = useState<{ funcId: string; dia: number } | null>(null);
-  const [modalTurno, setModalTurno] = useState('Manhã (06h - 14h)');
+  const [modalTurno, setModalTurno] = useState('Turno 1 - Manhã (06h - 14h)');
   const [modalStatus, setModalStatus] = useState<EscalaStatus>('TRABALHO');
   const [propostaGerada, setPropostaGerada] = useState<Escala[] | null>(null);
   const [conflitosDetectados, setConflitosDetectados] = useState<string[]>([]);
+
+  const normalizarTurnoPlanner = (raw?: string): string => {
+    const t = (raw || '').toLowerCase();
+    if (t.includes('horista') || t === 'hor') return 'Turno Horista';
+    if (t.includes('tarde') || t.includes('14h') || t.includes('turno 2 - tarde') || t === 'turno 2' || t === 't2') {
+      return 'Turno 2 - Tarde (14h - 22h)';
+    }
+    return 'Turno 1 - Manhã (06h - 14h)';
+  };
 
   const ano = currentDate.getFullYear();
   const mes = currentDate.getMonth();
@@ -84,7 +93,7 @@ export const PlannerView: React.FC<PlannerProps> = ({
             id: e.funcionarioId,
             nome: e.funcionarioNome || 'Colaborador',
             cargo: 'Escala Importada',
-            turnoPreferencial: e.turno || 'Manhã (06h - 14h)',
+            turnoPreferencial: normalizarTurnoPlanner(e.turno),
             isPendente: true,
           });
         }
@@ -114,12 +123,16 @@ export const PlannerView: React.FC<PlannerProps> = ({
     return count;
   }, [diasArray, escalas, ano, mes]);
 
-  // Gerador de proposta de escala 6x1 / 12x36 automatizada
+  // Gerador de proposta de escala 6x1 automatizada (Turno 1, Turno 2 e Horista)
   const handleGerarProposta = () => {
     const conflitos: string[] = [];
     const novasEscalas: Escala[] = [];
 
     colaboradoresExibicao.forEach((f, idx) => {
+      const turnoNorm = normalizarTurnoPlanner(f.turnoPreferencial);
+      const isTarde = turnoNorm.includes('Turno 2');
+      const isHorista = turnoNorm.includes('Horista');
+
       diasArray.forEach((dia) => {
         const data = formatarDataIso(dia);
         // Exemplo de rodízio: 6 dias de trabalho e 1 folga
@@ -132,9 +145,9 @@ export const PlannerView: React.FC<PlannerProps> = ({
           funcionarioId: f.id,
           funcionarioNome: f.nome,
           data,
-          turno: f.turnoPreferencial,
-          horarioInicio: f.turnoPreferencial.includes('06h') ? '06:00' : '14:00',
-          horarioFim: f.turnoPreferencial.includes('06h') ? '14:00' : '22:00',
+          turno: ehFolga ? 'Folga' : turnoNorm,
+          horarioInicio: ehFolga ? '00:00' : isHorista ? '08:00' : isTarde ? '14:00' : '06:00',
+          horarioFim: ehFolga ? '00:00' : isHorista ? '14:00' : isTarde ? '22:00' : '14:00',
           status,
           criadoEm: new Date().toISOString(),
           atualizadoEm: new Date().toISOString(),
@@ -179,18 +192,12 @@ export const PlannerView: React.FC<PlannerProps> = ({
     const id = `escala-${func.id}-${data}`;
     let hInicio = '06:00';
     let hFim = '14:00';
-    if (modalTurno.includes('Turno 3') || modalTurno.includes('14h') || modalTurno.includes('14:00') || modalTurno.includes('Tarde')) {
+    if (modalTurno.includes('Horista')) {
+      hInicio = '08:00';
+      hFim = '14:00';
+    } else if (modalTurno.includes('Turno 2') || modalTurno.includes('14h') || modalTurno.includes('14:00') || modalTurno.includes('Tarde')) {
       hInicio = '14:00';
       hFim = '22:00';
-    } else if (modalTurno.includes('Turno 4') || modalTurno.includes('22h') || modalTurno.includes('22:00') || modalTurno.includes('Noite')) {
-      hInicio = '22:00';
-      hFim = '06:00';
-    } else if (modalTurno.includes('10h') || modalTurno.includes('Intermed')) {
-      hInicio = '10:00';
-      hFim = '18:00';
-    } else if (modalTurno.includes('12x36')) {
-      hInicio = '07:00';
-      hFim = '19:00';
     }
 
     const novaEscala: Escala = {
@@ -327,16 +334,16 @@ export const PlannerView: React.FC<PlannerProps> = ({
         <span className="font-bold text-slate-700 uppercase text-[11px]">Legenda de Turnos & Status:</span>
         <div className="flex flex-wrap items-center gap-2.5">
           <span className="inline-flex items-center gap-1">
-            <span className="w-6 h-5 rounded border bg-amber-100 border-amber-300 text-amber-900 font-bold flex items-center justify-center text-[10px]">T2</span>
-            <span className="text-slate-700 font-semibold">Turno 2 (06h-14h)</span>
+            <span className="w-6 h-5 rounded border bg-amber-100 border-amber-300 text-amber-900 font-bold flex items-center justify-center text-[10px]">T1</span>
+            <span className="text-slate-700 font-semibold">Turno 1 — Manhã (06h-14h)</span>
           </span>
           <span className="inline-flex items-center gap-1">
-            <span className="w-6 h-5 rounded border bg-blue-100 border-blue-300 text-blue-900 font-bold flex items-center justify-center text-[10px]">T3</span>
-            <span className="text-slate-700 font-semibold">Turno 3 (14h-22h)</span>
+            <span className="w-6 h-5 rounded border bg-blue-100 border-blue-300 text-blue-900 font-bold flex items-center justify-center text-[10px]">T2</span>
+            <span className="text-slate-700 font-semibold">Turno 2 — Tarde (14h-22h)</span>
           </span>
           <span className="inline-flex items-center gap-1">
-            <span className="w-6 h-5 rounded border bg-purple-100 border-purple-300 text-purple-900 font-bold flex items-center justify-center text-[10px]">T4</span>
-            <span className="text-slate-700 font-semibold">Turno 4 (22h-06h)</span>
+            <span className="w-7 h-5 rounded border bg-teal-100 border-teal-300 text-teal-900 font-bold flex items-center justify-center text-[10px]">HOR</span>
+            <span className="text-slate-700 font-semibold">Turno Horista</span>
           </span>
           <span className="inline-flex items-center gap-1">
             <span className="w-6 h-5 rounded border bg-slate-100 border-slate-200 text-slate-600 font-bold flex items-center justify-center text-[10px]">F</span>
@@ -430,24 +437,15 @@ export const PlannerView: React.FC<PlannerProps> = ({
 
                     if (status === 'TRABALHO') {
                       const t = (escala?.turno || func.turnoPreferencial || '').toLowerCase();
-                      if (t.includes('2') || t.includes('06h') || t.includes('06:00') || t.includes('manha') || t.includes('manhã')) {
-                        badgeColor = 'bg-amber-100 text-amber-900 border-amber-300 font-bold';
-                        label = 'T2';
-                      } else if (t.includes('3') || t.includes('14h') || t.includes('14:00') || t.includes('tarde')) {
-                        badgeColor = 'bg-blue-100 text-blue-900 border-blue-300 font-bold';
-                        label = 'T3';
-                      } else if (t.includes('4') || t.includes('22h') || t.includes('22:00') || t.includes('noite')) {
-                        badgeColor = 'bg-purple-100 text-purple-900 border-purple-300 font-bold';
-                        label = 'T4';
-                      } else if (t.includes('inter') || t.includes('10h')) {
+                      if (t.includes('horista') || t === 'hor') {
                         badgeColor = 'bg-teal-100 text-teal-900 border-teal-300 font-bold';
-                        label = 'INT';
-                      } else if (t.includes('12x36')) {
-                        badgeColor = 'bg-cyan-100 text-cyan-900 border-cyan-300 font-bold';
-                        label = '12x36';
+                        label = 'HOR';
+                      } else if (t.includes('tarde') || t.includes('14h') || t.includes('14:00') || t.includes('turno 2 - tarde') || t === 'turno 2' || t === 't2') {
+                        badgeColor = 'bg-blue-100 text-blue-900 border-blue-300 font-bold';
+                        label = 'T2';
                       } else {
-                        badgeColor = 'bg-emerald-100 text-emerald-900 border-emerald-300 font-bold';
-                        label = 'T';
+                        badgeColor = 'bg-amber-100 text-amber-900 border-amber-300 font-bold';
+                        label = 'T1';
                       }
                     } else if (status === 'FERIAS') {
                       badgeColor = 'bg-sky-50 text-sky-700 border-sky-200 font-semibold';
@@ -467,10 +465,10 @@ export const PlannerView: React.FC<PlannerProps> = ({
                           setSelectedCell({ funcId: func.id, dia });
                           if (escala) {
                             setModalStatus(escala.status);
-                            setModalTurno(escala.turno);
+                            setModalTurno(normalizarTurnoPlanner(escala.turno));
                           } else {
                             setModalStatus('TRABALHO');
-                            setModalTurno(func.turnoPreferencial);
+                            setModalTurno(normalizarTurnoPlanner(func.turnoPreferencial));
                           }
                         }}
                         className="p-1 border-r border-slate-100 cursor-pointer hover:bg-blue-50/50"
@@ -544,48 +542,48 @@ export const PlannerView: React.FC<PlannerProps> = ({
                     type="button"
                     onClick={() => {
                       setModalStatus('TRABALHO');
-                      setModalTurno('Turno 2 (06h - 14h)');
+                      setModalTurno('Turno 1 - Manhã (06h - 14h)');
                     }}
                     className={`p-2 rounded-lg text-xs font-bold border transition text-center ${
-                      modalStatus === 'TRABALHO' && modalTurno.includes('2')
+                      modalStatus === 'TRABALHO' && modalTurno.includes('Turno 1')
                         ? 'bg-amber-100 border-amber-400 text-amber-900 ring-2 ring-amber-300'
                         : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-amber-50'
                     }`}
                   >
-                    <div>Turno 2</div>
-                    <div className="text-[10px] font-normal text-slate-500">06h - 14h</div>
+                    <div>Turno 1</div>
+                    <div className="text-[10px] font-normal text-slate-500">Manhã (06h-14h)</div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => {
                       setModalStatus('TRABALHO');
-                      setModalTurno('Turno 3 (14h - 22h)');
+                      setModalTurno('Turno 2 - Tarde (14h - 22h)');
                     }}
                     className={`p-2 rounded-lg text-xs font-bold border transition text-center ${
-                      modalStatus === 'TRABALHO' && modalTurno.includes('3')
+                      modalStatus === 'TRABALHO' && modalTurno.includes('Turno 2')
                         ? 'bg-blue-100 border-blue-400 text-blue-900 ring-2 ring-blue-300'
                         : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-blue-50'
                     }`}
                   >
-                    <div>Turno 3</div>
-                    <div className="text-[10px] font-normal text-slate-500">14h - 22h</div>
+                    <div>Turno 2</div>
+                    <div className="text-[10px] font-normal text-slate-500">Tarde (14h-22h)</div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => {
                       setModalStatus('TRABALHO');
-                      setModalTurno('Turno 4 (22h - 06h)');
+                      setModalTurno('Turno Horista');
                     }}
                     className={`p-2 rounded-lg text-xs font-bold border transition text-center ${
-                      modalStatus === 'TRABALHO' && modalTurno.includes('4')
-                        ? 'bg-purple-100 border-purple-400 text-purple-900 ring-2 ring-purple-300'
-                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-purple-50'
+                      modalStatus === 'TRABALHO' && modalTurno.includes('Horista')
+                        ? 'bg-teal-100 border-teal-400 text-teal-900 ring-2 ring-teal-300'
+                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-teal-50'
                     }`}
                   >
-                    <div>Turno 4</div>
-                    <div className="text-[10px] font-normal text-slate-500">22h - 06h</div>
+                    <div>Horista</div>
+                    <div className="text-[10px] font-normal text-slate-500">Flexível</div>
                   </button>
                 </div>
 
@@ -657,11 +655,9 @@ export const PlannerView: React.FC<PlannerProps> = ({
                     onChange={(e) => setModalTurno(e.target.value)}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold focus:ring-2 focus:ring-blue-500 focus:outline-none"
                   >
-                    <option value="Turno 2 (06h - 14h)">Turno 2 (06h às 14h)</option>
-                    <option value="Turno 3 (14h - 22h)">Turno 3 (14h às 22h)</option>
-                    <option value="Turno 4 (22h - 06h)">Turno 4 (22h às 06h)</option>
-                    <option value="Intermediário (10h - 18h)">Intermediário (10h às 18h)</option>
-                    <option value="12x36 (07h - 19h)">12x36 (07h às 19h)</option>
+                    <option value="Turno 1 - Manhã (06h - 14h)">Turno 1 — Manhã (06h às 14h)</option>
+                    <option value="Turno 2 - Tarde (14h - 22h)">Turno 2 — Tarde (14h às 22h)</option>
+                    <option value="Turno Horista">Turno Horista (Flexível / Por Hora)</option>
                   </select>
                 </div>
               )}
