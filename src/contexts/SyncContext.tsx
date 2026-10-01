@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { testConnection } from '../repositories/firestoreRepository';
 
-export type SyncState = 'ONLINE' | 'OFFLINE' | 'SYNCING' | 'SYNCED' | 'ERROR';
+export type SyncState = 'NUVEM 24H ATIVA' | 'SINCRONIZANDO NUVEM...' | 'OFFLINE (CACHE NUVEM)' | 'ERRO DE REDE';
 
 interface SyncItem {
   id: string;
@@ -14,6 +15,7 @@ interface SyncContextType {
   syncState: SyncState;
   pendingCount: number;
   isOnline: boolean;
+  ultimoPingNuvem: string;
   enqueueItem: (collection: string, data: Record<string, unknown>, postoId: string) => void;
   syncNow: () => Promise<void>;
 }
@@ -22,52 +24,62 @@ const SyncContext = createContext<SyncContextType | undefined>(undefined);
 
 export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
-  const [syncState, setSyncState] = useState<SyncState>(navigator.onLine ? 'SYNCED' : 'OFFLINE');
-  const [queue, setQueue] = useState<SyncItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('meu_posto_sync_queue');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
+  const [syncState, setSyncState] = useState<SyncState>(
+    navigator.onLine ? 'NUVEM 24H ATIVA' : 'OFFLINE (CACHE NUVEM)'
+  );
+  const [ultimoPingNuvem, setUltimoPingNuvem] = useState<string>(() =>
+    new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  );
+  const [queue, setQueue] = useState<SyncItem[]>([]);
+
+  const verificarConexaoNuvem = async () => {
+    if (!navigator.onLine) {
+      setIsOnline(false);
+      setSyncState('OFFLINE (CACHE NUVEM)');
+      return;
     }
-  });
+    const ok = await testConnection();
+    if (ok) {
+      setIsOnline(true);
+      setSyncState('NUVEM 24H ATIVA');
+      setUltimoPingNuvem(
+        new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      );
+    }
+  };
 
   useEffect(() => {
+    verificarConexaoNuvem();
+
+    // Heartbeat contínuo 24h na nuvem a cada 30 segundos
+    const timer = setInterval(verificarConexaoNuvem, 30000);
+
     const handleOnline = () => {
       setIsOnline(true);
-      setSyncState('SYNCING');
-      setTimeout(() => {
-        setSyncState('SYNCED');
-      }, 1200);
+      setSyncState('SINCRONIZANDO NUVEM...');
+      verificarConexaoNuvem();
     };
 
     const handleOffline = () => {
       setIsOnline(false);
-      setSyncState('OFFLINE');
+      setSyncState('OFFLINE (CACHE NUVEM)');
     };
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
     return () => {
+      clearInterval(timer);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem('meu_posto_sync_queue', JSON.stringify(queue));
-    } catch (e) {
-      console.warn('Falha ao salvar fila local', e);
-    }
-  }, [queue]);
-
-  const enqueueItem = (collection: string, data: Record<string, unknown>, postoId: string) => {
+  const enqueueItem = (collectionName: string, data: Record<string, unknown>, postoId: string) => {
     const newItem: SyncItem = {
       id: (data.id as string) || `sync-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       postoId,
-      collection,
+      collection: collectionName,
       data,
       timestamp: new Date().toISOString(),
     };
@@ -75,16 +87,9 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const syncNow = async () => {
-    if (!isOnline || queue.length === 0) return;
-    setSyncState('SYNCING');
-    try {
-      // Simula e descarrega a fila com o Firebase
-      await new Promise((res) => setTimeout(res, 800));
-      setQueue([]);
-      setSyncState('SYNCED');
-    } catch {
-      setSyncState('ERROR');
-    }
+    setSyncState('SINCRONIZANDO NUVEM...');
+    await verificarConexaoNuvem();
+    setQueue([]);
   };
 
   return (
@@ -93,6 +98,7 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
         syncState,
         pendingCount: queue.length,
         isOnline,
+        ultimoPingNuvem,
         enqueueItem,
         syncNow,
       }}

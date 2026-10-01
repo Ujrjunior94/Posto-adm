@@ -92,6 +92,7 @@ export const SobrasFaltasView: React.FC<SobrasFaltasViewProps> = ({
   const [turnoSelecionado, setTurnoSelecionado] = useState<string>('Turno 1 - Manhã (06h - 14h)');
   const [visualizacao, setVisualizacao] = useState<'NOVO_RATEIO' | 'HISTORICO' | 'RECIBO_IMPRESSAO'>('NOVO_RATEIO');
   const [rateioParaImprimir, setRateioParaImprimir] = useState<RateioTurno | null>(null);
+  const [editandoRateioId, setEditandoRateioId] = useState<string | null>(null);
 
   // Estado do Formulário de Rateio Atual
   const [tipoDiferenca, setTipoDiferenca] = useState<TipoDiferencaTurno>('FALTA');
@@ -112,25 +113,31 @@ export const SobrasFaltasView: React.FC<SobrasFaltasViewProps> = ({
     }[]
   >([]);
 
-  // Carrega histórico de rateios
+  // Carrega e sincroniza histórico de rateios em tempo real 24h na nuvem
   const carregarRateios = async () => {
     setCarregando(true);
     try {
       const data = await repoRateio.getAll(postoId);
       setRateios(data.sort((a, b) => b.data.localeCompare(a.data)));
     } catch (err) {
-      console.error('Erro ao carregar rateios:', err);
+      console.error('Erro ao carregar rateios da nuvem:', err);
     } finally {
       setCarregando(false);
     }
   };
 
   useEffect(() => {
-    carregarRateios();
+    setCarregando(true);
+    const unsub = repoRateio.subscribe(postoId, (items) => {
+      setRateios([...items].sort((a, b) => b.data.localeCompare(a.data)));
+      setCarregando(false);
+    });
+    return () => unsub();
   }, [postoId]);
 
-  // Sincroniza integrantes com a ESCALA do dia e turno selecionados
+  // Sincroniza integrantes com a ESCALA do dia e turno selecionados (apenas se não estiver editando um rateio salvo)
   useEffect(() => {
+    if (editandoRateioId) return;
     const isTurno1 = turnoSelecionado.includes('Turno 1') || turnoSelecionado.includes('Manhã');
     const isTurno2 = turnoSelecionado.includes('Turno 2') || turnoSelecionado.includes('Tarde');
     const isHorista = turnoSelecionado.includes('Horista');
@@ -292,7 +299,7 @@ export const SobrasFaltasView: React.FC<SobrasFaltasViewProps> = ({
       };
     });
 
-    const id = `rateio-${dataSelecionada}-${turnoSelecionado.split(' ')[1].toLowerCase()}`;
+    const id = editandoRateioId || `rateio-${dataSelecionada}-${turnoSelecionado.split(' ')[1].toLowerCase()}`;
 
     const novoRateio: RateioTurno = {
       id,
@@ -321,14 +328,37 @@ export const SobrasFaltasView: React.FC<SobrasFaltasViewProps> = ({
       'SOBRAS_FALTAS',
       'RateioTurno',
       id,
-      'CREATE',
+      editandoRateioId ? 'UPDATE' : 'CREATE',
       null,
       novoRateio as any
     );
 
+    setEditandoRateioId(null);
     await carregarRateios();
     onReload();
-    alert('Rateio de Sobras e Faltas registrado com sucesso!');
+    setVisualizacao('HISTORICO');
+  };
+
+  const handleEditarRateio = (r: RateioTurno) => {
+    setEditandoRateioId(r.id);
+    setDataSelecionada(r.data);
+    setTurnoSelecionado(r.turno);
+    setTipoDiferenca(r.tipo);
+    setValorTotalDiferenca(r.valorTotalDiferenca);
+    setMotivoDiferenca(r.motivo || '');
+    setStatusRateio(r.status);
+    setIntegrantesTurno(
+      r.integrantes.map((i) => ({
+        funcionarioId: i.funcionarioId,
+        funcionarioNome: i.funcionarioNome,
+        cargo: i.cargo || 'Frentista',
+        presente: i.presente,
+        motivoAusencia: i.motivoAusencia || '',
+        pago: i.pago || false,
+        formaPagamento: i.formaPagamento || 'PENDENTE',
+      }))
+    );
+    setVisualizacao('NOVO_RATEIO');
   };
 
   const handleExcluirRateio = async (id: string) => {
@@ -778,6 +808,13 @@ export const SobrasFaltasView: React.FC<SobrasFaltasViewProps> = ({
                               title="Visualizar / Imprimir Recibo"
                             >
                               <Printer className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleEditarRateio(r)}
+                              className="p-1.5 hover:bg-blue-100 text-blue-700 rounded-lg transition"
+                              title="Alterar este Rateio"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
                             </button>
                             <button
                               onClick={() => handleExcluirRateio(r.id)}

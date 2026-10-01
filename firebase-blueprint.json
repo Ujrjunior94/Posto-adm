@@ -206,6 +206,39 @@
         "timestamp": { "type": "string", "maxLength": 50 }
       },
       "required": ["postoId", "usuarioId", "modulo", "entidade", "acao", "timestamp"]
+    },
+    "lmc": {
+      "title": "LMCRegistro",
+      "description": "Livro de Movimentação de Combustíveis ANP sincronizado na nuvem",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "postoId": { "type": "string", "maxLength": 64 },
+        "data": { "type": "string", "maxLength": 20 },
+        "produto": { "type": "string", "maxLength": 100 },
+        "estoqueAbertura": { "type": "number" },
+        "entradas": { "type": "number" },
+        "vendas": { "type": "number" },
+        "estoqueEscritural": { "type": "number" },
+        "estoqueFisico": { "type": "number" },
+        "statusANP": { "type": "string", "enum": ["CONFORME", "ALERTA", "INVESTIGAR_VAZAMENTO"] }
+      },
+      "required": ["id", "postoId", "data", "produto"]
+    },
+    "rateio": {
+      "title": "RateioTurno",
+      "description": "Rateio de sobras e faltas de caixa por turno na nuvem",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "postoId": { "type": "string", "maxLength": 64 },
+        "data": { "type": "string", "maxLength": 20 },
+        "turno": { "type": "string", "maxLength": 80 },
+        "tipoDiferenca": { "type": "string", "enum": ["FALTA", "SOBRA"] },
+        "valorTotalDiferenca": { "type": "number" },
+        "status": { "type": "string", "enum": ["PENDENTE", "PARCIALMENTE_PAGO", "QUITADO", "DESCONTADO_FOLHA"] }
+      },
+      "required": ["id", "postoId", "data", "turno", "tipoDiferenca", "valorTotalDiferenca"]
     }
   },
   "firestore": {
@@ -260,6 +293,14 @@
     "/postos/{postoId}/auditoria/{auditoriaId}": {
       "schema": { "$ref": "#/entities/auditoria" },
       "description": "Logs imutáveis de auditoria de operações"
+    },
+    "/postos/{postoId}/lmc/{lmcId}": {
+      "schema": { "$ref": "#/entities/lmc" },
+      "description": "Registros do Livro de Movimentação de Combustíveis (LMC)"
+    },
+    "/postos/{postoId}/rateios/{rateioId}": {
+      "schema": { "$ref": "#/entities/rateio" },
+      "description": "Registros de rateios de sobras e faltas por turno"
     }
   }
 }

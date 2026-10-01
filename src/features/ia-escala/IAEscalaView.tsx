@@ -709,10 +709,12 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
 
         if (
           stUpper.includes('FOLGA') ||
+          stUpper === 'S' ||
           stUpper === 'F' ||
           stUpper === 'OFF' ||
           stUpper === 'DSR' ||
           turnoLower === 'folga' ||
+          turnoLower === 's' ||
           turnoLower === 'f' ||
           turnoLower === 'fol' ||
           turnoLower === 'dsr' ||
@@ -988,6 +990,48 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
     onReload();
   };
 
+  // Vincular manualmente um colaborador detectado na imagem a um funcionário já cadastrado
+  const handleVincularColaboradorManual = (index: number, funcIdSelecionado: string) => {
+    const colab = colaboradoresDetectados[index];
+    if (!colab) return;
+
+    if (!funcIdSelecionado) {
+      // Desvincular (criar novo)
+      const novos = [...colaboradoresDetectados];
+      novos[index] = {
+        ...colab,
+        jaCadastrado: false,
+        funcionarioId: undefined,
+        motivoCorrespondencia: 'Criar novo funcionário ao sincronizar',
+      };
+      setColaboradoresDetectados(novos);
+      setItensEscala((prev) =>
+        prev.map((it) => (it.funcionarioNome === colab.nomeOriginal ? { ...it, funcionarioId: '' } : it))
+      );
+      return;
+    }
+
+    const funcEscolhido = funcionarios.find((f) => f.id === funcIdSelecionado);
+    if (!funcEscolhido) return;
+
+    const novos = [...colaboradoresDetectados];
+    novos[index] = {
+      ...colab,
+      jaCadastrado: true,
+      funcionarioId: funcEscolhido.id,
+      motivoCorrespondencia: `Vinculado a: ${funcEscolhido.nome}`,
+    };
+    setColaboradoresDetectados(novos);
+
+    setItensEscala((prev) =>
+      prev.map((it) =>
+        it.funcionarioNome === colab.nomeOriginal
+          ? { ...it, funcionarioId: funcEscolhido.id }
+          : it
+      )
+    );
+  };
+
   // Cadastrar todos os colaboradores pendentes
   const handleCadastrarTodosNaoCadastrados = async () => {
     const naoCadastrados = colaboradoresDetectados
@@ -1220,19 +1264,20 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
         }
 
         const dataIso = normalizarDataParaIso(item.data, mesAnoReferencia);
-        const id = `escala-ia-${finalFuncId}-${dataIso}`;
+        const id = `escala-${finalFuncId}-${dataIso}`;
+        const funcVinculado = funcionarios.find((f) => f.id === finalFuncId);
 
         const escalaObj: Escala = {
           id,
           postoId,
           funcionarioId: finalFuncId,
-          funcionarioNome: item.funcionarioNome,
+          funcionarioNome: funcVinculado?.nome || item.funcionarioNome,
           data: dataIso,
           turno: item.turno,
           horarioInicio: item.horarioInicio,
           horarioFim: item.horarioFim,
           status: item.status,
-          observacao: item.observacao || 'Importado via Reconhecimento de Escala com IA',
+          observacao: item.observacao || 'Importado via Escanear Escala',
           criadoEm: new Date().toISOString(),
           atualizadoEm: new Date().toISOString(),
         };
@@ -1868,14 +1913,30 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
                       </div>
                     </div>
 
-                    {!colab.jaCadastrado && colab.sugestaoCadastroPrevio && (
-                      <button
-                        onClick={() => handleCadastrarPrevioIndividual(colab, idx)}
-                        className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded text-[11px] transition shrink-0 cursor-pointer"
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      <select
+                        value={colab.funcionarioId || ''}
+                        onChange={(e) => handleVincularColaboradorManual(idx, e.target.value)}
+                        className="px-2.5 py-1 bg-white border border-slate-300 rounded text-[11px] font-semibold text-slate-800 focus:ring-2 focus:ring-blue-500"
+                        title="Vincular linha escaneada a um funcionário do posto"
                       >
-                        Efetuar Cadastro Prévio
-                      </button>
-                    )}
+                        <option value="">+ Criar como Novo Funcionário</option>
+                        {funcionarios.map((f) => (
+                          <option key={f.id} value={f.id}>
+                            Vincular: {f.nome} ({f.cargo})
+                          </option>
+                        ))}
+                      </select>
+
+                      {!colab.jaCadastrado && colab.sugestaoCadastroPrevio && (
+                        <button
+                          onClick={() => handleCadastrarPrevioIndividual(colab, idx)}
+                          className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded text-[11px] transition shrink-0 cursor-pointer"
+                        >
+                          Cadastrar Agora
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

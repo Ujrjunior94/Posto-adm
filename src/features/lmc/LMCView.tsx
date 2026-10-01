@@ -93,104 +93,27 @@ export const LMCView: React.FC<LMCViewProps> = ({
   const [formDistribuidora, setFormDistribuidora] = useState('Vibra / Petrobras');
   const [formObservacoes, setFormObservacoes] = useState('');
 
-  // Carrega registros de LMC do Firestore
+  // Carrega e sincroniza registros de LMC em tempo real 24h na nuvem Firestore
   const carregarRegistros = async () => {
     setCarregando(true);
     try {
       const data = await repoLMC.getAll(postoId);
-      // Se não houver nenhum registro, pré-carrega simulações realistas para o mês atual
-      if (data.length === 0) {
-        const registrosIniciais = gerarRegistrosExemplo();
-        for (const reg of registrosIniciais) {
-          await repoLMC.save(postoId, reg);
-        }
-        setRegistrosLMC(registrosIniciais);
-      } else {
-        setRegistrosLMC(data.sort((a, b) => b.data.localeCompare(a.data)));
-      }
+      setRegistrosLMC(data.sort((a, b) => b.data.localeCompare(a.data)));
     } catch (err) {
-      console.error('Erro ao carregar LMC:', err);
+      console.error('Erro ao carregar LMC da nuvem:', err);
     } finally {
       setCarregando(false);
     }
   };
 
   React.useEffect(() => {
-    carregarRegistros();
-  }, [postoId]);
-
-  // Gera dados realistas para demonstração e conferência rápida
-  const gerarRegistrosExemplo = (): LMCRegistro[] => {
-    const [anoStr, mesStr] = mesSelecionado.split('-');
-    const ano = parseInt(anoStr);
-    const mes = parseInt(mesStr);
-    const diasNoMes = new Date(ano, mes, 0).getDate();
-    const lista: LMCRegistro[] = [];
-
-    const combustiveis: { nome: CombustivelPrincipal; abert: number; vendMedia: number }[] = [
-      { nome: 'Gasolina Comum', abert: 18500, vendMedia: 4200 },
-      { nome: 'Gasolina Aditivada', abert: 9200, vendMedia: 1800 },
-      { nome: 'Etanol', abert: 12000, vendMedia: 2900 },
-      { nome: 'Diesel S10', abert: 22000, vendMedia: 5100 },
-      { nome: 'Diesel S500', abert: 14000, vendMedia: 2300 },
-    ];
-
-    combustiveis.forEach((comb) => {
-      let estoqueAtual = comb.abert;
-      for (let dia = 1; dia <= Math.min(diasNoMes, 15); dia++) {
-        const dataStr = `${anoStr}-${mesStr}-${String(dia).padStart(2, '0')}`;
-        // Recebe caminhão tanque no dia 4 e no dia 11
-        const temEntrada = dia === 4 || dia === 11;
-        const entradaLitros = temEntrada ? 5000 : 0;
-        const vendasDia = Math.round(comb.vendMedia * (0.9 + Math.sin(dia) * 0.15));
-        const afericoesDia = 20;
-
-        const calc = calcularLMC(
-          estoqueAtual,
-          entradaLitros,
-          vendasDia,
-          afericoesDia,
-          estoqueAtual + entradaLitros - vendasDia - afericoesDia + (dia % 2 === 0 ? -12 : 8)
-        );
-
-        lista.push({
-          id: `lmc-${comb.nome.toLowerCase().replace(/\s+/g, '-')}-${dataStr}`,
-          postoId,
-          data: dataStr,
-          produto: comb.nome,
-          tanqueCodigo: `TQ-${comb.nome.substring(0, 3).toUpperCase()}`,
-          estoqueAbertura: calc.estoqueAbertura,
-          entradas: calc.entradas,
-          notasFiscais: temEntrada
-            ? [
-                {
-                  numeroNF: `NF-${98000 + dia}`,
-                  distribuidora: 'Petrobras / Vibra Energia',
-                  volumeLitros: entradaLitros,
-                },
-              ]
-            : [],
-          vendas: calc.vendas,
-          afericoes: calc.afericoes,
-          estoqueEscritural: calc.estoqueEscritural,
-          estoqueFisico: calc.estoqueFisico,
-          medicaoReguaCm: Math.round((calc.estoqueFisico / 200) * 10) / 10,
-          variacaoLitros: calc.variacaoLitros,
-          variacaoPercentual: calc.variacaoPercentual,
-          toleranciaANPMaxLitros: calc.toleranciaMaximaLitros,
-          statusANP: calc.statusANP,
-          fechado: true,
-          responsavelNome: userProfile?.nome || 'Gerente Operacional',
-          criadoEm: new Date().toISOString(),
-          atualizadoEm: new Date().toISOString(),
-        });
-
-        estoqueAtual = calc.estoqueFisico;
-      }
+    setCarregando(true);
+    const unsub = repoLMC.subscribe(postoId, (items) => {
+      setRegistrosLMC([...items].sort((a, b) => b.data.localeCompare(a.data)));
+      setCarregando(false);
     });
-
-    return lista;
-  };
+    return () => unsub();
+  }, [postoId]);
 
   // Puxa automaticamente do fechamento e dos tanques cadastrados
   const handleAutoPreencherDoPosto = () => {

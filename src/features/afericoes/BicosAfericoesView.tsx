@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Bico, Afericao, Funcionario, Tanque } from '../../types';
 import { PostoSubcollectionRepository, registrarAuditoria } from '../../repositories/firestoreRepository';
 import { useAuth } from '../../contexts/AuthContext';
@@ -70,6 +70,7 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
   // Modais de Aferições
   const [isModalAfericao, setIsModalAfericao] = useState(false);
   const [isModalBico, setIsModalBico] = useState(false);
+  const [bicoEditandoCadastro, setBicoEditandoCadastro] = useState<Bico | null>(null);
   const [bicoParaExcluir, setBicoParaExcluir] = useState<Bico | null>(null);
   const [isModalExcluirBico, setIsModalExcluirBico] = useState(false);
 
@@ -92,7 +93,7 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
 
   // Form Novo Bico
   const [numBico, setNumBico] = useState(bicos.length > 0 ? Math.max(...bicos.map((b) => b.numero)) + 1 : 1);
-  const [bomba, setBomba] = useState('Bomba 01 (Quádrupla)');
+  const [bomba, setBomba] = useState('Bomba 01 (Sêxtupla - Ilha 01)');
   const [tanqueId, setTanqueId] = useState(tanques[0]?.id || '');
   const [produto, setProduto] = useState('Gasolina Comum');
   const [lado, setLado] = useState<'A' | 'B'>('A');
@@ -292,13 +293,26 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
     await handleSalvarPrecosLote(atualizados);
   };
 
-  // Salvar Novo Bico
+  // Abrir modal para alterar cadastro completo de um Bico
+  const abrirModalEditarBico = (b: Bico) => {
+    setBicoEditandoCadastro(b);
+    setNumBico(b.numero);
+    setBomba(b.bomba);
+    setTanqueId(b.tanqueId);
+    setProduto(b.produto);
+    setLado(b.lado);
+    setNovoBicoPrecoBase(b.precoBase || b.precoLitro || 5.89);
+    setIsModalBico(true);
+  };
+
+  // Salvar Novo Bico ou Alterar Bico Existente
   const handleSalvarBico = async (e: React.FormEvent) => {
     e.preventDefault();
-    const id = `bico-${Date.now()}`;
+    const id = bicoEditandoCadastro?.id || `bico-${Date.now()}`;
     const precoPadrao = PRECOS_PADRAO_COMBUSTIVEL[produto] || novoBicoPrecoBase || 5.89;
 
     const novoBico: Bico = {
+      ...(bicoEditandoCadastro || {}),
       id,
       postoId,
       numero: numBico,
@@ -306,11 +320,11 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
       tanqueId,
       produto,
       lado,
-      status: 'ATIVO',
+      status: bicoEditandoCadastro?.status || 'ATIVO',
       precoBase: novoBicoPrecoBase || precoPadrao,
       precoLitro: novoBicoPrecoBase || precoPadrao,
-      temDesconto: false,
-      criadoEm: new Date().toISOString(),
+      temDesconto: bicoEditandoCadastro?.temDesconto || false,
+      criadoEm: bicoEditandoCadastro?.criadoEm || new Date().toISOString(),
       atualizadoEm: new Date().toISOString(),
     };
 
@@ -322,12 +336,13 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
       'BICOS',
       'Bico',
       id,
-      'CREATE',
-      null,
+      bicoEditandoCadastro ? 'UPDATE' : 'CREATE',
+      bicoEditandoCadastro as unknown as Record<string, unknown>,
       novoBico as unknown as Record<string, unknown>
     );
 
     setIsModalBico(false);
+    setBicoEditandoCadastro(null);
     onReload();
   };
 
@@ -481,38 +496,41 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
     }
   };
 
-  // Gerar Pista Padrão com 2 Bombas (Lado A e Lado B) e Aferições de Diagnóstico
+  // Configurar estrutura limpa de 2 Bombas Sêxtuplas (3 Bicos Lado A e 3 Bicos Lado B = 12 bicos) sem aferições de demonstração
   const handleGerarPistaPadrao = async () => {
     setProcessandoAcao(true);
     try {
-      const hoje = new Date().toISOString().slice(0, 10);
-      const ontem = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
       const padraoBicos: Array<{
         num: number;
         bomba: string;
         lado: 'A' | 'B';
         prod: string;
         preco: number;
-        leituras: number[];
       }> = [
-        { num: 1, bomba: 'Bomba 01 (Ilha Principal)', lado: 'A', prod: 'Gasolina Comum', preco: 5.89, leituras: [20.015, 20.010] },
-        { num: 2, bomba: 'Bomba 01 (Ilha Principal)', lado: 'A', prod: 'Gasolina Aditivada', preco: 6.09, leituras: [19.980, 19.990] },
-        { num: 3, bomba: 'Bomba 01 (Ilha Principal)', lado: 'A', prod: 'Etanol Hidratado', preco: 3.99, leituras: [20.075, 20.040] },
-        { num: 4, bomba: 'Bomba 01 (Ilha Principal)', lado: 'B', prod: 'Gasolina Comum', preco: 5.89, leituras: [20.000, 20.005] },
-        { num: 5, bomba: 'Bomba 01 (Ilha Principal)', lado: 'B', prod: 'Gasolina Aditivada', preco: 6.09, leituras: [20.025, 20.020] },
-        { num: 6, bomba: 'Bomba 01 (Ilha Principal)', lado: 'B', prod: 'Etanol Hidratado', preco: 3.99, leituras: [19.875, 19.930] },
-        { num: 7, bomba: 'Bomba 02 (Ilha Diesel)', lado: 'A', prod: 'Diesel S10', preco: 6.19, leituras: [20.010, 20.000] },
-        { num: 8, bomba: 'Bomba 02 (Ilha Diesel)', lado: 'B', prod: 'Diesel S500', preco: 5.99, leituras: [19.990, 19.995] },
+        // Bomba 01 — 3 Bicos Lado A e 3 Bicos Lado B
+        { num: 1, bomba: 'Bomba 01 (Sêxtupla - Ilha 01)', lado: 'A', prod: 'Gasolina Comum', preco: 5.89 },
+        { num: 2, bomba: 'Bomba 01 (Sêxtupla - Ilha 01)', lado: 'A', prod: 'Gasolina Aditivada', preco: 6.09 },
+        { num: 3, bomba: 'Bomba 01 (Sêxtupla - Ilha 01)', lado: 'A', prod: 'Etanol Hidratado', preco: 3.99 },
+        { num: 4, bomba: 'Bomba 01 (Sêxtupla - Ilha 01)', lado: 'B', prod: 'Gasolina Comum', preco: 5.89 },
+        { num: 5, bomba: 'Bomba 01 (Sêxtupla - Ilha 01)', lado: 'B', prod: 'Gasolina Aditivada', preco: 6.09 },
+        { num: 6, bomba: 'Bomba 01 (Sêxtupla - Ilha 01)', lado: 'B', prod: 'Etanol Hidratado', preco: 3.99 },
+        // Bomba 02 — 3 Bicos Lado A e 3 Bicos Lado B
+        { num: 7, bomba: 'Bomba 02 (Sêxtupla - Ilha 02)', lado: 'A', prod: 'Gasolina Comum', preco: 5.89 },
+        { num: 8, bomba: 'Bomba 02 (Sêxtupla - Ilha 02)', lado: 'A', prod: 'Etanol Hidratado', preco: 3.99 },
+        { num: 9, bomba: 'Bomba 02 (Sêxtupla - Ilha 02)', lado: 'A', prod: 'Diesel S10', preco: 6.19 },
+        { num: 10, bomba: 'Bomba 02 (Sêxtupla - Ilha 02)', lado: 'B', prod: 'Gasolina Comum', preco: 5.89 },
+        { num: 11, bomba: 'Bomba 02 (Sêxtupla - Ilha 02)', lado: 'B', prod: 'Etanol Hidratado', preco: 3.99 },
+        { num: 12, bomba: 'Bomba 02 (Sêxtupla - Ilha 02)', lado: 'B', prod: 'Diesel S10', preco: 6.19 },
       ];
 
       for (const item of padraoBicos) {
-        const bId = `bico-padrao-${item.num}`;
+        const bId = `bico-${item.num}`;
         const novoB: Bico = {
           id: bId,
           postoId,
           numero: item.num,
           bomba: item.bomba,
-          tanqueId: tanques[0]?.id || 'tanque-01',
+          tanqueId: tanques[0]?.id || '',
           produto: item.prod,
           lado: item.lado,
           status: 'ATIVO',
@@ -523,37 +541,11 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
           atualizadoEm: new Date().toISOString(),
         };
         await repoBicos.save(postoId, novoB);
-
-        // Criar 2 aferições (ontem e hoje) para análise de tendência e diagnóstico
-        for (let idx = 0; idx < item.leituras.length; idx++) {
-          const vol = item.leituras[idx];
-          const calc = calcularAfericao(vol, 20.0, 0.1);
-          const afId = `af-padrao-${item.num}-${idx}`;
-          const novaAf: Afericao = {
-            id: afId,
-            postoId,
-            bicoId: bId,
-            tanqueId: novoB.tanqueId,
-            produto: item.prod,
-            funcionarioId: funcionarios[0]?.id || 'op-01',
-            data: idx === 0 ? hoje : ontem,
-            hora: idx === 0 ? '08:30' : '14:15',
-            volumeNominal: 20.0,
-            volumeAferido: vol,
-            diferenca: calc.diferenca,
-            toleranciaConfigurada: 0.1,
-            resultado: calc.resultado,
-            equipamento: 'Medidor Padrão 20L Inmetro',
-            observacao: idx === 0 ? 'Aferição matinal de rotina' : 'Conferência anterior',
-            criadoEm: new Date().toISOString(),
-          };
-          await repoAfericoes.save(postoId, novaAf);
-        }
       }
 
       onReload();
     } catch (err) {
-      console.error('Erro ao gerar pista padrão:', err);
+      console.error('Erro ao configurar bombas:', err);
     } finally {
       setProcessandoAcao(false);
     }
@@ -801,18 +793,28 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
                         </span>
                       </div>
 
-                      {/* Botão de Excluir Bico */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setBicoParaExcluir(b);
-                          setIsModalExcluirBico(true);
-                        }}
-                        className="p-1 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded transition"
-                        title="Remover Bico"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      {/* Botões de Alterar e Excluir Bico */}
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => abrirModalEditarBico(b)}
+                          className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition"
+                          title="Alterar Cadastro do Bico"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setBicoParaExcluir(b);
+                            setIsModalExcluirBico(true);
+                          }}
+                          className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition"
+                          title="Remover Bico"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
 
                     {/* Dados do Combustível e Bomba */}
@@ -1312,11 +1314,13 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
         </div>
       )}
 
-      {/* Modal Novo Bico */}
+      {/* Modal Novo / Alterar Bico */}
       {isModalBico && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-slate-200">
-            <h3 className="text-base font-bold text-slate-900 mb-3">Novo Bico de Combustível</h3>
+            <h3 className="text-base font-bold text-slate-900 mb-3">
+              {bicoEditandoCadastro ? `Alterar Bico ${bicoEditandoCadastro.numero}` : 'Novo Bico de Combustível'}
+            </h3>
 
             <form onSubmit={handleSalvarBico} className="space-y-3.5">
               <div className="grid grid-cols-2 gap-3">

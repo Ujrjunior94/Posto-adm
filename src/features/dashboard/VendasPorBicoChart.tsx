@@ -75,66 +75,9 @@ export const VendasPorBicoChart: React.FC<VendasPorBicoChartProps> = ({
   const [bicoFiltro, setBicoFiltro] = useState<string>('TODOS');
   const [periodoMeses, setPeriodoMeses] = useState<number>(6);
 
-  // Lista normalizada de bicos ativos (usa os bicos cadastrados ou padrão do posto se vazio)
+  // Lista normalizada de bicos ativos reais cadastrados na nuvem
   const bicosDisponiveis = useMemo(() => {
-    if (bicos && bicos.length > 0) {
-      return bicos;
-    }
-    // Bicos padrão representativos do posto
-    return [
-      {
-        id: 'bico-padrao-1',
-        postoId: 'posto-matriz-01',
-        numero: 1,
-        bomba: 'Bomba 01',
-        tanqueId: 'tq-1',
-        produto: 'Gasolina Comum',
-        lado: 'A' as const,
-        status: 'ATIVO' as const,
-        precoLitro: 5.89,
-        criadoEm: '',
-        atualizadoEm: '',
-      },
-      {
-        id: 'bico-padrao-2',
-        postoId: 'posto-matriz-01',
-        numero: 2,
-        bomba: 'Bomba 01',
-        tanqueId: 'tq-2',
-        produto: 'Etanol Hidratado',
-        lado: 'B' as const,
-        status: 'ATIVO' as const,
-        precoLitro: 3.89,
-        criadoEm: '',
-        atualizadoEm: '',
-      },
-      {
-        id: 'bico-padrao-3',
-        postoId: 'posto-matriz-01',
-        numero: 3,
-        bomba: 'Bomba 02',
-        tanqueId: 'tq-3',
-        produto: 'Diesel S10',
-        lado: 'A' as const,
-        status: 'ATIVO' as const,
-        precoLitro: 6.19,
-        criadoEm: '',
-        atualizadoEm: '',
-      },
-      {
-        id: 'bico-padrao-4',
-        postoId: 'posto-matriz-01',
-        numero: 4,
-        bomba: 'Bomba 02',
-        tanqueId: 'tq-1',
-        produto: 'Gasolina Aditivada',
-        lado: 'B' as const,
-        status: 'ATIVO' as const,
-        precoLitro: 6.15,
-        criadoEm: '',
-        atualizadoEm: '',
-      },
-    ];
+    return bicos || [];
   }, [bicos]);
 
   // Produtos únicos disponíveis nos bicos
@@ -159,7 +102,7 @@ export const VendasPorBicoChart: React.FC<VendasPorBicoChartProps> = ({
     });
   }, [bicosDisponiveis, combustivelFiltro, bicoFiltro]);
 
-  // Geração e agregação mensal dos dados
+  // Geração e agregação mensal dos dados reais da nuvem
   const dadosMensais = useMemo<MesDados[]>(() => {
     const hoje = new Date();
     const meses: MesDados[] = [];
@@ -188,8 +131,7 @@ export const VendasPorBicoChart: React.FC<VendasPorBicoChartProps> = ({
       meses.push(mesItem);
     }
 
-    // 1. Acumular dados reais de fechamentos existentes
-    let teveDadosReais = false;
+    // Acumular dados reais de fechamentos sincronizados na nuvem
     fechamentos.forEach((f) => {
       if (!f.data) return;
       const fMesKey = f.data.slice(0, 7);
@@ -198,7 +140,6 @@ export const VendasPorBicoChart: React.FC<VendasPorBicoChartProps> = ({
 
       if (f.encerrantesBicos && f.encerrantesBicos.length > 0) {
         f.encerrantesBicos.forEach((itemEnc: ItemEncerranteBico) => {
-          teveDadosReais = true;
           const num = itemEnc.numeroBico;
           const litros = Number(itemEnc.litrosVendidos) || 0;
           const valor = Number(itemEnc.valorTotal) || litros * (itemEnc.precoLitro || 5.89);
@@ -208,44 +149,10 @@ export const VendasPorBicoChart: React.FC<VendasPorBicoChartProps> = ({
 
           targetMes[`bico_${num}_litros`] = Math.round(litrosAtual + litros);
           targetMes[`bico_${num}_valor`] = Math.round((valorAtual + valor) * 100) / 100;
-          targetMes.totalLitros += litros;
-          targetMes.totalValor += valor;
+          targetMes.totalLitros = Math.round(targetMes.totalLitros + litros);
+          targetMes.totalValor = Math.round((targetMes.totalValor + valor) * 100) / 100;
         });
       }
-    });
-
-    // 2. Se não houver dados históricos completos para todos os meses (ex: apenas o mês corrente foi lançado),
-    // preencher de forma proporcional e realista com base na volumetria de cada bico
-    meses.forEach((m, idx) => {
-      bicosDisponiveis.forEach((b) => {
-        const litrosKey = `bico_${b.numero}_litros`;
-        const valorKey = `bico_${b.numero}_valor`;
-        const valAtual = (m[litrosKey] as number) || 0;
-
-        // Se o mês estiver zerado para este bico, criar volume contextual consistente
-        if (valAtual === 0) {
-          // Variação mensal sazonal suave (+-12%)
-          const fatorSazonal = 1 + Math.sin((idx + b.numero) * 0.9) * 0.12;
-          
-          let baseLitrosBico = 14500; // Média mensal padrão por bico no Brasil
-          if (b.produto.includes('Gasolina Comum')) baseLitrosBico = 19800;
-          else if (b.produto.includes('Etanol')) baseLitrosBico = 15200;
-          else if (b.produto.includes('Diesel')) baseLitrosBico = 24600;
-          else if (b.produto.includes('Aditivada')) baseLitrosBico = 8900;
-
-          const litrosSimulado = Math.round(baseLitrosBico * fatorSazonal);
-          const preco = b.precoLitro || (b.produto.includes('Etanol') ? 3.89 : b.produto.includes('Diesel') ? 6.19 : 5.89);
-          const valorSimulado = Math.round(litrosSimulado * preco * 100) / 100;
-
-          m[litrosKey] = litrosSimulado;
-          m[valorKey] = valorSimulado;
-          m.totalLitros += litrosSimulado;
-          m.totalValor += valorSimulado;
-        }
-      });
-
-      m.totalLitros = Math.round(m.totalLitros);
-      m.totalValor = Math.round(m.totalValor * 100) / 100;
     });
 
     return meses;

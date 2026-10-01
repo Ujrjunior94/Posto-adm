@@ -37,9 +37,12 @@ import {
   Building2,
   Printer,
   Download,
+  Edit2,
+  Trash2,
 } from 'lucide-react';
 
 const repoOcorrencia = new PostoSubcollectionRepository<OcorrenciaCaixa>('ocorrenciasCaixa');
+const repoFechamento = new PostoSubcollectionRepository<FechamentoCaixa>('fechamentos');
 
 interface FechamentoProps {
   fechamentos: FechamentoCaixa[];
@@ -64,6 +67,7 @@ export const FechamentoCaixaView: React.FC<FechamentoProps> = ({
 
   // Estados dos modais
   const [isModalNovoFechamento, setIsModalNovoFechamento] = useState(false);
+  const [fechamentoParaEditar, setFechamentoParaEditar] = useState<FechamentoCaixa | null>(null);
   const [isModalDetalhes, setIsModalDetalhes] = useState(false);
   const [autoPrintModal, setAutoPrintModal] = useState(false);
   const [isModalOcorrencia, setIsModalOcorrencia] = useState(false);
@@ -224,6 +228,17 @@ export const FechamentoCaixaView: React.FC<FechamentoProps> = ({
     setIsModalOcorrencia(true);
   };
 
+  const handleEditarFechamento = (fechamento: FechamentoCaixa) => {
+    setFechamentoParaEditar(fechamento);
+    setIsModalNovoFechamento(true);
+  };
+
+  const handleExcluirFechamento = async (fechamento: FechamentoCaixa) => {
+    if (!window.confirm(`Deseja realmente excluir este Fechamento de Caixa (${fechamento.data.split('-').reverse().join('/')} - ${fechamento.turno})?`)) return;
+    await repoFechamento.delete(postoId, fechamento.id);
+    await onReload();
+  };
+
   const handleFechamentoSalvo = (fechamento: FechamentoCaixa) => {
     if (fechamento.tipoDiferenca === 'FALTA') {
       setSelectedFechamento(fechamento);
@@ -279,7 +294,10 @@ export const FechamentoCaixaView: React.FC<FechamentoProps> = ({
           </button>
 
           <button
-            onClick={() => setIsModalNovoFechamento(true)}
+            onClick={() => {
+              setFechamentoParaEditar(null);
+              setIsModalNovoFechamento(true);
+            }}
             className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl transition shadow-sm hover:shadow-md"
           >
             <Plus className="w-5 h-5" />
@@ -519,6 +537,26 @@ export const FechamentoCaixaView: React.FC<FechamentoProps> = ({
                             Detalhes
                           </button>
 
+                          <button
+                            type="button"
+                            onClick={() => handleEditarFechamento(f)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-semibold transition"
+                            title="Alterar este fechamento de caixa"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                            Alterar
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleExcluirFechamento(f)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-lg text-xs font-semibold transition"
+                            title="Excluir este fechamento de caixa"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            Excluir
+                          </button>
+
                           {f.tipoDiferenca === 'FALTA' && (
                             <button
                               type="button"
@@ -541,10 +579,13 @@ export const FechamentoCaixaView: React.FC<FechamentoProps> = ({
         </div>
       </div>
 
-      {/* Modal Novo Fechamento */}
+      {/* Modal Novo / Alterar Fechamento */}
       <ModalNovoFechamento
         isOpen={isModalNovoFechamento}
-        onClose={() => setIsModalNovoFechamento(false)}
+        onClose={() => {
+          setIsModalNovoFechamento(false);
+          setFechamentoParaEditar(null);
+        }}
         bicos={bicos}
         tanques={tanques}
         funcionarios={funcionarios}
@@ -552,6 +593,7 @@ export const FechamentoCaixaView: React.FC<FechamentoProps> = ({
         fechamentos={fechamentos}
         postoId={postoId}
         userProfile={userProfile}
+        fechamentoParaEditar={fechamentoParaEditar}
         onFechamentoSalvo={handleFechamentoSalvo}
         onReload={onReload}
       />

@@ -213,7 +213,7 @@ const MainApp: React.FC = () => {
     registerAccess,
     signOut,
   } = useAuth();
-  const { isOnline, syncState, pendingCount, syncNow } = useSync();
+  const { isOnline, syncState, pendingCount, ultimoPingNuvem, syncNow } = useSync();
 
   const [activeTab, setActiveTab] = useState('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -256,245 +256,36 @@ const MainApp: React.FC = () => {
   const currentTabDef = ALL_MENU_ITEMS.find((item) => item.id === activeTab) || ALL_MENU_ITEMS[0];
   const CurrentIcon = currentTabDef.icon;
 
-  const carregarDadosLocais = async () => {
-    setFuncionarios(await repoFunc.getAll(postoId));
-    setTanques(await repoTanques.getAll(postoId));
-    setBicos(await repoBicos.getAll(postoId));
-    setEscalas(await repoEscalas.getAll(postoId));
-    setFechamentos(await repoFech.getAll(postoId));
-    setOcorrencias(await repoOcorr.getAll(postoId));
-    setAfericoes(await repoAfericoes.getAll(postoId));
-    setDensidades(await repoDensidades.getAll(postoId));
-    setConformidades(await repoConformidades.getAll(postoId));
-    setAuditoria(await repoAuditoria.getAll(postoId));
+  const carregarDadosNuvem = async () => {
+    const [f, t, b, e, fc, oc, af, dn, cf, au] = await Promise.all([
+      repoFunc.getAll(postoId),
+      repoTanques.getAll(postoId),
+      repoBicos.getAll(postoId),
+      repoEscalas.getAll(postoId),
+      repoFech.getAll(postoId),
+      repoOcorr.getAll(postoId),
+      repoAfericoes.getAll(postoId),
+      repoDensidades.getAll(postoId),
+      repoConformidades.getAll(postoId),
+      repoAuditoria.getAll(postoId),
+    ]);
+    setFuncionarios(f);
+    setTanques(t);
+    setBicos(b);
+    setEscalas(e);
+    setFechamentos(fc);
+    setOcorrencias(oc);
+    setAfericoes(af);
+    setDensidades(dn);
+    setConformidades(cf);
+    setAuditoria(au);
   };
 
   const carregarDados = async () => {
-    await carregarDadosLocais();
+    await carregarDadosNuvem();
   };
 
-  // Função prática para popular pista completa (Tanques, Bombas Lado A/B, Aferições 20L e Equipe)
-  const handlePopularDadosExemplo = async () => {
-    setLimpandoDados(true);
-    try {
-      const hoje = new Date().toISOString().slice(0, 10);
-      const ontem = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-
-      // 1. Tanques
-      const tanquesPadrao: Tanque[] = [
-        {
-          id: 'tq-01',
-          postoId,
-          codigo: 'TQ-01',
-          produto: 'Gasolina Comum',
-          capacidadeNominal: 30000,
-          capacidadeOperacional: 28500,
-          unidade: 'Litros',
-          formato: 'CILINDRICO_HORIZONTAL',
-          ativo: true,
-          tabelaRegua: [
-            { altura: 20, volume: 2100 },
-            { altura: 50, volume: 6300 },
-            { altura: 100, volume: 15000 },
-            { altura: 150, volume: 24000 },
-            { altura: 200, volume: 30000 },
-          ],
-          criadoEm: new Date().toISOString(),
-          atualizadoEm: new Date().toISOString(),
-        },
-        {
-          id: 'tq-02',
-          postoId,
-          codigo: 'TQ-02',
-          produto: 'Gasolina Aditivada',
-          capacidadeNominal: 20000,
-          capacidadeOperacional: 19000,
-          unidade: 'Litros',
-          formato: 'CILINDRICO_HORIZONTAL',
-          ativo: true,
-          tabelaRegua: [
-            { altura: 20, volume: 1500 },
-            { altura: 50, volume: 4500 },
-            { altura: 100, volume: 10000 },
-            { altura: 150, volume: 16000 },
-            { altura: 200, volume: 20000 },
-          ],
-          criadoEm: new Date().toISOString(),
-          atualizadoEm: new Date().toISOString(),
-        },
-        {
-          id: 'tq-03',
-          postoId,
-          codigo: 'TQ-03',
-          produto: 'Etanol Hidratado',
-          capacidadeNominal: 20000,
-          capacidadeOperacional: 19000,
-          unidade: 'Litros',
-          formato: 'CILINDRICO_HORIZONTAL',
-          ativo: true,
-          tabelaRegua: [
-            { altura: 20, volume: 1500 },
-            { altura: 50, volume: 4500 },
-            { altura: 100, volume: 10000 },
-            { altura: 150, volume: 16000 },
-            { altura: 200, volume: 20000 },
-          ],
-          criadoEm: new Date().toISOString(),
-          atualizadoEm: new Date().toISOString(),
-        },
-        {
-          id: 'tq-04',
-          postoId,
-          codigo: 'TQ-04',
-          produto: 'Diesel S10',
-          capacidadeNominal: 30000,
-          capacidadeOperacional: 28500,
-          unidade: 'Litros',
-          formato: 'CILINDRICO_HORIZONTAL',
-          ativo: true,
-          tabelaRegua: [
-            { altura: 20, volume: 2100 },
-            { altura: 50, volume: 6300 },
-            { altura: 100, volume: 15000 },
-            { altura: 150, volume: 24000 },
-            { altura: 200, volume: 30000 },
-          ],
-          criadoEm: new Date().toISOString(),
-          atualizadoEm: new Date().toISOString(),
-        },
-      ];
-
-      for (const t of tanquesPadrao) {
-        await repoTanques.save(postoId, t);
-      }
-
-      // 2. Funcionários
-      const funcsPadrao: Funcionario[] = [
-        {
-          id: 'func-01',
-          postoId,
-          nome: 'Carlos Eduardo Silva',
-          cpf: '12345678909',
-          matricula: 'FR-101',
-          telefone: '(11) 98877-6655',
-          cargo: 'Chefe de Pista',
-          funcao: 'Chefe de Pista',
-          status: 'ATIVO',
-          dataAdmissao: '2023-03-10',
-          turnoPreferencial: 'Turno 1 - Manhã (06h - 14h)',
-          criadoEm: new Date().toISOString(),
-          atualizadoEm: new Date().toISOString(),
-        },
-        {
-          id: 'func-02',
-          postoId,
-          nome: 'Mariana Costa Souza',
-          cpf: '98765432100',
-          matricula: 'FR-102',
-          telefone: '(11) 97766-5544',
-          cargo: 'Frentista Caixa',
-          funcao: 'Frentista / Caixa',
-          status: 'ATIVO',
-          dataAdmissao: '2024-01-15',
-          turnoPreferencial: 'Turno 2 - Tarde (14h - 22h)',
-          criadoEm: new Date().toISOString(),
-          atualizadoEm: new Date().toISOString(),
-        },
-        {
-          id: 'func-03',
-          postoId,
-          nome: 'Roberto Almeida Santos',
-          cpf: '45678912300',
-          matricula: 'FR-103',
-          telefone: '(11) 96655-4433',
-          cargo: 'Frentista',
-          funcao: 'Frentista Horista',
-          status: 'ATIVO',
-          dataAdmissao: '2024-06-01',
-          turnoPreferencial: 'Turno Horista',
-          criadoEm: new Date().toISOString(),
-          atualizadoEm: new Date().toISOString(),
-        },
-      ];
-
-      for (const f of funcsPadrao) {
-        await repoFunc.save(postoId, f);
-      }
-
-      // 3. Bicos & Aferições (Bomba 01 Lado A e B, Bomba 02 Lado A e B)
-      const configBicos: Array<{
-        num: number;
-        bomba: string;
-        lado: 'A' | 'B';
-        prod: string;
-        tq: string;
-        preco: number;
-        leituras: [number, number];
-      }> = [
-        { num: 1, bomba: 'Bomba 01 (Ilha Principal)', lado: 'A', prod: 'Gasolina Comum', tq: 'tq-01', preco: 5.89, leituras: [20.015, 20.010] },
-        { num: 2, bomba: 'Bomba 01 (Ilha Principal)', lado: 'A', prod: 'Gasolina Aditivada', tq: 'tq-02', preco: 6.09, leituras: [19.985, 19.990] },
-        { num: 3, bomba: 'Bomba 01 (Ilha Principal)', lado: 'A', prod: 'Etanol Hidratado', tq: 'tq-03', preco: 3.99, leituras: [20.075, 20.045] },
-        { num: 4, bomba: 'Bomba 01 (Ilha Principal)', lado: 'B', prod: 'Gasolina Comum', tq: 'tq-01', preco: 5.89, leituras: [20.000, 20.005] },
-        { num: 5, bomba: 'Bomba 01 (Ilha Principal)', lado: 'B', prod: 'Gasolina Aditivada', tq: 'tq-02', preco: 6.09, leituras: [20.025, 20.015] },
-        { num: 6, bomba: 'Bomba 01 (Ilha Principal)', lado: 'B', prod: 'Etanol Hidratado', tq: 'tq-03', preco: 3.99, leituras: [19.875, 19.935] },
-        { num: 7, bomba: 'Bomba 02 (Ilha Diesel)', lado: 'A', prod: 'Diesel S10', tq: 'tq-04', preco: 6.19, leituras: [20.010, 20.000] },
-        { num: 8, bomba: 'Bomba 02 (Ilha Diesel)', lado: 'B', prod: 'Diesel S500', tq: 'tq-04', preco: 5.99, leituras: [19.990, 19.995] },
-      ];
-
-      for (const item of configBicos) {
-        const bId = `bico-padrao-${item.num}`;
-        await repoBicos.save(postoId, {
-          id: bId,
-          postoId,
-          numero: item.num,
-          bomba: item.bomba,
-          tanqueId: item.tq,
-          produto: item.prod,
-          lado: item.lado,
-          status: 'ATIVO',
-          precoBase: item.preco,
-          precoLitro: item.preco,
-          temDesconto: false,
-          criadoEm: new Date().toISOString(),
-          atualizadoEm: new Date().toISOString(),
-        });
-
-        for (let idx = 0; idx < item.leituras.length; idx++) {
-          const vol = item.leituras[idx];
-          const diff = Math.round((vol - 20.0) * 1000) / 1000;
-          const isOk = Math.abs(Math.round(diff * 1000)) <= 100;
-          await repoAfericoes.save(postoId, {
-            id: `af-padrao-${item.num}-${idx}`,
-            postoId,
-            bicoId: bId,
-            tanqueId: item.tq,
-            produto: item.prod,
-            funcionarioId: 'func-01',
-            data: idx === 0 ? hoje : ontem,
-            hora: idx === 0 ? '08:20' : '15:40',
-            volumeNominal: 20.0,
-            volumeAferido: vol,
-            diferenca: diff,
-            toleranciaConfigurada: 0.1,
-            resultado: isOk ? 'CONFORME' : 'NAO_CONFORME',
-            equipamento: 'Medidor Padrão 20L Inmetro',
-            observacao: idx === 0 ? 'Aferição matinal de pista' : 'Aferição do turno anterior',
-            criadoEm: new Date().toISOString(),
-          });
-        }
-      }
-
-      await carregarDados();
-      setToastSucesso('Pista carregada com Bombas (Lado A e B), Tanques, Equipe e Aferições 20L!');
-      setTimeout(() => setToastSucesso(''), 5000);
-    } catch (err) {
-      console.error('Erro ao popular dados de exemplo:', err);
-    } finally {
-      setLimpandoDados(false);
-    }
-  };
-
-  // Função para remover todos os dados de demonstração e resetar o posto
+  // Função para remover todos os dados de demonstração e zerar as coleções na nuvem Firestore
   const handleRemoverDadosDemonstracao = async () => {
     setLimpandoDados(true);
     try {
@@ -517,7 +308,7 @@ const MainApp: React.FC = () => {
         const chavesParaRemover: string[] = [];
         for (let i = 0; i < localStorage.length; i++) {
           const key = localStorage.key(i);
-          if (key && (key.startsWith('meuposto_demo_') || key.startsWith('meuposto_'))) {
+          if (key && (key.startsWith('meuposto_demo_') || key === 'meu_posto_sync_queue')) {
             chavesParaRemover.push(key);
           }
         }
@@ -541,20 +332,20 @@ const MainApp: React.FC = () => {
           userProfile.uid,
           userProfile.nome,
           'SISTEMA',
-          'BANCO_DE_DADOS',
+          'BANCO_DE_DADOS_NUVEM',
           postoId,
           'DELETE',
-          { acao: 'Remoção de dados de demonstração e reset de coleções' },
+          { acao: 'Limpeza completa de dados de demonstração na nuvem 24h' },
           null
         );
       }
 
       setModalLimpezaAberto(false);
-      setToastSucesso('Dados de demonstração removidos com sucesso! Banco limpo para uso operacional.');
+      setToastSucesso('Dados de demonstração limpos na nuvem! Sistema pronto para operação real 24h.');
       setTimeout(() => setToastSucesso(''), 5000);
     } catch (err) {
       console.error('Erro ao remover dados de demonstração:', err);
-      alert('Erro ao limpar dados: ' + (err instanceof Error ? err.message : String(err)));
+      alert('Erro ao limpar dados na nuvem: ' + (err instanceof Error ? err.message : String(err)));
     } finally {
       setLimpandoDados(false);
     }
@@ -563,14 +354,16 @@ const MainApp: React.FC = () => {
   useEffect(() => {
     if (!userProfile) return;
 
-    if (!currentUser) {
-      carregarDadosLocais();
-      return;
+    testConnection();
+
+    // Limpeza automática única dos dados de demonstração legados na nuvem e cache local
+    const flagLimpezaNuvem = `meuposto_demo_purged_cloud_v3_${postoId}`;
+    if (typeof window !== 'undefined' && !localStorage.getItem(flagLimpezaNuvem)) {
+      localStorage.setItem(flagLimpezaNuvem, 'true');
+      handleRemoverDadosDemonstracao();
     }
 
-    testConnection();
-    carregarDados();
-
+    // Conexão 24 horas em tempo real (onSnapshot) diretamente no Google Cloud Firestore
     const unFunc = repoFunc.subscribe(postoId, setFuncionarios);
     const unEsc = repoEscalas.subscribe(postoId, setEscalas);
     const unFech = repoFech.subscribe(postoId, setFechamentos);
@@ -594,7 +387,7 @@ const MainApp: React.FC = () => {
       unConf();
       unAud();
     };
-  }, [postoId, currentUser, userProfile]);
+  }, [postoId, userProfile]);
 
   // Tela de Login Simplificada com Cadastro de Acesso Habilitado
   if (!userProfile) {
@@ -959,24 +752,22 @@ const MainApp: React.FC = () => {
           </div>
         </nav>
 
-        {/* Rodapé de Status de Rede e Sincronização */}
+        {/* Rodapé de Status de Rede e Sincronização 24h na Nuvem */}
         <div className="p-3 border-t border-slate-800 bg-slate-950/60 text-[11px] space-y-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
               {isOnline ? (
-                <Wifi className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
               ) : (
                 <WifiOff className="w-3.5 h-3.5 text-red-400" />
               )}
-              <span className={`text-[11px] font-medium ${isOnline ? 'text-emerald-400' : 'text-red-400'}`}>
+              <span className={`text-[11px] font-bold ${isOnline ? 'text-emerald-400' : 'text-red-400'}`}>
                 {syncState}
               </span>
             </div>
-            {pendingCount > 0 && (
-              <span className="bg-amber-500 text-slate-950 text-[10px] font-bold px-1.5 py-0.2 rounded-full">
-                {pendingCount}
-              </span>
-            )}
+            <span className="text-[9px] font-mono text-slate-400">
+              Sync {ultimoPingNuvem}
+            </span>
           </div>
 
           {pendingCount > 0 && (
@@ -1091,19 +882,25 @@ const MainApp: React.FC = () => {
             </div>
           </div>
 
-          {/* Atalhos Rápidos Diretos (1-Clique) */}
+          {/* Atalhos Rápidos Diretos (1-Clique) e Status Nuvem 24h */}
           <div className="flex items-center gap-2">
-            {bicos.length === 0 && (
-              <button
-                onClick={handlePopularDadosExemplo}
-                disabled={limpandoDados}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white transition shadow-xs whitespace-nowrap"
-                title="Carregar bombas, bicos Lado A/B, tanques e aferições de exemplo"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                <span>Popular Pista Exemplo</span>
-              </button>
-            )}
+            <div
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 whitespace-nowrap"
+              title={`Sincronizado em tempo real no Google Cloud Firestore (${ultimoPingNuvem})`}
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+              <span>Nuvem 24h Conectada</span>
+            </div>
+
+            <button
+              onClick={() => setModalLimpezaAberto(true)}
+              disabled={limpandoDados}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 transition whitespace-nowrap"
+              title="Limpar todos os dados de demonstração da nuvem"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Limpar Dados</span>
+            </button>
 
             <button
               onClick={() => setActiveTab('afericoes')}
@@ -1222,6 +1019,40 @@ const MainApp: React.FC = () => {
             </div>
           </div>
         )}
+
+        {/* Barra Visual de Ícones de Representação Operacional (Acesso Direto 1-Clique) */}
+        <div className="bg-slate-900/95 border-b border-slate-800 px-4 md:px-6 py-2.5 overflow-x-auto print:hidden shrink-0">
+          <div className="flex items-center gap-2 min-w-max max-w-7xl mx-auto">
+            {ALL_MENU_ITEMS.map((item) => {
+              const Icon = item.icon;
+              const isAtivo = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setActiveTab(item.id)}
+                  title={item.description}
+                  className={`group flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                    isAtivo
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/80'
+                  }`}
+                >
+                  <div
+                    className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 transition ${
+                      isAtivo
+                        ? 'bg-white/20 text-white'
+                        : 'bg-slate-900 text-blue-400 group-hover:text-amber-400'
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                  </div>
+                  <span>{item.shortLabel}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
         {/* Conteúdo Principal Renderizado */}
         <main className="flex-1 p-4 md:p-8 overflow-y-auto max-w-7xl mx-auto w-full print:p-0 print:m-0 print:max-w-none print:overflow-visible">

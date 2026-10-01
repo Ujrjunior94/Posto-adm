@@ -89,7 +89,7 @@ REGRAS INVIOLÁVEIS DE EXTRAÇÃO COMPLETA (CRÍTICO - NÃO TRUNQUE!):
    - TURNO 1 - MANHÃ (06:00 às 14:00): Células com "1", "T1", "T01", "Turno 1", "06-14", "06h às 14h", "06:00", "M", "MAN", "Manhã", "M1" -> turno="Turno 1 - Manhã (06h - 14h)", horarioInicio="06:00", horarioFim="14:00", status="TRABALHO".
    - TURNO 2 - TARDE (14:00 às 22:00): Células com "2", "T2", "T02", "Turno 2", "14-22", "14h às 22h", "14:00", "T", "TAR", "Tarde" -> turno="Turno 2 - Tarde (14h - 22h)", horarioInicio="14:00", horarioFim="22:00", status="TRABALHO".
    - TURNO HORISTA (Flexível / Por Hora): Células com "HOR", "H", "Horista", "Flex", "INT" -> turno="Turno Horista", horarioInicio="08:00", horarioFim="14:00", status="TRABALHO".
-   - FOLGAS E DSR: "F", "FOL", "FOLGA", "DSR", "OFF", "DESC", traço ("-") -> status="FOLGA", turno="Folga", horarioInicio="00:00", horarioFim="00:00". NÃO OMITA AS FOLGAS!
+   - FOLGAS E DSR: "S", "F", "FOL", "FOLGA", "DSR", "OFF", "DESC", traço ("-") -> status="FOLGA", turno="Folga", horarioInicio="00:00", horarioFim="00:00". NÃO OMITA AS FOLGAS! Células marcadas com "S" significam FOLGA!
    - AFASTADO / FÉRIAS: "AT", "MED", "LIC" -> status="AFASTADO"; "FE", "FER", "FERIAS" -> status="FERIAS".
 
 4. CORRESPONDÊNCIA DE CADASTRO:
@@ -186,9 +186,9 @@ Retorne os dados estruturados rigorosamente conforme o esquema JSON definido.`;
 
       // Modelos suportados em ordem de preferência e resiliência com chaveamento rápido em pico de demanda
       const modelosCandidatos = [
-        'gemini-3.8-flash',
-        'gemini-3.1-flash-lite',
-        'gemini-flash-latest',
+        'gemini-3-flash-preview',
+        'gemini-3.1-flash-lite-preview',
+        'gemini-2.5-flash',
       ];
       let response: any = null;
       let ultimoErro: any = null;
@@ -301,13 +301,21 @@ Retorne os dados estruturados rigorosamente conforme o esquema JSON definido.`;
             }
 
             const turnoTexto = String(d.turno || '').trim();
+            const codigoOrig = String(d.codigoOriginal || '').trim().toUpperCase();
             const statusRaw = String(d.status || '').toUpperCase();
             const isFolga =
               statusRaw.includes('FOLGA') ||
+              statusRaw === 'S' ||
               statusRaw === 'F' ||
               statusRaw === 'OFF' ||
               statusRaw === 'DSR' ||
+              codigoOrig === 'S' ||
+              codigoOrig === 'F' ||
+              codigoOrig === 'FOLGA' ||
+              codigoOrig === 'DSR' ||
+              codigoOrig === 'OFF' ||
               turnoTexto.toLowerCase().includes('folga') ||
+              turnoTexto.toLowerCase() === 's' ||
               turnoTexto.toLowerCase() === 'f' ||
               turnoTexto.toLowerCase() === 'dsr' ||
               turnoTexto.toLowerCase() === '-';

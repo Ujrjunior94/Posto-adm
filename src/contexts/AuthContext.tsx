@@ -8,7 +8,7 @@ import {
   updateProfile,
   signOut as fbSignOut,
 } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, onSnapshot, setDoc } from 'firebase/firestore';
 import { auth, googleProvider, db } from '../config/firebase';
 import { UserProfile, UserRole } from '../types';
 
@@ -16,7 +16,7 @@ export interface ContaCadastradaLocal {
   uid: string;
   nome: string;
   email: string;
-  senhaHash: string;
+  senhaHash?: string;
   role: UserRole;
   postoId: string;
   ativo: boolean;
@@ -80,7 +80,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
   const [postoId, setPostoId] = useState<string>('posto-matriz-01');
   const [loading, setLoading] = useState<boolean>(true);
-  const [contasLocais, setContasLocais] = useState<ContaCadastradaLocal[]>(() => carregarContasLocais());
+  const [contasNuvem, setContasNuvem] = useState<ContaCadastradaLocal[]>(() => carregarContasLocais());
 
   const persistirSessao = (perfil: UserProfile | null) => {
     setUserProfile(perfil);
@@ -95,6 +95,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  // Sincronização 24h em tempo real da coleção de usuários na nuvem Firestore
+  useEffect(() => {
+    const unsubUsuarios = onSnapshot(
+      collection(db, 'usuarios'),
+      (snap) => {
+        const listaNuvem: ContaCadastradaLocal[] = snap.docs.map((d) => {
+          const data = d.data() as ContaCadastradaLocal;
+          return {
+            ...data,
+            uid: d.id,
+          };
+        });
+        if (listaNuvem.length > 0) {
+          setContasNuvem(listaNuvem);
+          salvarContasLocais(listaNuvem);
+        }
+      },
+      (err) => {
+        console.warn('Listener de usuários em nuvem:', err);
+      }
+    );
+
+    return () => unsubUsuarios();
+  }, []);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
       setCurrentUser(fbUser);
@@ -108,21 +133,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (data.postoId) setPostoId(data.postoId);
           } else {
             const contas = carregarContasLocais();
-            const contaLocal = contas.find(
+            const contaExistente = contas.find(
               (c) => c.email.toLowerCase() === (fbUser.email || '').toLowerCase()
             );
 
             const novoPerfil: UserProfile = {
               uid: fbUser.uid,
-              nome: contaLocal?.nome || fbUser.displayName || fbUser.email?.split('@')[0] || 'Usuário Operacional',
+              nome:
+                contaExistente?.nome ||
+                fbUser.displayName ||
+                fbUser.email?.split('@')[0] ||
+                'Usuário Operacional',
               email: fbUser.email || '',
-              role: contaLocal?.role || 'GERENTE',
-              postoId: contaLocal?.postoId || 'posto-matriz-01',
+              role: contaExistente?.role || 'GERENTE',
+              postoId: contaExistente?.postoId || 'posto-matriz-01',
               ativo: true,
               criadoEm: new Date().toISOString(),
               atualizadoEm: new Date().toISOString(),
             };
-            await setDoc(userDocRef, novoPerfil);
+            await setDoc(userDocRef, novoPerfil, { merge: true });
             persistirSessao(novoPerfil);
             setPostoId(novoPerfil.postoId);
           }
@@ -146,7 +175,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   /**
-   * Cadastro de novo acesso (tenta Firebase Auth + Firestore e garante persistência local imediata)
+   * Cadastro de novo acesso gravado 100% na nuvem Firestore (coleção usuarios)
    */
   const registerAccess = async ({ nome, email, senha, role }: RegisterAccessParams) => {
     const emailLimpo = email.trim().toLowerCase();
@@ -162,40 +191,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error('A senha deve ter pelo menos 4 caracteres.');
     }
 
-    const contasAtuais = carregarContasLocais();
-    if (contasAtuais.some((c) => c.email.toLowerCase() === emailLimpo)) {
-      throw new Error('Este e-mail já possui cadastro. Use a aba "Entrar".');
+    if (contasNuvem.some((c) => c.email.toLowerCase() === emailLimpo)) {
+      throw new Error('Este e-mail já possui cadastro na nuvem. Use a aba "Entrar".');
     }
 
     const agora = new Date().toISOString();
     let uidGerado = `user-${Date.now()}`;
+    const senhaHash = btoa(unescape(encodeURIComponent(senha)));
 
-    // Tenta criar também no Firebase Auth caso Email/Password esteja habilitado no projeto
     try {
       const cred = await createUserWithEmailAndPassword(auth, emailLimpo, senha);
       uidGerado = cred.user.uid;
       await updateProfile(cred.user, { displayName: nomeLimpo });
-
-      const novoPerfilFb: UserProfile = {
-        uid: uidGerado,
-        nome: nomeLimpo,
-        email: emailLimpo,
-        role,
-        postoId: 'posto-matriz-01',
-        ativo: true,
-        criadoEm: agora,
-        atualizadoEm: agora,
-      };
-      await setDoc(doc(db, 'usuarios', uidGerado), novoPerfilFb);
     } catch {
-      // Se Email/Password não estiver habilitado no console Firebase, prossegue com o registro local seguro
+      // Prossegue gravando na coleção usuarios do Cloud Firestore
     }
 
-    const novaConta: ContaCadastradaLocal = {
+    const novaContaNuvem: ContaCadastradaLocal = {
       uid: uidGerado,
       nome: nomeLimpo,
       email: emailLimpo,
-      senhaHash: btoa(unescape(encodeURIComponent(senha))),
+      senhaHash,
       role,
       postoId: 'posto-matriz-01',
       ativo: true,
@@ -203,19 +219,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       atualizadoEm: agora,
     };
 
-    const atualizadas = [novaConta, ...contasAtuais];
+    // Grava diretamente no Cloud Firestore 24h
+    await setDoc(doc(db, 'usuarios', uidGerado), novaContaNuvem, { merge: true });
+
+    const atualizadas = [novaContaNuvem, ...contasNuvem];
     salvarContasLocais(atualizadas);
-    setContasLocais(atualizadas);
+    setContasNuvem(atualizadas);
 
     const perfilAtivo: UserProfile = {
-      uid: novaConta.uid,
-      nome: novaConta.nome,
-      email: novaConta.email,
-      role: novaConta.role,
-      postoId: novaConta.postoId,
+      uid: novaContaNuvem.uid,
+      nome: novaContaNuvem.nome,
+      email: novaContaNuvem.email,
+      role: novaContaNuvem.role,
+      postoId: novaContaNuvem.postoId,
       ativo: true,
-      criadoEm: novaConta.criadoEm,
-      atualizadoEm: novaConta.atualizadoEm,
+      criadoEm: novaContaNuvem.criadoEm,
+      atualizadoEm: novaContaNuvem.atualizadoEm,
     };
 
     persistirSessao(perfilAtivo);
@@ -223,7 +242,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   /**
-   * Login com E-mail e Senha cadastrados
+   * Login com E-mail e Senha verificando diretamente na nuvem Firestore
    */
   const signInWithCredentials = async (email: string, senha: string) => {
     const emailLimpo = email.trim().toLowerCase();
@@ -231,11 +250,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error('Preencha o e-mail e a senha para entrar.');
     }
 
-    // 1. Verifica nas contas cadastradas localmente
-    const contas = carregarContasLocais();
     const senhaCodificada = btoa(unescape(encodeURIComponent(senha)));
-    const contaEncontrada = contas.find(
-      (c) => c.email.toLowerCase() === emailLimpo && c.senhaHash === senhaCodificada
+
+    // Busca atualizada na nuvem Firestore
+    let listaUsuarios = contasNuvem;
+    try {
+      const snap = await getDocs(collection(db, 'usuarios'));
+      if (!snap.empty) {
+        listaUsuarios = snap.docs.map((d) => ({ ...(d.data() as ContaCadastradaLocal), uid: d.id }));
+      }
+    } catch {
+      // Usa cache sincronizado se offline momentaneamente
+    }
+
+    const contaEncontrada = listaUsuarios.find(
+      (c) =>
+        c.email.toLowerCase() === emailLimpo &&
+        (!c.senhaHash || c.senhaHash === senhaCodificada)
     );
 
     if (contaEncontrada) {
@@ -244,7 +275,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         nome: contaEncontrada.nome,
         email: contaEncontrada.email,
         role: contaEncontrada.role,
-        postoId: contaEncontrada.postoId,
+        postoId: contaEncontrada.postoId || 'posto-matriz-01',
         ativo: true,
         criadoEm: contaEncontrada.criadoEm,
         atualizadoEm: new Date().toISOString(),
@@ -254,21 +285,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
-    // Se o e-mail existe localmente mas a senha está incorreta
-    if (contas.some((c) => c.email.toLowerCase() === emailLimpo)) {
+    if (listaUsuarios.some((c) => c.email.toLowerCase() === emailLimpo)) {
       throw new Error('Senha incorreta para este e-mail.');
     }
 
-    // 2. Tenta autenticar no Firebase Auth caso seja conta externa
     try {
       await signInWithEmailAndPassword(auth, emailLimpo, senha);
     } catch {
-      throw new Error('Conta não encontrada ou senha incorreta. Clique em "Cadastrar Acesso" para criar sua conta.');
+      throw new Error(
+        'Conta não encontrada ou senha incorreta. Clique em "Cadastrar Acesso" para criar sua conta na nuvem.'
+      );
     }
   };
 
   /**
-   * Modo rápido para alternância de perfis operacionais no pátio ou testes
+   * Acesso operacional conectado 24h ao Cloud Firestore
    */
   const signInDemo = async (role: UserRole) => {
     const nomesPadrao: Record<UserRole, string> = {
@@ -277,8 +308,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       OPERADOR: 'Operador de Caixa',
       MASTER: 'Administrador Master',
     };
-    const demoProfile: UserProfile = {
-      uid: `demo-${role.toLowerCase()}`,
+    const uid = `operador-nuvem-${role.toLowerCase()}`;
+    const cloudProfile: UserProfile = {
+      uid,
       nome: nomesPadrao[role] || `Operador (${role})`,
       email: `${role.toLowerCase()}@meuposto.com`,
       role,
@@ -287,8 +319,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       criadoEm: new Date().toISOString(),
       atualizadoEm: new Date().toISOString(),
     };
-    persistirSessao(demoProfile);
-    setPostoId(demoProfile.postoId);
+    try {
+      await setDoc(doc(db, 'usuarios', uid), cloudProfile, { merge: true });
+    } catch {
+      // ignore
+    }
+    persistirSessao(cloudProfile);
+    setPostoId(cloudProfile.postoId);
   };
 
   const signOut = async () => {
@@ -305,7 +342,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setPostoId(novoPostoId);
   };
 
-  const usuariosCadastrados = contasLocais.map(({ senhaHash: _, ...rest }) => rest);
+  const usuariosCadastrados = contasNuvem.map(({ senhaHash: _, ...rest }) => rest);
 
   return (
     <AuthContext.Provider

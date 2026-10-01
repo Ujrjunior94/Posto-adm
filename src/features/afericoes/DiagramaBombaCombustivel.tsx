@@ -13,13 +13,12 @@ import {
   TrendingUp,
   TrendingDown,
   ShieldCheck,
-  Wrench,
   Fuel,
-  ChevronRight,
   Info,
   Sparkles,
   History,
   Sliders,
+  RefreshCw,
 } from 'lucide-react';
 
 interface DiagramaBombaCombustivelProps {
@@ -46,9 +45,9 @@ export interface DiagnosticoBico {
   statusDiagnostico: DiagnosticoStatus;
   tituloDiagnostico: string;
   recomendacao: string;
-  tendenciaMl: number | null; // Diferença entre última e penúltima aferição
-  perdaOuSobraPor1000L: number; // Litros a mais ou a menos a cada 1.000L vendidos
-  impactoFinanceiroPor1000L: number; // R$ a cada 1.000L vendidos
+  tendenciaMl: number | null;
+  perdaOuSobraPor1000L: number;
+  impactoFinanceiroPor1000L: number;
   diasDesdeUltima: number | null;
 }
 
@@ -57,62 +56,71 @@ export function obterCoresCombustivel(produto: string) {
   if (p.includes('aditivada')) {
     return {
       nomeCurto: 'GAS. ADITIVADA',
+      sigla: 'GA',
       bgHeader: 'bg-sky-600',
       bgSoft: 'bg-sky-50',
       border: 'border-sky-200',
       text: 'text-sky-800',
       badge: 'bg-sky-100 text-sky-900 border-sky-300',
       hoseColor: '#0284c7',
+      nozzleFill: '#0369a1',
     };
   }
   if (p.includes('etanol') || p.includes('álcool')) {
     return {
       nomeCurto: 'ETANOL HIDR.',
+      sigla: 'ET',
       bgHeader: 'bg-emerald-600',
       bgSoft: 'bg-emerald-50',
       border: 'border-emerald-200',
       text: 'text-emerald-800',
       badge: 'bg-emerald-100 text-emerald-900 border-emerald-300',
       hoseColor: '#059669',
+      nozzleFill: '#047857',
     };
   }
   if (p.includes('s10') || p.includes('s-10')) {
     return {
       nomeCurto: 'DIESEL S10',
+      sigla: 'S10',
       bgHeader: 'bg-amber-500',
       bgSoft: 'bg-amber-50',
       border: 'border-amber-200',
       text: 'text-amber-900',
       badge: 'bg-amber-100 text-amber-900 border-amber-300',
       hoseColor: '#d97706',
+      nozzleFill: '#b45309',
     };
   }
   if (p.includes('s500') || p.includes('s-500') || p.includes('diesel')) {
     return {
       nomeCurto: 'DIESEL S500',
+      sigla: 'S500',
       bgHeader: 'bg-indigo-600',
       bgSoft: 'bg-indigo-50',
       border: 'border-indigo-200',
       text: 'text-indigo-900',
       badge: 'bg-indigo-100 text-indigo-900 border-indigo-300',
       hoseColor: '#4f46e5',
+      nozzleFill: '#4338ca',
     };
   }
   return {
     nomeCurto: 'GAS. COMUM',
+    sigla: 'GC',
     bgHeader: 'bg-rose-600',
     bgSoft: 'bg-rose-50',
     border: 'border-rose-200',
     text: 'text-rose-900',
     badge: 'bg-rose-100 text-rose-900 border-rose-300',
     hoseColor: '#e11d48',
+    nozzleFill: '#be123c',
   };
 }
 
 export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> = ({
   bicos,
   afericoes,
-  tanques,
   funcionarios,
   selectedBicoId,
   onSelectBico,
@@ -130,7 +138,6 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
     const hojeMs = Date.now();
 
     bicos.forEach((bico) => {
-      // Ordenar aferições do bico da mais recente para a mais antiga
       const hist = afericoes
         .filter((a) => a.bicoId === bico.id)
         .sort((x, y) => {
@@ -151,7 +158,8 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
           toleranciaMl: 100,
           statusDiagnostico: 'PENDENTE',
           tituloDiagnostico: 'Sem Aferição Recente',
-          recomendacao: 'Realize a medição com o balde aferidor de 20L para certificar a entrega deste bico.',
+          recomendacao:
+            'Realize a medição com o balde aferidor de 20L para certificar a entrega deste bico.',
           tendenciaMl: null,
           perdaOuSobraPor1000L: 0,
           impactoFinanceiroPor1000L: 0,
@@ -199,7 +207,6 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
         ? desvioMl - Math.round(penultima.diferenca * 1000)
         : null;
 
-      // A cada 20L há `desvioMl` ml de diferença -> a cada 1.000L (50 baldes de 20L), são (desvioMl * 50) / 1000 Litros
       const perdaOuSobraPor1000L = Number(((desvioMl * 50) / 1000).toFixed(2));
       const precoEfetivo = calcularPrecoEfetivoBico(bico).precoFinal;
       const impactoFinanceiroPor1000L = Number((perdaOuSobraPor1000L * precoEfetivo).toFixed(2));
@@ -231,7 +238,7 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
     return map;
   }, [bicos, afericoes]);
 
-  // Agrupar bicos por Bomba (Ilha)
+  // Agrupar bicos por Bomba (Ilha) garantindo a estrutura de 2 Bombas com 3 bicos de cada lado
   const bombasAgrupadas = useMemo(() => {
     const grupos = new Map<string, { nomeBomba: string; ladoA: Bico[]; ladoB: Bico[] }>();
 
@@ -242,7 +249,7 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
         return;
       }
 
-      const chave = b.bomba || 'Bomba 01 (Ilha Principal)';
+      const chave = b.bomba || 'Bomba 01 (Sêxtupla - Ilha 01)';
       if (!grupos.has(chave)) {
         grupos.set(chave, { nomeBomba: chave, ladoA: [], ladoB: [] });
       }
@@ -260,7 +267,7 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
   }, [bicos, diagnosticosMap, filtroBomba, filtroStatusDiag]);
 
   const nomesBombas = useMemo(() => {
-    return Array.from(new Set(bicos.map((b) => b.bomba || 'Bomba 01 (Ilha Principal)')));
+    return Array.from(new Set(bicos.map((b) => b.bomba || 'Bomba 01 (Sêxtupla - Ilha 01)')));
   }, [bicos]);
 
   // Resumo Geral da Pista
@@ -288,8 +295,416 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
     return primeiro ? diagnosticosMap.get(primeiro.id) || null : null;
   }, [selectedBicoId, diagnosticosMap, bicos]);
 
+  // Renderizador do Desenho Técnico Interativo da Bomba Sêxtupla (3 Bicos Lado A | 3 Bicos Lado B)
+  const renderDesenhoBombaSextupla = (
+    nomeBomba: string,
+    indiceBomba: number,
+    ladoA: Bico[],
+    ladoB: Bico[]
+  ) => {
+    // Determinar o bico em destaque no visor desta bomba
+    const todosDestaBomba = [...ladoA, ...ladoB];
+    const bicoVisor =
+      todosDestaBomba.find((b) => b.id === bicoSelecionadoDiag?.bico.id) ||
+      todosDestaBomba[0] ||
+      null;
+    const diagVisor = bicoVisor ? diagnosticosMap.get(bicoVisor.id) : null;
+    const precoVisor = bicoVisor ? calcularPrecoEfetivoBico(bicoVisor).precoFinal : 5.89;
+    const volVisor = diagVisor?.ultimaAfericao ? diagVisor.ultimaAfericao.volumeAferido : 20.0;
+    const totalReaisVisor = volVisor * precoVisor;
+
+    // Montar os 3 slots do Lado A e 3 slots do Lado B para o desenho da bomba
+    const slotsA = [0, 1, 2].map((idx) => ladoA[idx] || null);
+    const slotsB = [0, 1, 2].map((idx) => ladoB[idx] || null);
+
+    return (
+      <div className="w-full max-w-[280px] mx-auto flex flex-col items-center select-none">
+        {/* Testeira / Cabeçote Superior da Bomba */}
+        <div className="w-[92%] bg-gradient-to-b from-amber-500 to-amber-600 text-slate-950 rounded-t-2xl border-2 border-b-0 border-slate-800 px-3 py-2 text-center shadow-md relative overflow-hidden">
+          <div className="text-[9px] font-mono font-extrabold uppercase tracking-widest text-amber-950/80">
+            BOMBA SÊXTUPLA • 6 BICOS (3A | 3B)
+          </div>
+          <div className="text-xs font-black tracking-tight text-slate-950 truncate">
+            {nomeBomba.split('(')[0].trim() || `BOMBA 0${indiceBomba + 1}`}
+          </div>
+        </div>
+
+        {/* Gabinete Principal Metálico da Bomba */}
+        <div className="w-full bg-slate-900 rounded-2xl border-2 border-slate-700 shadow-xl p-3 text-white relative">
+          {/* Painel Eletrônico LCD da Bomba */}
+          <div className="bg-slate-950 border-2 border-slate-700 rounded-xl p-2.5 font-mono space-y-1.5 shadow-inner">
+            <div className="flex items-center justify-between text-[9px] text-slate-400 border-b border-slate-800 pb-1">
+              <span className="font-bold text-amber-400">
+                VISOR {nomeBomba.split('(')[0].trim().toUpperCase()}
+              </span>
+              <span className="text-emerald-400 font-bold">
+                {bicoVisor
+                  ? `BICO #${String(bicoVisor.numero).padStart(2, '0')} (LADO ${bicoVisor.lado})`
+                  : '6 BICOS'}
+              </span>
+            </div>
+
+            {/* Total R$ Simulado na Bomba */}
+            <div className="bg-slate-900/90 border border-slate-800 rounded-lg px-2 py-1 flex items-center justify-between">
+              <span className="text-[8px] text-slate-400 uppercase">TOTAL R$</span>
+              <span className="text-xs font-bold text-amber-300 tabular-nums">
+                { totalReaisVisor.toFixed(2) }
+              </span>
+            </div>
+
+            {/* Volume Aferido no Balde 20L */}
+            <div className="bg-emerald-950/60 border border-emerald-700/60 rounded-lg px-2.5 py-1.5 flex items-center justify-between">
+              <div className="text-left">
+                <span className="text-[8px] text-emerald-400/90 uppercase block leading-none">
+                  LITROS (20L)
+                </span>
+                <span className="text-[9px] text-emerald-500/80 font-sans">Balde Inmetro</span>
+              </div>
+              <div className="text-base font-extrabold text-emerald-300 tabular-nums tracking-tight">
+                {volVisor.toFixed(3)} L
+              </div>
+            </div>
+
+            {/* Desvio Apurado em ml */}
+            <div className="bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 flex items-center justify-between">
+              <span className="text-[8px] text-slate-400 uppercase">DESVIO ÚLT. AFERIÇÃO</span>
+              <span
+                className={`text-xs font-extrabold tabular-nums ${
+                  diagVisor?.desvioMl === null || diagVisor?.desvioMl === undefined
+                    ? 'text-slate-400'
+                    : Math.abs(diagVisor.desvioMl) > 100
+                    ? 'text-red-400'
+                    : Math.abs(diagVisor.desvioMl) >= 65
+                    ? 'text-amber-400'
+                    : 'text-emerald-400'
+                }`}
+              >
+                {diagVisor?.desvioMl !== null && diagVisor?.desvioMl !== undefined
+                  ? `${diagVisor.desvioMl > 0 ? `+${diagVisor.desvioMl}` : diagVisor.desvioMl} ml`
+                  : 'PENDENTE'}
+              </span>
+            </div>
+          </div>
+
+          {/* Desenho SVG da Bomba com 3 Bicos e 3 Mangueiras de Cada Lado (Lado A = Esquerda, Lado B = Direita) */}
+          <div className="mt-3 bg-slate-950/70 rounded-xl border border-slate-800 p-2">
+            <div className="flex items-center justify-between text-[9px] font-mono font-bold text-slate-400 px-1 mb-1">
+              <span className="text-amber-400">◀ 3 BICOS LADO A</span>
+              <span className="text-slate-500">BLOCO HIDRÁULICO</span>
+              <span className="text-sky-400">3 BICOS LADO B ▶</span>
+            </div>
+
+            <svg
+              viewBox="0 0 240 215"
+              className="w-full h-auto overflow-visible"
+              aria-label={`Desenho da ${nomeBomba} com 3 bicos no Lado A e 3 bicos no Lado B`}
+            >
+              {/* Coluna Hidráulica Central da Bomba */}
+              <rect
+                x="68"
+                y="6"
+                width="104"
+                height="186"
+                rx="8"
+                fill="#1e293b"
+                stroke="#475569"
+                strokeWidth="2"
+              />
+
+              {/* Divisória Vertical Interna Lado A | Lado B */}
+              <line
+                x1="120"
+                y1="14"
+                x2="120"
+                y2="184"
+                stroke="#334155"
+                strokeWidth="1.5"
+                strokeDasharray="3 3"
+              />
+
+              {/* Cabeçalho Interno A | B */}
+              <text
+                x="94"
+                y="20"
+                textAnchor="middle"
+                fill="#94a3b8"
+                fontSize="8"
+                fontWeight="bold"
+                fontFamily="monospace"
+              >
+                LADO A
+              </text>
+              <text
+                x="146"
+                y="20"
+                textAnchor="middle"
+                fill="#94a3b8"
+                fontSize="8"
+                fontWeight="bold"
+                fontFamily="monospace"
+              >
+                LADO B
+              </text>
+
+              {/* Renderizar os 3 Bicos + Mangueiras do LADO A (Esquerda) */}
+              {slotsA.map((bico, idx) => {
+                const yBase = 38 + idx * 52; // Posições Y: 38, 90, 142
+                const cores = bico
+                  ? obterCoresCombustivel(bico.produto)
+                  : { hoseColor: '#475569', nozzleFill: '#334155', sigla: '--' };
+                const diag = bico ? diagnosticosMap.get(bico.id) : null;
+                const isSelected = bico && bicoSelecionadoDiag?.bico.id === bico.id;
+
+                const statusColor = !diag || diag.statusDiagnostico === 'PENDENTE'
+                  ? '#94a3b8'
+                  : diag.statusDiagnostico === 'FORA_INMETRO'
+                  ? '#ef4444'
+                  : diag.statusDiagnostico === 'DERIVA_LIMITE'
+                  ? '#f59e0b'
+                  : '#10b981';
+
+                return (
+                  <g
+                    key={`lado-a-slot-${idx}`}
+                    onClick={() => bico && onSelectBico(bico.id)}
+                    className={bico ? 'cursor-pointer' : ''}
+                  >
+                    {/* Mangueira Curva saindo da bomba para o Lado A (Esquerda) */}
+                    <path
+                      d={`M 68 ${yBase + 12} C 35 ${yBase + 12}, 32 ${yBase + 32}, 2 ${yBase + 16}`}
+                      fill="none"
+                      stroke={cores.hoseColor}
+                      strokeWidth={isSelected ? '5' : '3.5'}
+                      strokeLinecap="round"
+                    />
+
+                    {/* Suporte / Gatilho do Bico na Lateral Esquerda da Bomba */}
+                    <rect
+                      x="42"
+                      y={yBase - 4}
+                      width="28"
+                      height="30"
+                      rx="5"
+                      fill={isSelected ? '#f8fafc' : '#0f172a'}
+                      stroke={cores.hoseColor}
+                      strokeWidth={isSelected ? '2.5' : '1.8'}
+                    />
+
+                    {/* Desenho da Ponteira do Bico (Nozzle Gun) apontando para a esquerda */}
+                    <path
+                      d={`M 42 ${yBase + 6} L 26 ${yBase + 2} L 24 ${yBase + 7} L 42 ${yBase + 13} Z`}
+                      fill={cores.hoseColor}
+                    />
+
+                    {/* Número do Bico dentro do suporte lateral */}
+                    <text
+                      x="56"
+                      y={yBase + 10}
+                      textAnchor="middle"
+                      fill={isSelected ? '#0f172a' : '#f8fafc'}
+                      fontSize="9"
+                      fontWeight="bold"
+                      fontFamily="monospace"
+                    >
+                      {bico ? `B${String(bico.numero).padStart(2, '0')}` : `A${idx + 1}`}
+                    </text>
+                    <text
+                      x="56"
+                      y={yBase + 20}
+                      textAnchor="middle"
+                      fill={isSelected ? '#334155' : '#94a3b8'}
+                      fontSize="7"
+                      fontWeight="bold"
+                      fontFamily="monospace"
+                    >
+                      {cores.sigla}
+                    </text>
+
+                    {/* Bloco Medidor Interno Lado A */}
+                    <rect
+                      x="75"
+                      y={yBase - 2}
+                      width="38"
+                      height="26"
+                      rx="4"
+                      fill="#0f172a"
+                      stroke={isSelected ? '#fbbf24' : '#334155'}
+                      strokeWidth="1.2"
+                    />
+                    <circle cx="83" cy={yBase + 7} r="3" fill={statusColor} />
+                    <text
+                      x="97"
+                      y={yBase + 9}
+                      textAnchor="middle"
+                      fill="#e2e8f0"
+                      fontSize="7"
+                      fontWeight="bold"
+                      fontFamily="monospace"
+                    >
+                      {idx + 1}º A
+                    </text>
+                    <text
+                      x="94"
+                      y={yBase + 19}
+                      textAnchor="middle"
+                      fill={statusColor}
+                      fontSize="7.5"
+                      fontWeight="bold"
+                      fontFamily="monospace"
+                    >
+                      {diag?.desvioMl !== null && diag?.desvioMl !== undefined
+                        ? `${diag.desvioMl > 0 ? `+${diag.desvioMl}` : diag.desvioMl}ml`
+                        : '---'}
+                    </text>
+                  </g>
+                );
+              })}
+
+              {/* Renderizar os 3 Bicos + Mangueiras do LADO B (Direita) */}
+              {slotsB.map((bico, idx) => {
+                const yBase = 38 + idx * 52; // Posições Y: 38, 90, 142
+                const cores = bico
+                  ? obterCoresCombustivel(bico.produto)
+                  : { hoseColor: '#475569', nozzleFill: '#334155', sigla: '--' };
+                const diag = bico ? diagnosticosMap.get(bico.id) : null;
+                const isSelected = bico && bicoSelecionadoDiag?.bico.id === bico.id;
+
+                const statusColor = !diag || diag.statusDiagnostico === 'PENDENTE'
+                  ? '#94a3b8'
+                  : diag.statusDiagnostico === 'FORA_INMETRO'
+                  ? '#ef4444'
+                  : diag.statusDiagnostico === 'DERIVA_LIMITE'
+                  ? '#f59e0b'
+                  : '#10b981';
+
+                return (
+                  <g
+                    key={`lado-b-slot-${idx}`}
+                    onClick={() => bico && onSelectBico(bico.id)}
+                    className={bico ? 'cursor-pointer' : ''}
+                  >
+                    {/* Mangueira Curva saindo da bomba para o Lado B (Direita) */}
+                    <path
+                      d={`M 172 ${yBase + 12} C 205 ${yBase + 12}, 208 ${yBase + 32}, 238 ${yBase + 16}`}
+                      fill="none"
+                      stroke={cores.hoseColor}
+                      strokeWidth={isSelected ? '5' : '3.5'}
+                      strokeLinecap="round"
+                    />
+
+                    {/* Suporte / Gatilho do Bico na Lateral Direita da Bomba */}
+                    <rect
+                      x="170"
+                      y={yBase - 4}
+                      width="28"
+                      height="30"
+                      rx="5"
+                      fill={isSelected ? '#f8fafc' : '#0f172a'}
+                      stroke={cores.hoseColor}
+                      strokeWidth={isSelected ? '2.5' : '1.8'}
+                    />
+
+                    {/* Desenho da Ponteira do Bico (Nozzle Gun) apontando para a direita */}
+                    <path
+                      d={`M 198 ${yBase + 6} L 214 ${yBase + 2} L 216 ${yBase + 7} L 198 ${yBase + 13} Z`}
+                      fill={cores.hoseColor}
+                    />
+
+                    {/* Número do Bico dentro do suporte lateral */}
+                    <text
+                      x="184"
+                      y={yBase + 10}
+                      textAnchor="middle"
+                      fill={isSelected ? '#0f172a' : '#f8fafc'}
+                      fontSize="9"
+                      fontWeight="bold"
+                      fontFamily="monospace"
+                    >
+                      {bico ? `B${String(bico.numero).padStart(2, '0')}` : `B${idx + 1}`}
+                    </text>
+                    <text
+                      x="184"
+                      y={yBase + 20}
+                      textAnchor="middle"
+                      fill={isSelected ? '#334155' : '#94a3b8'}
+                      fontSize="7"
+                      fontWeight="bold"
+                      fontFamily="monospace"
+                    >
+                      {cores.sigla}
+                    </text>
+
+                    {/* Bloco Medidor Interno Lado B */}
+                    <rect
+                      x="127"
+                      y={yBase - 2}
+                      width="38"
+                      height="26"
+                      rx="4"
+                      fill="#0f172a"
+                      stroke={isSelected ? '#fbbf24' : '#334155'}
+                      strokeWidth="1.2"
+                    />
+                    <circle cx="157" cy={yBase + 7} r="3" fill={statusColor} />
+                    <text
+                      x="142"
+                      y={yBase + 9}
+                      textAnchor="middle"
+                      fill="#e2e8f0"
+                      fontSize="7"
+                      fontWeight="bold"
+                      fontFamily="monospace"
+                    >
+                      {idx + 1}º B
+                    </text>
+                    <text
+                      x="146"
+                      y={yBase + 19}
+                      textAnchor="middle"
+                      fill={statusColor}
+                      fontSize="7.5"
+                      fontWeight="bold"
+                      fontFamily="monospace"
+                    >
+                      {diag?.desvioMl !== null && diag?.desvioMl !== undefined
+                        ? `${diag.desvioMl > 0 ? `+${diag.desvioMl}` : diag.desvioMl}ml`
+                        : '---'}
+                    </text>
+                  </g>
+                );
+              })}
+
+              {/* Pedestal / Ilha de Concreto na Base da Bomba */}
+              <rect
+                x="46"
+                y="192"
+                width="148"
+                height="16"
+                rx="4"
+                fill="#334155"
+                stroke="#64748b"
+                strokeWidth="1.5"
+              />
+              <text
+                x="120"
+                y="203"
+                textAnchor="middle"
+                fill="#cbd5e1"
+                fontSize="7.5"
+                fontWeight="bold"
+                fontFamily="monospace"
+              >
+                ILHA 0{indiceBomba + 1} • INMETRO ±100ml
+              </text>
+            </svg>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // Renderizador de Card Visual de Bico (Lado A ou Lado B)
-  const renderCardBico = (bico: Bico, lado: 'A' | 'B') => {
+  const renderCardBico = (bico: Bico, lado: 'A' | 'B', posicaoIdx: number) => {
     const diag = diagnosticosMap.get(bico.id)!;
     const cores = obterCoresCombustivel(bico.produto);
     const isSelected = bicoSelecionadoDiag?.bico.id === bico.id;
@@ -346,10 +761,10 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
             : 'border-slate-200 hover:border-slate-300 shadow-2xs'
         }`}
       >
-        {/* Conector visual da mangueira em direção ao centro da bomba (Desktop) */}
+        {/* Conector visual da mangueira em direção ao desenho central da bomba (Desktop) */}
         <div
           className={`hidden xl:flex items-center absolute top-1/2 -translate-y-1/2 z-0 pointer-events-none ${
-            lado === 'A' ? '-right-5 flex-row' : '-left-5 flex-row-reverse'
+            lado === 'A' ? '-right-4 flex-row' : '-left-4 flex-row-reverse'
           }`}
         >
           <div
@@ -357,15 +772,14 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
             style={{ backgroundColor: cores.hoseColor }}
           />
           <div
-            className="w-3 h-1"
+            className="w-2.5 h-1"
             style={{ backgroundColor: cores.hoseColor }}
           />
         </div>
 
         {/* Faixa Superior Colorida por Combustível */}
-        <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100 bg-slate-50/70 rounded-t-xl">
+        <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100 bg-slate-50/80 rounded-t-xl">
           <div className="flex items-center gap-2 min-w-0">
-            {/* Ícone de Gatilho / Bico com número */}
             <div
               className={`w-7 h-7 rounded-lg ${cores.bgHeader} text-white font-mono font-extrabold text-xs flex items-center justify-center shadow-2xs shrink-0`}
             >
@@ -377,7 +791,7 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
                   Bico {bico.numero}
                 </span>
                 <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 bg-slate-200/80 text-slate-700 rounded">
-                  Lado {bico.lado}
+                  {posicaoIdx + 1}º Lado {bico.lado}
                 </span>
               </div>
               <div className="text-[10px] font-bold tracking-wide text-slate-500 truncate">
@@ -390,7 +804,7 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
         </div>
 
         {/* Corpo de Leitura Metrológica da Última Aferição */}
-        <div className="p-3 space-y-2.5">
+        <div className="p-3 space-y-2">
           {diag.ultimaAfericao && diag.desvioMl !== null ? (
             <>
               <div className="flex items-baseline justify-between gap-2">
@@ -423,17 +837,13 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
 
               {/* Mini-Régua Metrológica Visual (-100ml | 0 | +100ml) */}
               <div className="space-y-1">
-                <div className="relative h-2.5 rounded-full bg-slate-100 border border-slate-200 overflow-hidden flex">
-                  {/* Zona Crítica Esquerda (< -100ml) */}
+                <div className="relative h-2 rounded-full bg-slate-100 border border-slate-200 overflow-hidden flex">
                   <div className="w-[16.66%] bg-red-200/80 border-r border-red-300" />
-                  {/* Zona Conforme (-100ml a +100ml) */}
                   <div className="w-[66.68%] bg-emerald-100/90 relative">
                     <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-emerald-600/50" />
                   </div>
-                  {/* Zona Crítica Direita (> +100ml) */}
                   <div className="w-[16.66%] bg-red-200/80 border-l border-red-300" />
 
-                  {/* Marcador do Bico */}
                   <div
                     style={{ left: `${Math.min(Math.max(pctPosicao, 3), 97)}%` }}
                     className="absolute top-0 bottom-0 -translate-x-1/2 w-2 flex items-center justify-center"
@@ -458,7 +868,7 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
               </div>
             </>
           ) : (
-            <div className="py-2.5 px-3 rounded-lg bg-slate-50 border border-dashed border-slate-200 text-center">
+            <div className="py-2 px-3 rounded-lg bg-slate-50 border border-dashed border-slate-200 text-center">
               <div className="text-[11px] font-semibold text-slate-600">
                 Nenhuma aferição registrada
               </div>
@@ -469,7 +879,7 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
           )}
 
           {/* Rodapé do Bico: Data/Hora + Botão Rápido de Aferição */}
-          <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+          <div className="pt-1.5 border-t border-slate-100 flex items-center justify-between gap-2">
             <div className="text-[10px] text-slate-500 font-mono truncate">
               {diag.ultimaAfericao ? (
                 <span>
@@ -480,21 +890,19 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
               )}
             </div>
 
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onSelectBico(bico.id);
-                  onAbrirModalAfericao(bico.id);
-                }}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-bold bg-amber-50 hover:bg-amber-600 text-amber-800 hover:text-white border border-amber-200 hover:border-amber-600 transition"
-                title="Registrar nova aferição de 20L neste bico"
-              >
-                <Gauge className="w-3 h-3" />
-                <span>Aferir 20L</span>
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectBico(bico.id);
+                onAbrirModalAfericao(bico.id);
+              }}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-bold bg-amber-50 hover:bg-amber-600 text-amber-800 hover:text-white border border-amber-200 hover:border-amber-600 transition"
+              title="Registrar nova aferição de 20L neste bico"
+            >
+              <Gauge className="w-3 h-3" />
+              <span>Aferir 20L</span>
+            </button>
           </div>
         </div>
       </div>
@@ -503,37 +911,73 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
 
   if (bicos.length === 0) {
     return (
-      <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center space-y-4 shadow-xs">
-        <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 text-amber-700 flex items-center justify-center mx-auto">
-          <Fuel className="w-7 h-7" />
-        </div>
-        <div className="max-w-md mx-auto space-y-1">
-          <h3 className="text-base font-bold text-slate-900">
-            Nenhuma Bomba ou Bico Cadastrado na Pista
-          </h3>
-          <p className="text-xs text-slate-500">
-            Cadastre os bicos manualmente ou gere uma pista completa de exemplo com Bombas, Lado A e Lado B e leituras de aferição para visualizar o diagrama interativo.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
-          {onGerarPistaPadrao && (
+      <div className="space-y-6">
+        <div className="bg-white rounded-2xl border border-slate-200 p-6 flex flex-col md:flex-row items-center justify-between gap-4 shadow-xs">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 text-amber-700 flex items-center justify-center shrink-0">
+              <Fuel className="w-7 h-7" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <span>Desenho das 2 Bombas (3 Bicos Lado A • 3 Bicos Lado B)</span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Dados de demonstração limpos. As 2 bombas sêxtuplas estão prontas para receber o cadastro real dos bicos na nuvem 24h.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2.5">
+            {onGerarPistaPadrao && (
+              <button
+                type="button"
+                onClick={onGerarPistaPadrao}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl transition shadow-xs cursor-pointer"
+              >
+                <Fuel className="w-4 h-4 text-amber-400" />
+                <span>Ativar 12 Bicos Limpos (Sem Dados Demo)</span>
+              </button>
+            )}
             <button
               type="button"
-              onClick={onGerarPistaPadrao}
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl transition shadow-xs"
+              onClick={onAbrirModalNovoBico}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold rounded-xl transition cursor-pointer"
             >
-              <Sparkles className="w-4 h-4 text-amber-400" />
-              Gerar Bombas & Bicos de Exemplo (Lado A e B)
+              <Plus className="w-4 h-4" />
+              <span>Cadastrar Bico Individual</span>
             </button>
+          </div>
+        </div>
+
+        {/* Visualização constante do Desenho das 2 Bombas com 3 Bicos de Cada Lado */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {['Bomba 01 (Sêxtupla - Ilha 01)', 'Bomba 02 (Sêxtupla - Ilha 02)'].map(
+            (nomeBomba, idxBomba) => (
+              <div
+                key={nomeBomba}
+                className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden"
+              >
+                <div className="bg-slate-900 text-white px-5 py-3.5 flex items-center justify-between border-b border-slate-800">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-400/30 text-amber-300 flex items-center justify-center">
+                      <Fuel className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="font-bold text-sm text-white">{nomeBomba}</div>
+                      <div className="text-[11px] text-slate-400">
+                        3 Bicos Lado A (Esquerda) • 3 Bicos Lado B (Direita)
+                      </div>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-slate-800 text-emerald-400 border border-slate-700">
+                    Nuvem 24h
+                  </span>
+                </div>
+                <div className="p-5 bg-slate-50 flex flex-col items-center justify-center">
+                  {renderDesenhoBombaSextupla(nomeBomba, idxBomba, [], [])}
+                </div>
+              </div>
+            )
           )}
-          <button
-            type="button"
-            onClick={onAbrirModalNovoBico}
-            className="inline-flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl border border-slate-300 transition"
-          >
-            <Plus className="w-4 h-4" />
-            Cadastrar Primeiro Bico
-          </button>
         </div>
       </div>
     );
@@ -541,11 +985,13 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
 
   return (
     <div className="space-y-6">
-      {/* 1. Barra de Indicadores de Saúde Metrológica das Bombas */}
+      {/* 1. Barra de Indicadores de Saúde Metrológica das 2 Bombas */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <button
           type="button"
-          onClick={() => setFiltroStatusDiag(filtroStatusDiag === 'CALIBRADO' ? 'TODOS' : 'CALIBRADO')}
+          onClick={() =>
+            setFiltroStatusDiag(filtroStatusDiag === 'CALIBRADO' ? 'TODOS' : 'CALIBRADO')
+          }
           className={`p-4 rounded-xl border text-left transition ${
             filtroStatusDiag === 'CALIBRADO'
               ? 'bg-emerald-50 border-emerald-500 ring-1 ring-emerald-500'
@@ -569,7 +1015,9 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
 
         <button
           type="button"
-          onClick={() => setFiltroStatusDiag(filtroStatusDiag === 'DERIVA_LIMITE' ? 'TODOS' : 'DERIVA_LIMITE')}
+          onClick={() =>
+            setFiltroStatusDiag(filtroStatusDiag === 'DERIVA_LIMITE' ? 'TODOS' : 'DERIVA_LIMITE')
+          }
           className={`p-4 rounded-xl border text-left transition ${
             filtroStatusDiag === 'DERIVA_LIMITE'
               ? 'bg-amber-50 border-amber-500 ring-1 ring-amber-500'
@@ -590,7 +1038,9 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
 
         <button
           type="button"
-          onClick={() => setFiltroStatusDiag(filtroStatusDiag === 'FORA_INMETRO' ? 'TODOS' : 'FORA_INMETRO')}
+          onClick={() =>
+            setFiltroStatusDiag(filtroStatusDiag === 'FORA_INMETRO' ? 'TODOS' : 'FORA_INMETRO')
+          }
           className={`p-4 rounded-xl border text-left transition ${
             filtroStatusDiag === 'FORA_INMETRO'
               ? 'bg-red-50 border-red-500 ring-1 ring-red-500'
@@ -611,7 +1061,9 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
 
         <button
           type="button"
-          onClick={() => setFiltroStatusDiag(filtroStatusDiag === 'PENDENTE' ? 'TODOS' : 'PENDENTE')}
+          onClick={() =>
+            setFiltroStatusDiag(filtroStatusDiag === 'PENDENTE' ? 'TODOS' : 'PENDENTE')
+          }
           className={`p-4 rounded-xl border text-left transition ${
             filtroStatusDiag === 'PENDENTE'
               ? 'bg-slate-100 border-slate-500 ring-1 ring-slate-500'
@@ -631,10 +1083,10 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
         </button>
       </div>
 
-      {/* 2. Barra de Filtro de Ilha/Bomba e Legenda Rápida */}
+      {/* 2. Barra de Seleção das 2 Bombas (Ilha 01 e Ilha 02) e Padronização */}
       <div className="bg-white px-4 py-3 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-xs font-bold text-slate-500 mr-1">Ilha / Bomba:</span>
+          <span className="text-xs font-bold text-slate-500 mr-1">Visualizar Bombas:</span>
           <button
             type="button"
             onClick={() => setFiltroBomba('TODAS')}
@@ -644,7 +1096,7 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
                 : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
             }`}
           >
-            Todas as Bombas ({nomesBombas.length})
+            As 2 Bombas ({bicos.length} Bicos)
           </button>
           {nomesBombas.map((nome) => (
             <button
@@ -662,22 +1114,36 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
           ))}
         </div>
 
-        {filtroStatusDiag !== 'TODOS' && (
-          <button
-            type="button"
-            onClick={() => setFiltroStatusDiag('TODOS')}
-            className="text-xs font-semibold text-blue-600 hover:underline"
-          >
-            Mostrar todos os status ({bicos.length} bicos)
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {filtroStatusDiag !== 'TODOS' && (
+            <button
+              type="button"
+              onClick={() => setFiltroStatusDiag('TODOS')}
+              className="text-xs font-semibold text-blue-600 hover:underline mr-2"
+            >
+              Mostrar todos ({bicos.length} bicos)
+            </button>
+          )}
+
+          {onGerarPistaPadrao && (
+            <button
+              type="button"
+              onClick={onGerarPistaPadrao}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 transition"
+              title="Restaurar configuração padrão: 2 Bombas com 3 bicos no Lado A e 3 bicos no Lado B (12 bicos)"
+            >
+              <RefreshCw className="w-3.5 h-3.5 text-amber-700" />
+              <span>Padrão 2 Bombas (3 Bicos/Lado)</span>
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* 3. Grid Principal: Diagrama Visual das Bombas (Esquerda) + Diagnóstico e Acompanhamento (Direita) */}
+      {/* 3. Grid Principal: Desenho das 2 Bombas (3 Bicos Lado A + 3 Bicos Lado B) + Painel de Diagnóstico */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Coluna 1: Desenho / Esquema das Bombas com Lado A e Lado B (7 colunas) */}
-        <div className="lg:col-span-7 space-y-6">
-          {bombasAgrupadas.map((bomba) => {
+        {/* Coluna 1: Diagrama das 2 Bombas Sêxtuplas (8 colunas no desktop) */}
+        <div className="lg:col-span-8 space-y-6">
+          {bombasAgrupadas.map((bomba, idxBomba) => {
             const todosBicosBomba = [...bomba.ladoA, ...bomba.ladoB];
             const temCritico = todosBicosBomba.some(
               (b) => diagnosticosMap.get(b.id)?.statusDiagnostico === 'FORA_INMETRO'
@@ -691,23 +1157,23 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
                 key={bomba.nomeBomba}
                 className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden"
               >
-                {/* Topo Metálico da Bomba (Cabeçote / Testeira da Ilha) */}
+                {/* Cabeçalho da Bomba (Bomba 01 / Bomba 02) */}
                 <div className="bg-slate-900 text-white px-5 py-3.5 flex flex-wrap items-center justify-between gap-3 border-b border-slate-800">
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-400/30 text-amber-300 flex items-center justify-center font-mono font-bold">
                       <Fuel className="w-5 h-5" />
                     </div>
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <h3 className="font-bold text-sm tracking-wide text-white">
                           {bomba.nomeBomba}
                         </h3>
-                        <span className="text-[10px] font-mono text-slate-400">
-                          {todosBicosBomba.length} bicos ({bomba.ladoA.length} Lado A • {bomba.ladoB.length} Lado B)
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-amber-300 border border-slate-700 font-bold">
+                          {bomba.ladoA.length} Bicos Lado A • {bomba.ladoB.length} Bicos Lado B
                         </span>
                       </div>
-                      <p className="text-[11px] text-slate-400">
-                        Clique em qualquer bico no Lado A ou Lado B para inspecionar o diagnóstico ou aferir
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Bomba Sêxtupla: 3 bicos à esquerda (Lado A) e 3 bicos à direita (Lado B)
                       </p>
                     </div>
                   </div>
@@ -732,171 +1198,48 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
                   </div>
                 </div>
 
-                {/* Corpo do Diagrama: [LADO A] — [GABINETE CENTRAL DA BOMBA] — [LADO B] */}
-                <div className="p-4 sm:p-5 bg-slate-50/60">
-                  <div className="grid grid-cols-1 xl:grid-cols-11 gap-4 items-stretch">
-                    {/* LADO A DA BOMBA (4 colunas) */}
+                {/* Corpo do Esquema: [LADO A: 3 BICOS] — [DESENHO DA BOMBA COM 6 MANGUEIRAS] — [LADO B: 3 BICOS] */}
+                <div className="p-4 sm:p-5 bg-slate-50/70">
+                  <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-center">
+                    {/* LADO A DA BOMBA (4 colunas -> 3 Bicos empilhados) */}
                     <div className="xl:col-span-4 flex flex-col justify-between space-y-3">
-                      <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-slate-200/70 border border-slate-300/80">
-                        <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-800">
-                          ◀ Lado A (Pista Esquerda)
+                      <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30">
+                        <span className="text-[11px] font-extrabold uppercase tracking-wider text-amber-950">
+                          ◀ Lado A (Esquerda)
                         </span>
-                        <span className="text-[10px] font-mono font-bold text-slate-600">
-                          {bomba.ladoA.length} {bomba.ladoA.length === 1 ? 'bico' : 'bicos'}
+                        <span className="text-[10px] font-mono font-bold text-amber-900 bg-amber-200/70 px-1.5 py-0.5 rounded">
+                          {bomba.ladoA.length} de 3 bicos
                         </span>
                       </div>
 
-                      <div className="space-y-3 flex-1">
-                        {bomba.ladoA.length === 0 ? (
-                          <div className="h-full min-h-28 rounded-xl border border-dashed border-slate-300 flex items-center justify-center p-4 text-center text-xs text-slate-400">
-                            Nenhum bico cadastrado no Lado A desta bomba
-                          </div>
-                        ) : (
-                          bomba.ladoA.map((bico) => renderCardBico(bico, 'A'))
-                        )}
+                      <div className="space-y-2.5">
+                        {bomba.ladoA.map((bico, idx) => renderCardBico(bico, 'A', idx))}
                       </div>
                     </div>
 
-                    {/* GABINETE CENTRAL ILUSTRADO DA BOMBA DE COMBUSTÍVEL (3 colunas) */}
-                    <div className="xl:col-span-3 flex flex-col items-center justify-center py-2">
-                      <div className="w-full max-w-[210px] bg-slate-900 rounded-2xl border-2 border-slate-700 shadow-lg p-3 text-white flex flex-col justify-between relative">
-                        {/* Topo da Bomba */}
-                        <div className="text-center pb-2 border-b border-slate-800">
-                          <div className="text-[9px] font-mono uppercase tracking-widest text-amber-400 font-bold">
-                            MEDIDOR INMETRO 20L
-                          </div>
-                          <div className="text-xs font-extrabold tracking-tight text-white truncate mt-0.5">
-                            {bomba.nomeBomba.split('(')[0]}
-                          </div>
-                        </div>
-
-                        {/* Visor Digital LCD Simulado */}
-                        <div className="my-3 bg-slate-950 border border-slate-700 rounded-xl p-2.5 font-mono space-y-1.5 shadow-inner">
-                          <div className="flex items-center justify-between text-[9px] text-slate-400">
-                            <span>BICO SELEC.</span>
-                            <span className="text-emerald-400 font-bold">
-                              #{bicoSelecionadoDiag ? String(bicoSelecionadoDiag.bico.numero).padStart(2, '0') : '--'} (LADO {bicoSelecionadoDiag?.bico.lado || '-'})
-                            </span>
-                          </div>
-
-                          <div className="bg-emerald-950/50 border border-emerald-800/60 rounded-lg px-2 py-1.5 text-right">
-                            <div className="text-[8px] text-emerald-400/80 uppercase">
-                              VOLUME AFERIDO (L)
-                            </div>
-                            <div className="text-base font-extrabold text-emerald-300 tabular-nums leading-tight">
-                              {bicoSelecionadoDiag?.ultimaAfericao
-                                ? bicoSelecionadoDiag.ultimaAfericao.volumeAferido.toFixed(3)
-                                : '20.000'}
-                            </div>
-                          </div>
-
-                          <div className="bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-right flex items-center justify-between">
-                            <span className="text-[8px] text-slate-400 uppercase">DESVIO</span>
-                            <span
-                              className={`text-xs font-extrabold tabular-nums ${
-                                bicoSelecionadoDiag?.desvioMl === null || bicoSelecionadoDiag?.desvioMl === undefined
-                                  ? 'text-slate-400'
-                                  : Math.abs(bicoSelecionadoDiag.desvioMl) > 100
-                                  ? 'text-red-400'
-                                  : Math.abs(bicoSelecionadoDiag.desvioMl) >= 65
-                                  ? 'text-amber-400'
-                                  : 'text-emerald-400'
-                              }`}
-                            >
-                              {bicoSelecionadoDiag?.desvioMl !== null && bicoSelecionadoDiag?.desvioMl !== undefined
-                                ? `${bicoSelecionadoDiag.desvioMl > 0 ? `+${bicoSelecionadoDiag.desvioMl}` : bicoSelecionadoDiag.desvioMl} ml`
-                                : 'PENDENTE'}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Ilustração SVG Técnica do Corpo Hidráulico e Mangueiras A/B */}
-                        <svg
-                          viewBox="0 0 160 88"
-                          className="w-full h-20 text-slate-400"
-                          aria-label="Diagrama hidráulico da bomba"
-                        >
-                          {/* Mangueiras Esquerda (Lado A) */}
-                          <path
-                            d="M 35 18 C 12 18, 12 45, 4 45"
-                            fill="none"
-                            stroke="#0ea5e9"
-                            strokeWidth="3"
-                            strokeLinecap="round"
-                          />
-                          <path
-                            d="M 35 34 C 16 34, 16 62, 4 62"
-                            fill="none"
-                            stroke="#10b981"
-                            strokeWidth="3"
-                            strokeLinecap="round"
-                          />
-                          {/* Mangueiras Direita (Lado B) */}
-                          <path
-                            d="M 125 18 C 148 18, 148 45, 156 45"
-                            fill="none"
-                            stroke="#f59e0b"
-                            strokeWidth="3"
-                            strokeLinecap="round"
-                          />
-                          <path
-                            d="M 125 34 C 144 34, 144 62, 156 62"
-                            fill="none"
-                            stroke="#f43f5e"
-                            strokeWidth="3"
-                            strokeLinecap="round"
-                          />
-
-                          {/* Bloco Hidráulico Central */}
-                          <rect
-                            x="35"
-                            y="8"
-                            width="90"
-                            height="64"
-                            rx="6"
-                            fill="#1e293b"
-                            stroke="#475569"
-                            strokeWidth="2"
-                          />
-                          {/* Medidores Volumétricos A e B */}
-                          <circle cx="60" cy="34" r="13" fill="#0f172a" stroke="#64748b" strokeWidth="1.5" />
-                          <text x="60" y="38" textAnchor="middle" fill="#e2e8f0" fontSize="9" fontWeight="bold" fontFamily="monospace">
-                            A
-                          </text>
-                          <circle cx="100" cy="34" r="13" fill="#0f172a" stroke="#64748b" strokeWidth="1.5" />
-                          <text x="100" y="38" textAnchor="middle" fill="#e2e8f0" fontSize="9" fontWeight="bold" fontFamily="monospace">
-                            B
-                          </text>
-
-                          {/* Pedestal / Ilha de Concreto */}
-                          <rect x="22" y="74" width="116" height="10" rx="3" fill="#334155" />
-                        </svg>
-
-                        <div className="text-[9px] text-center text-slate-400 font-mono pt-1 border-t border-slate-800">
-                          TOLERÂNCIA INMETRO: ±100 ml
-                        </div>
-                      </div>
+                    {/* DESENHO CENTRAL DA BOMBA DE COMBUSTÍVEL COM 3 BICOS DE CADA LADO (4 colunas) */}
+                    <div className="xl:col-span-4 flex items-center justify-center py-2">
+                      {renderDesenhoBombaSextupla(
+                        bomba.nomeBomba,
+                        idxBomba,
+                        bomba.ladoA,
+                        bomba.ladoB
+                      )}
                     </div>
 
-                    {/* LADO B DA BOMBA (4 colunas) */}
+                    {/* LADO B DA BOMBA (4 colunas -> 3 Bicos empilhados) */}
                     <div className="xl:col-span-4 flex flex-col justify-between space-y-3">
-                      <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-slate-200/70 border border-slate-300/80">
-                        <span className="text-[10px] font-mono font-bold text-slate-600">
-                          {bomba.ladoB.length} {bomba.ladoB.length === 1 ? 'bico' : 'bicos'}
+                      <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-sky-500/10 border border-sky-500/30">
+                        <span className="text-[10px] font-mono font-bold text-sky-900 bg-sky-200/70 px-1.5 py-0.5 rounded">
+                          {bomba.ladoB.length} de 3 bicos
                         </span>
-                        <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-800">
-                          Lado B (Pista Direita) ▶
+                        <span className="text-[11px] font-extrabold uppercase tracking-wider text-sky-950">
+                          Lado B (Direita) ▶
                         </span>
                       </div>
 
-                      <div className="space-y-3 flex-1">
-                        {bomba.ladoB.length === 0 ? (
-                          <div className="h-full min-h-28 rounded-xl border border-dashed border-slate-300 flex items-center justify-center p-4 text-center text-xs text-slate-400">
-                            Nenhum bico cadastrado no Lado B desta bomba
-                          </div>
-                        ) : (
-                          bomba.ladoB.map((bico) => renderCardBico(bico, 'B'))
-                        )}
+                      <div className="space-y-2.5">
+                        {bomba.ladoB.map((bico, idx) => renderCardBico(bico, 'B', idx))}
                       </div>
                     </div>
                   </div>
@@ -906,8 +1249,8 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
           })}
         </div>
 
-        {/* Coluna 2: Painel de Diagnóstico Metrológico e Acompanhamento do Bico Selecionado (5 colunas) */}
-        <div className="lg:col-span-5 lg:sticky lg:top-6 space-y-4">
+        {/* Coluna 2: Painel de Diagnóstico Metrológico e Acompanhamento do Bico Selecionado (4 colunas) */}
+        <div className="lg:col-span-4 lg:sticky lg:top-6 space-y-4">
           {bicoSelecionadoDiag ? (
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
               {/* Cabeçalho do Bico em Diagnóstico */}
@@ -926,11 +1269,11 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
                         <span className="text-xs font-mono uppercase font-bold px-2 py-0.5 rounded bg-slate-800 text-amber-400 border border-slate-700">
                           Lado {bicoSelecionadoDiag.bico.lado}
                         </span>
-                        <span className="text-xs text-slate-300 font-medium">
+                        <span className="text-xs text-slate-300 font-medium truncate">
                           {bicoSelecionadoDiag.bico.bomba}
                         </span>
                       </div>
-                      <h3 className="text-lg font-extrabold text-white mt-1">
+                      <h3 className="text-base font-extrabold text-white mt-1">
                         Bico {bicoSelecionadoDiag.bico.numero} — {bicoSelecionadoDiag.bico.produto}
                       </h3>
                     </div>
@@ -999,7 +1342,7 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
                       Impacto a cada 1.000 L
                     </span>
                     <div
-                      className={`text-base font-mono font-extrabold mt-1 tabular-nums ${
+                      className={`text-sm font-mono font-extrabold mt-1 tabular-nums ${
                         bicoSelecionadoDiag.perdaOuSobraPor1000L > 0
                           ? 'text-amber-700'
                           : bicoSelecionadoDiag.perdaOuSobraPor1000L < 0
@@ -1024,7 +1367,7 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
                     <span className="text-[10px] font-bold uppercase text-slate-400 block">
                       Estabilidade / Deriva
                     </span>
-                    <div className="text-base font-mono font-extrabold text-slate-900 mt-1 tabular-nums flex items-center gap-1">
+                    <div className="text-sm font-mono font-extrabold text-slate-900 mt-1 tabular-nums flex items-center gap-1">
                       {bicoSelecionadoDiag.tendenciaMl !== null ? (
                         <>
                           {bicoSelecionadoDiag.tendenciaMl > 0 ? (
@@ -1059,7 +1402,7 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
                   <div className="flex items-center justify-between">
                     <h4 className="text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
                       <History className="w-3.5 h-3.5 text-slate-400" />
-                      Histórico de Acompanhamento do Bico ({bicoSelecionadoDiag.historicoBico.length})
+                      Histórico do Bico ({bicoSelecionadoDiag.historicoBico.length})
                     </h4>
                     <span className="text-[10px] font-mono text-slate-400">Padrão 20,000 L</span>
                   </div>
@@ -1074,7 +1417,8 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
                         const ml = Math.round(af.diferenca * 1000);
                         const tol = Math.round((af.toleranciaConfigurada || 0.1) * 1000);
                         const ok = Math.abs(ml) <= tol;
-                        const resp = funcionarios.find((f) => f.id === af.funcionarioId)?.nome || 'Operador';
+                        const resp =
+                          funcionarios.find((f) => f.id === af.funcionarioId)?.nome || 'Operador';
 
                         return (
                           <div

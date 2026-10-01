@@ -1,2222 +1,1097 @@
-import React, { useState } from 'react';
-import { RegistroDensidade, Conformidade, Funcionario, TipoTesteANP } from '../../types';
-import { PostoSubcollectionRepository, registrarAuditoria } from '../../repositories/firestoreRepository';
+import React, { useState, useMemo } from 'react';
+import {
+  RegistroDensidade,
+  TipoTesteANP,
+  Conformidade,
+  ConformidadeStatus,
+  Funcionario,
+} from '../../types';
+import {
+  PostoSubcollectionRepository,
+  registrarAuditoria,
+} from '../../repositories/firestoreRepository';
 import { useAuth } from '../../contexts/AuthContext';
 import {
-  PADROES_ANP_2026,
   obterPadraoANP,
-  calcularDensidade20C,
   calcularDetalhesDensidadeOperacional,
   calcularTesteProvetaGasolina,
   calcularTeorAlcoolicoEtanol,
+  gerarMatrizNBR5992,
 } from '../../utils/calculations';
-import { ModalTabelaOficialANP } from './ModalTabelaOficialANP';
 import {
-  TestTubes,
-  CheckSquare,
-  Plus,
-  AlertCircle,
-  AlertTriangle,
-  CheckCircle2,
-  ShieldCheck,
-  FlaskConical,
-  Truck,
-  Droplets,
-  Calendar,
-  XCircle,
-  FileCheck,
   Calculator,
+  CheckCircle2,
+  AlertTriangle,
+  Trash2,
+  Edit2,
+  Printer,
   ChevronDown,
   ChevronUp,
-  Info,
-  Scale,
+  RotateCcw,
+  Save,
+  SlidersHorizontal,
+  Sparkles,
+  FileText,
+  ClipboardCheck,
+  Plus,
   Thermometer,
-  FileSpreadsheet,
-  ExternalLink,
-  Table,
-  Pencil,
-  Trash2,
+  FlaskConical,
+  Droplets,
+  Truck,
+  Flame,
+  Zap,
+  Leaf,
+  Fuel,
 } from 'lucide-react';
-import { ModalEditarAnalise } from './ModalEditarAnalise';
 
-const repoDensidade = new PostoSubcollectionRepository<RegistroDensidade>('densidades');
-const repoConformidade = new PostoSubcollectionRepository<Conformidade>('conformidades');
+const repoDensidades = new PostoSubcollectionRepository<RegistroDensidade>('densidades');
+const repoConformidades = new PostoSubcollectionRepository<Conformidade>('conformidades');
 
-interface AnalisesConformidadeProps {
+interface AnalisesProps {
   densidades: RegistroDensidade[];
   conformidades: Conformidade[];
   funcionarios: Funcionario[];
   onReload: () => void;
 }
 
-export const AnalisesConformidadeView: React.FC<AnalisesConformidadeProps> = ({
+const COMBUSTIVEIS_LIST = [
+  'Gasolina Comum',
+  'Gasolina Aditivada',
+  'Etanol',
+  'Diesel S10',
+  'Diesel S500',
+];
+
+export const AnalisesConformidadeView: React.FC<AnalisesProps> = ({
   densidades,
   conformidades,
   funcionarios,
   onReload,
 }) => {
   const { postoId, userProfile } = useAuth();
-  const [tabPrincipal, setTabPrincipal] = useState<'ANP_2026' | 'CHECKLIST_NR20'>('ANP_2026');
-  const [abaTeste, setAbaTeste] = useState<TipoTesteANP>('DENSIDADE_D20');
 
-  // Estado do Teste de Densidade D20
-  const [produto, setProduto] = useState('Gasolina Comum');
-  const [temperatura, setTemperatura] = useState(25);
-  const [densidadeObservada, setDensidadeObservada] = useState(0.742);
-  const [responsavelId, setResponsavelId] = useState(funcionarios[0]?.id || '');
-  const [obsDensidade, setObsDensidade] = useState('');
+  // Alternador Principal: Versão Simples (padrão) vs Detalhar Informações
+  const [detalharInformacoes, setDetalharInformacoes] = useState(false);
 
-  // Estado do Teste da Proveta (Teor de Etanol na Gasolina - Padrão D32 Resolução Ago/2026: 32% ± 1%)
-  const [volumeAquosoFinal, setVolumeAquosoFinal] = useState(65.5); // 65.5ml -> (65.5-50)*2 + 1 = 32.0% (Padrão D32 / E32)
+  // Aba secundária quando desejar ver Checklist de Conformidades do Posto
+  const [secaoAtiva, setSecaoAtiva] = useState<'CALCULADORA' | 'CONFORMIDADES'>('CALCULADORA');
 
-  // Estado da Análise de Etanol Hidratado
-  const [condutividadeEletrica, setCondutividadeEletrica] = useState(180); // µS/m (máx 350)
-  const [phEtanol, setPhEtanol] = useState(7.0); // 6.0 a 8.0
+  // Modo de Teste na Calculadora ANP
+  const [tipoTeste, setTipoTeste] = useState<TipoTesteANP>('DENSIDADE_D20');
+  const [produto, setProduto] = useState<string>('Gasolina Comum');
 
-  // Estado de Recebimento de Descarga de Caminhão-Tanque
-  const [numeroNotaFiscal, setNumeroNotaFiscal] = useState('');
-  const [placaCaminhao, setPlacaCaminhao] = useState('');
-  const [distribuidora, setDistribuidora] = useState('Vibra / Petrobras');
-  const [compartimento, setCompartimento] = useState('Comp. 01 (5.000 L)');
-  const [lacreConferido, setLacreConferido] = useState(true);
+  // Estado de Edição de Registro de Densidade / Análise
+  const [editandoId, setEditandoId] = useState<string | null>(null);
 
-  // Estados Operacionais Específicos D32
-  const [metodoEnsaioD32, setMetodoEnsaioD32] = useState<'ABNT NBR 5992' | 'ASTM D1250' | 'DIGITAL'>('ABNT NBR 5992');
-  const [temperaturaAmbienteD32, setTemperaturaAmbienteD32] = useState(25.0);
-  const [expandirMemoriaCalculo, setExpandirMemoriaCalculo] = useState(false);
-  const [isModalTabelaOficialAberto, setIsModalTabelaOficialAberto] = useState(false);
+  // Entradas Diretas da Calculadora
+  const [temperatura, setTemperatura] = useState<number>(25.0);
+  const [densidadeObservada, setDensidadeObservada] = useState<number>(0.738);
+  const [volumeAquosoFinal, setVolumeAquosoFinal] = useState<number>(66.0);
+  const [condutividadeEletrica, setCondutividadeEletrica] = useState<number>(180);
+  const [ph, setPh] = useState<number>(6.5);
+  const [aspecto, setAspecto] = useState<string>('Límpido e Isento (L.I.I.)');
 
-  // Form Modal Checklist Conformidade
-  const [isModalConformidade, setIsModalConformidade] = useState(false);
-  const [categoria, setCategoria] = useState<
-    'SEGURANCA' | 'MEIO_AMBIENTE' | 'QUALIDADE' | 'FISCAL' | 'EQUIPAMENTOS' | 'UNIFORMES'
-  >('SEGURANCA');
-  const [itemChecklist, setItemChecklist] = useState('Extintores de Incêndio Desobstruídos e com Carga Válida (NR-20)');
-  const [statusConformidade, setStatusConformidade] = useState<'CONFORME' | 'NAO_CONFORME' | 'PENDENTE'>('CONFORME');
-  const [obsConformidade, setObsConformidade] = useState('');
+  // Campos Detalhados (visíveis ao clicar em "Detalhar Informações")
+  const [responsavelId, setResponsavelId] = useState<string>(funcionarios[0]?.id || '');
+  const [dataTeste, setDataTeste] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [horaTeste, setHoraTeste] = useState<string>(() =>
+    new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  );
+  const [numeroNotaFiscal, setNumeroNotaFiscal] = useState<string>('');
+  const [placaCaminhao, setPlacaCaminhao] = useState<string>('');
+  const [distribuidora, setDistribuidora] = useState<string>('');
+  const [observacao, setObservacao] = useState<string>('');
+  const [salvando, setSalvando] = useState<boolean>(false);
 
-  // Estados para Edição e Exclusão de Laudos de Análise (RegistroDensidade)
-  const [analiseParaEditar, setAnaliseParaEditar] = useState<RegistroDensidade | null>(null);
-  const [isModalEditarAnalise, setIsModalEditarAnalise] = useState(false);
-  const [analiseParaExcluir, setAnaliseParaExcluir] = useState<RegistroDensidade | null>(null);
-  const [isModalExcluirAnalise, setIsModalExcluirAnalise] = useState(false);
-  const [isModalLimparLaudos, setIsModalLimparLaudos] = useState(false);
+  // Estados para Cadastro / Edição de Checklist de Conformidade
+  const [editandoConfId, setEditandoConfId] = useState<string | null>(null);
+  const [confCategoria, setConfCategoria] = useState<Conformidade['categoria']>('QUALIDADE');
+  const [confItem, setConfItem] = useState<string>('');
+  const [confStatus, setConfStatus] = useState<ConformidadeStatus>('CONFORME');
+  const [confObs, setConfObs] = useState<string>('');
 
-  // Estados para Edição e Exclusão de Checklist (Conformidade)
-  const [checklistParaEditar, setChecklistParaEditar] = useState<Conformidade | null>(null);
-  const [isModalEditarChecklist, setIsModalEditarChecklist] = useState(false);
-  const [checklistParaExcluir, setChecklistParaExcluir] = useState<Conformidade | null>(null);
-  const [isModalExcluirChecklist, setIsModalExcluirChecklist] = useState(false);
-  const [isModalLimparChecklist, setIsModalLimparChecklist] = useState(false);
-  const [cenarioTesteAtivo, setCenarioTesteAtivo] = useState<string | null>(null);
-
-  const [processandoAcao, setProcessandoAcao] = useState(false);
-
-  // Cenários calibrados com dados reais de bancada e pátio para teste imediato
-  const cenariosTesteReal = [
-    {
-      id: 'gasolina-comum-25',
-      titulo: 'Gasolina Comum',
-      tag: '25°C • 0,7420 g/cm³',
-      esperado: 'D20: 745,8 kg/m³ (Conforme)',
-      conforme: true,
-      tipo: 'DENSIDADE_D20' as TipoTesteANP,
-      prod: 'Gasolina Comum',
-      temp: 25.0,
-      dens: 0.7420,
-      detalhe: 'Ensaio de rotina em pista. Norma ANP 807/2020: 715,0 a 775,0 kg/m³.'
-    },
-    {
-      id: 'gasolina-aditivada-23',
-      titulo: 'Gasolina Aditivada',
-      tag: '23,5°C • 0,7460 g/cm³',
-      esperado: 'D20: 748,7 kg/m³ (Conforme)',
-      conforme: true,
-      tipo: 'DENSIDADE_D20' as TipoTesteANP,
-      prod: 'Gasolina Aditivada',
-      temp: 23.5,
-      dens: 0.7460,
-      detalhe: 'Combustível com aditivo dispersante/detergente. Faixa: 715,0 a 775,0 kg/m³.'
-    },
-    {
-      id: 'proveta-d32-32pct',
-      titulo: 'Proveta D32 Gasolina',
-      tag: 'Vol. Aquoso: 65,5 ml',
-      esperado: '32,0% v/v Etanol (Conforme)',
-      conforme: true,
-      tipo: 'TESTE_PROVETA_GASOLINA' as TipoTesteANP,
-      prod: 'Gasolina Comum',
-      temp: 20.0,
-      dens: 0.7420,
-      volAquoso: 65.5,
-      detalhe: 'Determinação na proveta de 100ml: (% = (65,5 - 50) × 2 + 1 = 32,0% v/v). Tolerância D32: 31,0% a 33,0%.'
-    },
-    {
-      id: 'etanol-nbr-93inpm',
-      titulo: 'Etanol Hidratado',
-      tag: '26,8°C • 0,8040 g/cm³',
-      esperado: 'D20: 809,7 kg/m³ | 93,0° INPM',
-      conforme: true,
-      tipo: 'TEOR_ALCOOLICO_ETANOL' as TipoTesteANP,
-      prod: 'Etanol',
-      temp: 26.8,
-      dens: 0.8040,
-      cond: 180,
-      ph: 7.0,
-      detalhe: 'Conversão ABNT NBR 5992: D20 = 809,7 kg/m³, 93,0° INPM (faixa regulamentar: 92,5° a 93,8° INPM) e 95,4° GL.'
-    },
-    {
-      id: 'diesel-s10-24',
-      titulo: 'Diesel S10 (B14/B15)',
-      tag: '24,5°C • 0,8320 g/cm³',
-      esperado: 'D20: 835,2 kg/m³ (Conforme S10)',
-      conforme: true,
-      tipo: 'DENSIDADE_D20' as TipoTesteANP,
-      prod: 'Diesel S10',
-      temp: 24.5,
-      dens: 0.8320,
-      detalhe: 'Res. ANP 968/2024: Massa específica a 20°C entre 820,0 e 857,0 kg/m³ com Biodiesel B14/B15.'
-    },
-    {
-      id: 'diesel-s10-b15-real',
-      titulo: 'Diesel S10 Lote Real (B15)',
-      tag: '20,0°C • 0,8520 g/cm³',
-      esperado: 'D20: 852,0 kg/m³ (Conforme B15)',
-      conforme: true,
-      tipo: 'DENSIDADE_D20' as TipoTesteANP,
-      prod: 'Diesel S10',
-      temp: 20.0,
-      dens: 0.8520,
-      detalhe: 'Res. ANP 968/2024: Amostra real de Diesel B S10 com Biodiesel B15, perfeitamente conforme na faixa 820,0 a 857,0 kg/m³.'
-    },
-    {
-      id: 'diesel-s500-22',
-      titulo: 'Diesel S500',
-      tag: '22,0°C • 0,8436 g/cm³',
-      esperado: 'D20: 845,0 kg/m³ (Conforme S500)',
-      conforme: true,
-      tipo: 'DENSIDADE_D20' as TipoTesteANP,
-      prod: 'Diesel S500',
-      temp: 22.0,
-      dens: 0.8436,
-      detalhe: 'Res. ANP 968/2024: Massa específica a 20°C entre 820,0 e 870,0 kg/m³ com Biodiesel B14/B15.'
-    },
-    {
-      id: 'gasolina-adulterada-37pct',
-      titulo: 'Gasolina Adulterada (Proveta)',
-      tag: 'Vol. Aquoso: 68,0 ml',
-      esperado: 'Teor: 37,0% (Reprovada > 33%)',
-      conforme: false,
-      tipo: 'TESTE_PROVETA_GASOLINA' as TipoTesteANP,
-      prod: 'Gasolina Comum',
-      temp: 20.0,
-      dens: 0.7420,
-      volAquoso: 68.0,
-      detalhe: 'Excesso de etanol anidro: Volume aquoso lido de 68 ml resulta em 37,0% de etanol, violando o teto de 33,0%.'
-    },
-    {
-      id: 'etanol-molhado-814',
-      titulo: 'Etanol "Molhado" (Água)',
-      tag: '20,0°C • 0,8140 g/cm³',
-      esperado: 'D20: 814,0 kg/m³ | 91,3° INPM',
-      conforme: false,
-      tipo: 'TEOR_ALCOOLICO_ETANOL' as TipoTesteANP,
-      prod: 'Etanol',
-      temp: 20.0,
-      dens: 0.8140,
-      cond: 410,
-      ph: 5.6,
-      detalhe: 'Etanol hidratado adulterado com água: D20 alta (814,0 kg/m³) resulta em teor alcoólico de apenas 91,3° INPM (< 92,5°).'
-    },
-  ];
-
-  const handleExecutarTesteReal = (c: (typeof cenariosTesteReal)[number]) => {
-    setCenarioTesteAtivo(c.id);
-    setAbaTeste(c.tipo);
-    setProduto(c.prod);
-    setTemperatura(c.temp);
-    setDensidadeObservada(c.dens);
-    if (c.volAquoso !== undefined) setVolumeAquosoFinal(c.volAquoso);
-    if (c.cond !== undefined) setCondutividadeEletrica(c.cond);
-    if (c.ph !== undefined) setPhEtanol(c.ph);
+  // Troca de produto com ajuste automático de densidade inicial quando não está em edição
+  const handleTrocarProduto = (novoProd: string) => {
+    setProduto(novoProd);
+    if (editandoId) return;
+    const padrao = obterPadraoANP(novoProd);
+    const media = Number(((padrao.densidade20CMin + padrao.densidade20CMax) / 2).toFixed(4));
+    setDensidadeObservada(media);
   };
 
-  // Configuração e referências do produto selecionado segundo a ANP 2026
-  const padraoAtual = obterPadraoANP(produto);
+  // Cálculo em tempo real
+  const calculoAtual = useMemo(() => {
+    const padrao = obterPadraoANP(produto);
+    const calcDens = calcularDetalhesDensidadeOperacional(densidadeObservada, temperatura, produto);
+    const aspectoConforme = aspecto.toLowerCase().includes('límpido') || aspecto.toLowerCase().includes('limpido');
 
-  // 1. Cálculos D20 com memória de cálculo detalhada para transparência operacional
-  const detalhesDensidade = calcularDetalhesDensidadeOperacional(densidadeObservada, temperatura, produto);
-  const densidadeCalculada20 = detalhesDensidade.densidadeCalculada20C;
-  const isDensidadeConforme = detalhesDensidade.isConforme;
-
-  // 2. Cálculos Teste da Proveta Gasolina (Resolução de Agosto de 2026 D32 / E32)
-  const resultadoProveta = calcularTesteProvetaGasolina(
-    volumeAquosoFinal,
-    produto.includes('Premium') ? 'PREMIUM' : 'COMUM'
-  );
-
-  // 3. Cálculos Etanol Hidratado (Res. ANP 907/2022: 807,6 a 811,0 kg/m³ e 92,5% a 93,8% °INPM)
-  const resultadoEtanol = calcularTeorAlcoolicoEtanol(densidadeCalculada20);
-  const isCondutividadeConforme = condutividadeEletrica <= 350;
-  const isPhConforme = phEtanol >= 6.0 && phEtanol <= 8.0;
-  const isEtanolTotalConforme = resultadoEtanol.isConforme && isCondutividadeConforme && isPhConforme;
-
-  // Determinação do status global de acordo com o teste ativo
-  let statusFinalTeste: 'CONFORME' | 'NAO_CONFORME' = 'CONFORME';
-  let parecerTecnicoFinal = '';
-
-  if (abaTeste === 'DENSIDADE_D20') {
-    if (produto.includes('Etanol')) {
-      statusFinalTeste = isDensidadeConforme && resultadoEtanol.isConforme ? 'CONFORME' : 'NAO_CONFORME';
-      parecerTecnicoFinal = (isDensidadeConforme && resultadoEtanol.isConforme)
-        ? `APROVADO - Dentro das especificações ANP (${detalhesDensidade.faixaMinimaKgM3.toFixed(1)} - ${detalhesDensidade.faixaMaximaKgM3.toFixed(1)} kg/m³). D20 calculada: ${detalhesDensidade.densidadeKgM3.toFixed(1)} kg/m³ | Grau alcoólico: ${resultadoEtanol.grauINPM}% m/m (mín. 92,5% m/m).`
-        : `NÃO CONFORME: Densidade D20 (${detalhesDensidade.densidadeKgM3.toFixed(1)} kg/m³) fora dos limites ANP (${detalhesDensidade.faixaMinimaKgM3.toFixed(1)} a ${detalhesDensidade.faixaMaximaKgM3.toFixed(1)} kg/m³). Teor em massa apurado: ${resultadoEtanol.grauINPM}% m/m.`;
-    } else {
-      const isDiesel = produto.toLowerCase().includes('diesel');
-      statusFinalTeste = isDensidadeConforme ? 'CONFORME' : 'NAO_CONFORME';
-      parecerTecnicoFinal = isDensidadeConforme
-        ? `${isDiesel ? 'ÓLEO DIESEL CONFORME (' + padraoAtual.normaANP + ')' : 'CONFORME (ANP)'}: Densidade D20 (${densidadeCalculada20.toFixed(4)} g/cm³ | ${detalhesDensidade.densidadeKgM3.toFixed(1)} kg/m³) dentro do padrão regulamentar (${(padraoAtual.densidade20CMin * 1000).toFixed(1)} a ${(padraoAtual.densidade20CMax * 1000).toFixed(1)} kg/m³). Fator de correção α: ${detalhesDensidade.coeficienteExpansaoTermica}.`
-        : `NÃO CONFORME: Densidade D20 (${densidadeCalculada20.toFixed(4)} g/cm³ | ${detalhesDensidade.densidadeKgM3.toFixed(1)} kg/m³) fora dos limites regulamentares da ${padraoAtual.normaANP} (${(padraoAtual.densidade20CMin * 1000).toFixed(1)} a ${(padraoAtual.densidade20CMax * 1000).toFixed(1)} kg/m³).`;
+    if (tipoTeste === 'TESTE_PROVETA_GASOLINA') {
+      const resProv = calcularTesteProvetaGasolina(
+        volumeAquosoFinal,
+        produto.includes('Premium') ? 'PREMIUM' : produto.includes('Aditivada') ? 'ADITIVADA' : 'COMUM'
+      );
+      const isConforme = resProv.isConforme && aspectoConforme;
+      return {
+        isConforme,
+        tituloResultado: 'Teor de Etanol Anidro na Gasolina',
+        valorPrincipal: `${resProv.teorEtanolApurado.toFixed(1)}%`,
+        subvalor: `Camada aquosa lida: ${resProv.volumeAquosoFinal} mL`,
+        faixaPermitida: `Faixa ANP: ${resProv.teorReferenciaMin}% a ${resProv.teorReferenciaMax}% (Meta ${resProv.teorReferenciaNominal}%)`,
+        parecerCurto: isConforme ? resProv.parecer : !aspectoConforme ? 'Reprovado por aspecto visual fora do padrão.' : resProv.parecer,
+        formulaDetalhada: `Teor (%) = [(${resProv.volumeAquosoFinal} mL - 50 mL) × 2] + 1 = ${resProv.teorEtanolApurado}%`,
+        d20Calculada: calcDens.densidadeCalculada20C,
+        d20KgM3: calcDens.densidadeKgM3,
+        teorEtanolAnidro: resProv.teorEtanolApurado,
+        grauINPM: undefined as number | undefined,
+        grauGL: undefined as number | undefined,
+        padrao,
+        calcDens,
+      };
     }
-  } else if (abaTeste === 'TESTE_PROVETA_GASOLINA') {
-    statusFinalTeste = resultadoProveta.isConforme ? 'CONFORME' : 'NAO_CONFORME';
-    parecerTecnicoFinal = `${resultadoProveta.parecer} Teor apurado de ${resultadoProveta.teorEtanolApurado}% (Volume aquoso lido na proveta: ${volumeAquosoFinal} ml | Faixa exigida pela Resolução de Agosto/2026 D32: ${resultadoProveta.teorReferenciaMin}% a ${resultadoProveta.teorReferenciaMax}%).`;
-  } else if (abaTeste === 'TEOR_ALCOOLICO_ETANOL') {
-    statusFinalTeste = isEtanolTotalConforme ? 'CONFORME' : 'NAO_CONFORME';
-    parecerTecnicoFinal = `Conversão para teor alcoólico em massa: ${resultadoEtanol.grauINPM}° INPM (Padrão ANP: 92,5° a 93,8° INPM) | Teor em volume: ${resultadoEtanol.grauGL}° GL | Condutividade: ${condutividadeEletrica} µS/m | pH: ${phEtanol}. ${resultadoEtanol.parecer}`;
-  } else if (abaTeste === 'RECEBIMENTO_DESCARGA') {
-    const conformeDescarga = isDensidadeConforme && lacreConferido;
-    statusFinalTeste = conformeDescarga ? 'CONFORME' : 'NAO_CONFORME';
-    parecerTecnicoFinal = conformeDescarga
-      ? `Descarga liberada: Lacres conferidos, D20 ${densidadeCalculada20.toFixed(4)} g/cm³ (${detalhesDensidade.densidadeKgM3.toFixed(1)} kg/m³) em conformidade com o padrão ANP (${(padraoAtual.densidade20CMin * 1000).toFixed(1)} a ${(padraoAtual.densidade20CMax * 1000).toFixed(1)} kg/m³) e NF ${numeroNotaFiscal || 'S/N'}.`
-      : `Descarga REPROVADA / BLOQUEADA: ${!lacreConferido ? 'Lacres violados ou divergentes. ' : ''}${!isDensidadeConforme ? `Desvio de densidade: ${detalhesDensidade.densidadeKgM3.toFixed(1)} kg/m³ fora do padrão ANP (${(padraoAtual.densidade20CMin * 1000).toFixed(1)} a ${(padraoAtual.densidade20CMax * 1000).toFixed(1)} kg/m³).` : ''}`;
-  }
 
-  // Gravar registro técnico no Firestore / Repositório Local
-  const handleSalvarAnaliseANP = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const id = `anp-${Date.now()}`;
-    const responsavelNome = funcionarios.find((f) => f.id === responsavelId)?.nome || 'Operador de Pátio';
+    if (tipoTeste === 'TEOR_ALCOOLICO_ETANOL') {
+      const resEta = calcularTeorAlcoolicoEtanol(calcDens.densidadeCalculada20C);
+      const condOk = condutividadeEletrica <= (padrao.condutividadeEletricaMax || 350);
+      const phOk = ph >= (padrao.phMin || 6.0) && ph <= (padrao.phMax || 8.0);
+      const isConforme = resEta.isConforme && condOk && phOk && aspectoConforme;
 
-    const novoRegistro: RegistroDensidade = {
-      id,
-      postoId,
-      produto,
-      tipoTeste: abaTeste,
-      temperatura,
-      densidadeObservada,
-      densidadeCalculada20C: densidadeCalculada20,
-      densidadeReferenciaMin: padraoAtual.densidade20CMin,
-      densidadeReferenciaMax: padraoAtual.densidade20CMax,
-      resultado: statusFinalTeste,
-      responsavelId,
-      data: new Date().toISOString().slice(0, 10),
-      hora: new Date().toLocaleTimeString('pt-BR').slice(0, 5),
-      volumeAquosoFinal: abaTeste === 'TESTE_PROVETA_GASOLINA' ? volumeAquosoFinal : undefined,
-      teorEtanolAnidro: abaTeste === 'TESTE_PROVETA_GASOLINA' ? resultadoProveta.teorEtanolApurado : undefined,
-      grauINPM: (abaTeste === 'TEOR_ALCOOLICO_ETANOL' || produto.includes('Etanol')) ? resultadoEtanol.grauINPM : undefined,
-      grauGL: (abaTeste === 'TEOR_ALCOOLICO_ETANOL' || produto.includes('Etanol')) ? resultadoEtanol.grauGL : undefined,
-      condutividadeEletrica: abaTeste === 'TEOR_ALCOOLICO_ETANOL' ? condutividadeEletrica : undefined,
-      ph: abaTeste === 'TEOR_ALCOOLICO_ETANOL' ? phEtanol : undefined,
-      aspecto: padraoAtual.aspectoEsperado,
-      cor: padraoAtual.corEsperada,
-      numeroNotaFiscal: abaTeste === 'RECEBIMENTO_DESCARGA' ? numeroNotaFiscal : undefined,
-      placaCaminhao: abaTeste === 'RECEBIMENTO_DESCARGA' ? placaCaminhao : undefined,
-      distribuidora: abaTeste === 'RECEBIMENTO_DESCARGA' ? distribuidora : undefined,
-      compartimento: abaTeste === 'RECEBIMENTO_DESCARGA' ? compartimento : undefined,
-      lacreConferido: abaTeste === 'RECEBIMENTO_DESCARGA' ? lacreConferido : undefined,
-      parecerTecnico: parecerTecnicoFinal,
-      observacao: obsDensidade,
-      criadoEm: new Date().toISOString(),
-      // Campos específicos de conformidade regulatória D32
-      metodoEnsaioD32: metodoEnsaioD32,
-      coeficienteCorrecaoUtilizado: detalhesDensidade.coeficienteExpansaoTermica,
-      fatorExpansaoTermica: detalhesDensidade.fatorCorrecaoAplicado,
-      densidadeKgM3: detalhesDensidade.densidadeKgM3,
-      temperaturaAmbiente: temperaturaAmbienteD32,
+      return {
+        isConforme,
+        tituloResultado: 'Teor Alcoólico e Densidade a 20°C',
+        valorPrincipal: `${resEta.grauINPM.toFixed(1)} °INPM`,
+        subvalor: `Densidade 20°C: ${calcDens.densidadeCalculada20C.toFixed(4)} g/cm³ (${calcDens.densidadeKgM3.toFixed(1)} kg/m³)`,
+        faixaPermitida: 'Faixa ANP: 92,5 a 93,8 °INPM | 0,8076 a 0,8110 g/cm³',
+        parecerCurto: isConforme
+          ? `Etanol aprovado (${resEta.grauINPM.toFixed(1)} °INPM • ${calcDens.densidadeCalculada20C.toFixed(4)} g/cm³).`
+          : !condOk
+          ? `Condutividade (${condutividadeEletrica} µS/m) acima do limite de 350 µS/m.`
+          : !phOk
+          ? `pH (${ph}) fora da faixa de 6,0 a 8,0.`
+          : resEta.parecer,
+        formulaDetalhada: `${calcDens.formulaExplicativa} → Conversão NBR 5992 = ${resEta.grauINPM.toFixed(1)} °INPM (${resEta.grauGL.toFixed(1)} °GL)`,
+        d20Calculada: calcDens.densidadeCalculada20C,
+        d20KgM3: calcDens.densidadeKgM3,
+        teorEtanolAnidro: undefined,
+        grauINPM: resEta.grauINPM,
+        grauGL: resEta.grauGL,
+        padrao,
+        calcDens,
+      };
+    }
+
+    // DENSIDADE_D20 ou RECEBIMENTO_DESCARGA
+    const isConforme = calcDens.isConforme && aspectoConforme;
+    return {
+      isConforme,
+      tituloResultado:
+        tipoTeste === 'RECEBIMENTO_DESCARGA'
+          ? 'Densidade a 20°C na Descarga (Caminhão)'
+          : 'Densidade Convertida a 20°C (D20)',
+      valorPrincipal: `${calcDens.densidadeCalculada20C.toFixed(4)} g/cm³`,
+      subvalor: `Equivalente a ${calcDens.densidadeKgM3.toFixed(1)} kg/m³ (lida a ${temperatura}°C)`,
+      faixaPermitida: `Faixa ANP: ${padrao.densidade20CMin.toFixed(4)} a ${padrao.densidade20CMax.toFixed(4)} g/cm³ (${calcDens.faixaMinimaKgM3} a ${calcDens.faixaMaximaKgM3} kg/m³)`,
+      parecerCurto: isConforme
+        ? calcDens.parecerOperacional
+        : !aspectoConforme
+        ? 'Reprovado por aspecto visual fora do padrão.'
+        : calcDens.parecerOperacional,
+      formulaDetalhada: calcDens.formulaExplicativa,
+      d20Calculada: calcDens.densidadeCalculada20C,
+      d20KgM3: calcDens.densidadeKgM3,
+      teorEtanolAnidro: undefined,
+      grauINPM: undefined,
+      grauGL: undefined,
+      padrao,
+      calcDens,
     };
+  }, [
+    produto,
+    tipoTeste,
+    temperatura,
+    densidadeObservada,
+    volumeAquosoFinal,
+    condutividadeEletrica,
+    ph,
+    aspecto,
+  ]);
 
-    await repoDensidade.save(postoId, novoRegistro);
-    await registrarAuditoria(
-      postoId,
-      userProfile?.uid || 'anon',
-      responsavelNome,
-      'DENSIDADE',
-      'RegistroDensidade',
-      id,
-      'CREATE',
-      null,
-      novoRegistro as unknown as Record<string, unknown>
-    );
+  // Matriz NBR 5992 (gerada para exibição quando "Detalhar Informações" estiver ativo)
+  const matrizNBR = useMemo(() => {
+    return gerarMatrizNBR5992(produto, temperatura, densidadeObservada);
+  }, [produto, temperatura, densidadeObservada]);
 
-    setObsDensidade('');
+  const limparFormulario = () => {
+    setEditandoId(null);
     setNumeroNotaFiscal('');
     setPlacaCaminhao('');
-    onReload();
+    setDistribuidora('');
+    setObservacao('');
+    setAspecto('Límpido e Isento (L.I.I.)');
+    setDataTeste(new Date().toISOString().slice(0, 10));
+    setHoraTeste(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
   };
 
-  // Salvar Item de Checklist
+  // Carregar registro para Alterar (Editar)
+  const handleEditarRegistro = (reg: RegistroDensidade) => {
+    setEditandoId(reg.id);
+    setProduto(reg.produto);
+    setTipoTeste(reg.tipoTeste || 'DENSIDADE_D20');
+    setTemperatura(reg.temperatura);
+    setDensidadeObservada(reg.densidadeObservada);
+    if (reg.volumeAquosoFinal !== undefined) setVolumeAquosoFinal(reg.volumeAquosoFinal);
+    if (reg.condutividadeEletrica !== undefined) setCondutividadeEletrica(reg.condutividadeEletrica);
+    if (reg.ph !== undefined) setPh(reg.ph);
+    setAspecto(reg.aspecto || 'Límpido e Isento (L.I.I.)');
+    setResponsavelId(reg.responsavelId || funcionarios[0]?.id || '');
+    setDataTeste(reg.data || new Date().toISOString().slice(0, 10));
+    setHoraTeste(reg.hora || '08:00');
+    setNumeroNotaFiscal(reg.numeroNotaFiscal || '');
+    setPlacaCaminhao(reg.placaCaminhao || '');
+    setDistribuidora(reg.distribuidora || '');
+    setObservacao(reg.observacao || '');
+    if (reg.numeroNotaFiscal || reg.placaCaminhao || reg.observacao) {
+      setDetalharInformacoes(true);
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Excluir registro de análise
+  const handleExcluirRegistro = async (id: string) => {
+    if (!window.confirm('Tem certeza que deseja excluir este registro de análise?')) return;
+    await repoDensidades.delete(postoId, id);
+    if (editandoId === id) {
+      limparFormulario();
+    }
+    await onReload();
+  };
+
+  // Salvar ou Atualizar Registro
+  const handleSalvarRegistro = async () => {
+    setSalvando(true);
+    try {
+      const id = editandoId || `dens-${Date.now()}`;
+      const padrao = calculoAtual.padrao;
+
+      const novoRegistro: RegistroDensidade = {
+        id,
+        postoId,
+        produto,
+        tipoTeste,
+        temperatura: Number(temperatura),
+        densidadeObservada: Number(densidadeObservada),
+        densidadeCalculada20C: calculoAtual.d20Calculada,
+        densidadeReferenciaMin: padrao.densidade20CMin,
+        densidadeReferenciaMax: padrao.densidade20CMax,
+        resultado: calculoAtual.isConforme ? 'CONFORME' : 'NAO_CONFORME',
+        responsavelId: responsavelId || userProfile?.uid || 'op',
+        data: dataTeste,
+        hora: horaTeste,
+        volumeAquosoFinal: tipoTeste === 'TESTE_PROVETA_GASOLINA' ? volumeAquosoFinal : undefined,
+        teorEtanolAnidro: calculoAtual.teorEtanolAnidro,
+        grauINPM: calculoAtual.grauINPM,
+        grauGL: calculoAtual.grauGL,
+        condutividadeEletrica: tipoTeste === 'TEOR_ALCOOLICO_ETANOL' ? condutividadeEletrica : undefined,
+        ph: tipoTeste === 'TEOR_ALCOOLICO_ETANOL' ? ph : undefined,
+        aspecto,
+        cor: padrao.corEsperada,
+        numeroNotaFiscal: numeroNotaFiscal.trim() || undefined,
+        placaCaminhao: placaCaminhao.trim() || undefined,
+        distribuidora: distribuidora.trim() || undefined,
+        parecerTecnico: calculoAtual.parecerCurto,
+        observacao: observacao.trim() || undefined,
+        densidadeKgM3: calculoAtual.d20KgM3,
+        criadoEm: new Date().toISOString(),
+      };
+
+      await repoDensidades.save(postoId, novoRegistro);
+      await registrarAuditoria(
+        postoId,
+        userProfile?.uid || 'anon',
+        userProfile?.nome || 'Operador',
+        'LABORATORIO_ANP',
+        'RegistroDensidade',
+        id,
+        editandoId ? 'UPDATE' : 'CREATE',
+        null,
+        novoRegistro as unknown as Record<string, unknown>
+      );
+
+      limparFormulario();
+      await onReload();
+    } catch (e: any) {
+      alert(`Erro ao salvar análise: ${e.message}`);
+    } finally {
+      setSalvando(false);
+    }
+  };
+
+  // Salvar ou Alterar item de Conformidade
   const handleSalvarConformidade = async (e: React.FormEvent) => {
     e.preventDefault();
-    const id = `conf-${Date.now()}`;
-    const responsavelNome = funcionarios.find((f) => f.id === responsavelId)?.nome || 'Fiscal de Pátio';
-
-    const novoItem: Conformidade = {
+    if (!confItem.trim()) return;
+    const id = editandoConfId || `conf-${Date.now()}`;
+    const novaConf: Conformidade = {
       id,
       postoId,
       data: new Date().toISOString().slice(0, 10),
-      categoria,
-      item: itemChecklist,
-      status: statusConformidade,
-      responsavelId,
-      observacao: obsConformidade,
+      categoria: confCategoria,
+      item: confItem.trim(),
+      status: confStatus,
+      responsavelId: userProfile?.uid || funcionarios[0]?.id || 'op',
+      observacao: confObs.trim() || undefined,
       criadoEm: new Date().toISOString(),
     };
-
-    await repoConformidade.save(postoId, novoItem);
-    await registrarAuditoria(
-      postoId,
-      userProfile?.uid || 'anon',
-      responsavelNome,
-      'CONFORMIDADE',
-      'Conformidade',
-      id,
-      'CREATE',
-      null,
-      novoItem as unknown as Record<string, unknown>
-    );
-
-    setIsModalConformidade(false);
-    setObsConformidade('');
-    onReload();
+    await repoConformidades.save(postoId, novaConf);
+    setEditandoConfId(null);
+    setConfItem('');
+    setConfObs('');
+    await onReload();
   };
 
-  // Handlers para Ações em Laudos de Análise (RegistroDensidade)
-  const handleEditarAnalise = (d: RegistroDensidade) => {
-    setAnaliseParaEditar(d);
-    setIsModalEditarAnalise(true);
-  };
-
-  const handleSalvarEdicaoAnalise = async (analiseAtualizada: RegistroDensidade) => {
-    const responsavelNome = funcionarios.find((f) => f.id === analiseAtualizada.responsavelId)?.nome || userProfile?.nome || 'Operador Técnico';
-    await repoDensidade.save(postoId, analiseAtualizada);
-    await registrarAuditoria(
-      postoId,
-      userProfile?.uid || 'anon',
-      responsavelNome,
-      'DENSIDADE',
-      'RegistroDensidade',
-      analiseAtualizada.id,
-      'UPDATE',
-      analiseParaEditar as unknown as Record<string, unknown>,
-      analiseAtualizada as unknown as Record<string, unknown>
-    );
-    setIsModalEditarAnalise(false);
-    setAnaliseParaEditar(null);
-    onReload();
-  };
-
-  const handleSolicitarExclusaoAnalise = (d: RegistroDensidade) => {
-    setAnaliseParaExcluir(d);
-    setIsModalExcluirAnalise(true);
-  };
-
-  const handleConfirmarExclusaoAnalise = async () => {
-    if (!analiseParaExcluir) return;
-    setProcessandoAcao(true);
-    try {
-      const responsavelNome = userProfile?.nome || 'Operador';
-      await repoDensidade.delete(postoId, analiseParaExcluir.id);
-      await registrarAuditoria(
-        postoId,
-        userProfile?.uid || 'anon',
-        responsavelNome,
-        'DENSIDADE',
-        'RegistroDensidade',
-        analiseParaExcluir.id,
-        'DELETE',
-        analiseParaExcluir as unknown as Record<string, unknown>,
-        null
-      );
-      setIsModalExcluirAnalise(false);
-      setAnaliseParaExcluir(null);
-      onReload();
-    } catch (err) {
-      console.error('Erro ao excluir laudo de análise:', err);
-      alert('Erro ao excluir laudo de análise.');
-    } finally {
-      setProcessandoAcao(false);
-    }
-  };
-
-  const handleConfirmarLimpezaLaudos = async () => {
-    setProcessandoAcao(true);
-    try {
-      const responsavelNome = userProfile?.nome || 'Operador';
-      await repoDensidade.clearAll(postoId);
-      await registrarAuditoria(
-        postoId,
-        userProfile?.uid || 'anon',
-        responsavelNome,
-        'DENSIDADE',
-        'RegistroDensidade',
-        'TODOS',
-        'DELETE',
-        { totalRemovidos: densidades.length },
-        null
-      );
-      setIsModalLimparLaudos(false);
-      onReload();
-    } catch (err) {
-      console.error('Erro ao limpar laudos de combustível:', err);
-      alert('Erro ao limpar laudos de combustível.');
-    } finally {
-      setProcessandoAcao(false);
-    }
-  };
-
-  // Handlers para Ações em Itens de Checklist (Conformidade)
-  const handleEditarChecklist = (c: Conformidade) => {
-    setChecklistParaEditar(c);
-    setIsModalEditarChecklist(true);
-  };
-
-  const handleSalvarEdicaoChecklist = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!checklistParaEditar) return;
-    setProcessandoAcao(true);
-    try {
-      const responsavelNome = funcionarios.find((f) => f.id === checklistParaEditar.responsavelId)?.nome || userProfile?.nome || 'Fiscal de Pátio';
-      await repoConformidade.save(postoId, checklistParaEditar);
-      await registrarAuditoria(
-        postoId,
-        userProfile?.uid || 'anon',
-        responsavelNome,
-        'CONFORMIDADE',
-        'Conformidade',
-        checklistParaEditar.id,
-        'UPDATE',
-        null,
-        checklistParaEditar as unknown as Record<string, unknown>
-      );
-      setIsModalEditarChecklist(false);
-      setChecklistParaEditar(null);
-      onReload();
-    } catch (err) {
-      console.error('Erro ao atualizar item de checklist:', err);
-      alert('Erro ao atualizar item de checklist.');
-    } finally {
-      setProcessandoAcao(false);
-    }
-  };
-
-  const handleSolicitarExclusaoChecklist = (c: Conformidade) => {
-    setChecklistParaExcluir(c);
-    setIsModalExcluirChecklist(true);
-  };
-
-  const handleConfirmarExclusaoChecklist = async () => {
-    if (!checklistParaExcluir) return;
-    setProcessandoAcao(true);
-    try {
-      const responsavelNome = userProfile?.nome || 'Operador';
-      await repoConformidade.delete(postoId, checklistParaExcluir.id);
-      await registrarAuditoria(
-        postoId,
-        userProfile?.uid || 'anon',
-        responsavelNome,
-        'CONFORMIDADE',
-        'Conformidade',
-        checklistParaExcluir.id,
-        'DELETE',
-        checklistParaExcluir as unknown as Record<string, unknown>,
-        null
-      );
-      setIsModalExcluirChecklist(false);
-      setChecklistParaExcluir(null);
-      onReload();
-    } catch (err) {
-      console.error('Erro ao excluir item de checklist:', err);
-      alert('Erro ao excluir item de checklist.');
-    } finally {
-      setProcessandoAcao(false);
-    }
-  };
-
-  const handleConfirmarLimpezaChecklist = async () => {
-    setProcessandoAcao(true);
-    try {
-      const responsavelNome = userProfile?.nome || 'Operador';
-      await repoConformidade.clearAll(postoId);
-      await registrarAuditoria(
-        postoId,
-        userProfile?.uid || 'anon',
-        responsavelNome,
-        'CONFORMIDADE',
-        'Conformidade',
-        'TODOS',
-        'DELETE',
-        { totalRemovidos: conformidades.length },
-        null
-      );
-      setIsModalLimparChecklist(false);
-      onReload();
-    } catch (err) {
-      console.error('Erro ao limpar itens de checklist:', err);
-      alert('Erro ao limpar itens de checklist.');
-    } finally {
-      setProcessandoAcao(false);
-    }
+  const handleExcluirConformidade = async (id: string) => {
+    if (!window.confirm('Deseja excluir este item de conformidade?')) return;
+    await repoConformidades.delete(postoId, id);
+    await onReload();
   };
 
   return (
-    <div className="space-y-6">
-      {/* Cabeçalho e Alternância Principal */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-teal-100 text-teal-800 tracking-wider">
-              Resolução de Agosto de 2026 (Marco D32 / E32) • ABNT NBR 5992 • ANP
-            </span>
+    <div className="space-y-5">
+      {/* Cabeçalho com Alternador Claro: Versão Simples vs Botão para Detalhar Informações */}
+      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl bg-teal-600 text-white flex items-center justify-center shadow-xs shrink-0">
+            <Calculator className="w-5 h-5" />
           </div>
-          <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2 mt-1">
-            <TestTubes className="w-6 h-6 text-teal-600" />
-            Laboratório & Calculadora ANP de Combustíveis
-          </h2>
-          <p className="text-sm text-slate-500 mt-0.5">
-            Cálculo oficial de densidade a 20°C (D20), teste da proveta com tolerância D32, conversão para teor alcoólico em massa (92,5° a 93,8° INPM / 94,5° a 95,4° GL) e laudos.
-          </p>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-bold text-slate-900">
+                Laboratório &amp; Calculadora ANP de Combustíveis
+              </h2>
+              <span
+                className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                  detalharInformacoes
+                    ? 'bg-purple-100 text-purple-800'
+                    : 'bg-teal-100 text-teal-800'
+                }`}
+              >
+                {detalharInformacoes ? 'Visão Detalhada' : 'Versão Simples'}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Cálculo direto de densidade a 20°C, proveta de gasolina e grau alcoólico.
+            </p>
+          </div>
         </div>
 
-        <div className="flex bg-slate-100 p-1 rounded-lg">
+        {/* Botões de Controle de Modo (Simples vs Detalhar Informações) */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+            <button
+              type="button"
+              onClick={() => setDetalharInformacoes(false)}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                !detalharInformacoes
+                  ? 'bg-white text-slate-900 shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Versão Simples
+            </button>
+            <button
+              type="button"
+              onClick={() => setDetalharInformacoes(true)}
+              className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                detalharInformacoes
+                  ? 'bg-teal-600 text-white shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              Detalhar Informações
+            </button>
+          </div>
+
           <button
-            onClick={() => setTabPrincipal('ANP_2026')}
-            className={`px-4 py-2 text-xs font-bold rounded-md transition ${
-              tabPrincipal === 'ANP_2026'
-                ? 'bg-white text-teal-700 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
+            type="button"
+            onClick={() =>
+              setSecaoAtiva(secaoAtiva === 'CALCULADORA' ? 'CONFORMIDADES' : 'CALCULADORA')
+            }
+            className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold border transition cursor-pointer ${
+              secaoAtiva === 'CONFORMIDADES'
+                ? 'bg-slate-900 text-white border-slate-900'
+                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
             }`}
           >
-            Calculadora & Testes ANP
-          </button>
-          <button
-            onClick={() => setTabPrincipal('CHECKLIST_NR20')}
-            className={`px-4 py-2 text-xs font-bold rounded-md transition ${
-              tabPrincipal === 'CHECKLIST_NR20'
-                ? 'bg-white text-teal-700 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            Checklist Diário & NR-20
+            <ClipboardCheck className="w-3.5 h-3.5" />
+            {secaoAtiva === 'CONFORMIDADES'
+              ? 'Voltar à Calculadora'
+              : `Checklist (${conformidades.length})`}
           </button>
         </div>
       </div>
 
-      {tabPrincipal === 'ANP_2026' ? (
-        <div className="space-y-6">
-          {/* Seletor de Tipo de Teste ANP */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <button
-              onClick={() => {
-                setAbaTeste('DENSIDADE_D20');
-              }}
-              className={`p-4 rounded-xl border text-left transition flex flex-col justify-between ${
-                abaTeste === 'DENSIDADE_D20'
-                  ? 'bg-teal-50 border-teal-500 shadow-xs ring-1 ring-teal-500'
-                  : 'bg-white border-slate-200 hover:bg-slate-50'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <FlaskConical className={`w-5 h-5 ${abaTeste === 'DENSIDADE_D20' ? 'text-teal-600' : 'text-slate-400'}`} />
-                <span className="text-[10px] font-bold uppercase text-slate-500">Oficial ANP</span>
-              </div>
-              <div className="mt-3">
-                <div className="font-bold text-sm text-slate-900">Densidade D20</div>
-                <div className="text-xs text-slate-500">Correção térmica 20°C</div>
-              </div>
-            </button>
-
-            <button
-              onClick={() => {
-                setAbaTeste('TESTE_PROVETA_GASOLINA');
-                setProduto('Gasolina Comum');
-              }}
-              className={`p-4 rounded-xl border text-left transition flex flex-col justify-between ${
-                abaTeste === 'TESTE_PROVETA_GASOLINA'
-                  ? 'bg-teal-50 border-teal-500 shadow-xs ring-1 ring-teal-500'
-                  : 'bg-white border-slate-200 hover:bg-slate-50'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <Droplets className={`w-5 h-5 ${abaTeste === 'TESTE_PROVETA_GASOLINA' ? 'text-teal-600' : 'text-slate-400'}`} />
-                <span className="text-[10px] font-bold uppercase bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">D32 Ago/2026</span>
-              </div>
-              <div className="mt-3">
-                <div className="font-bold text-sm text-slate-900">Teste da Proveta</div>
-                <div className="text-xs text-slate-500">Gasolina 32% ± 1% (D32)</div>
-              </div>
-            </button>
-
-            <button
-              onClick={() => {
-                setAbaTeste('TEOR_ALCOOLICO_ETANOL');
-                setProduto('Etanol');
-                setDensidadeObservada(0.8040);
-                setTemperatura(26.8);
-              }}
-              className={`p-4 rounded-xl border text-left transition flex flex-col justify-between ${
-                abaTeste === 'TEOR_ALCOOLICO_ETANOL'
-                  ? 'bg-teal-50 border-teal-500 shadow-xs ring-1 ring-teal-500'
-                  : 'bg-white border-slate-200 hover:bg-slate-50'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <TestTubes className={`w-5 h-5 ${abaTeste === 'TEOR_ALCOOLICO_ETANOL' ? 'text-teal-600' : 'text-slate-400'}`} />
-                <span className="text-[10px] font-bold uppercase bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">D20 → INPM</span>
-              </div>
-              <div className="mt-3">
-                <div className="font-bold text-sm text-slate-900">Etanol Hidratado</div>
-                <div className="text-xs text-slate-500">Conversão para 92,5°-93,8° INPM</div>
-              </div>
-            </button>
-
-            <button
-              onClick={() => setAbaTeste('RECEBIMENTO_DESCARGA')}
-              className={`p-4 rounded-xl border text-left transition flex flex-col justify-between ${
-                abaTeste === 'RECEBIMENTO_DESCARGA'
-                  ? 'bg-teal-50 border-teal-500 shadow-xs ring-1 ring-teal-500'
-                  : 'bg-white border-slate-200 hover:bg-slate-50'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <Truck className={`w-5 h-5 ${abaTeste === 'RECEBIMENTO_DESCARGA' ? 'text-teal-600' : 'text-slate-400'}`} />
-                <span className="text-[10px] font-bold uppercase text-slate-500">Boletim NF</span>
-              </div>
-              <div className="mt-3">
-                <div className="font-bold text-sm text-slate-900">Descarga de Caminhão</div>
-                <div className="text-xs text-slate-500">Laudo de recebimento do posto</div>
-              </div>
-            </button>
-          </div>
-
-          {/* Painel Interativo da Calculadora e Formulário */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-100 pb-4">
-              <div>
-                <h3 className="font-bold text-base text-slate-900">
-                  {abaTeste === 'DENSIDADE_D20' && 'Calculadora Oficial de Densidade Relativa a 20°C (D20)'}
-                  {abaTeste === 'TESTE_PROVETA_GASOLINA' && 'Determinação do Teor de Etanol na Gasolina (Teste da Proveta - Padrão D32)'}
-                  {abaTeste === 'TEOR_ALCOOLICO_ETANOL' && 'Conversão para teor alcoólico em massa (92,5° a 93,8° INPM)'}
-                  {abaTeste === 'RECEBIMENTO_DESCARGA' && 'Boletim de Conformidade para Descarregamento de Caminhão-Tanque'}
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {abaTeste === 'TESTE_PROVETA_GASOLINA'
-                    ? 'Tolerância da gasolina seguindo a Resolução de Agosto de 2026 D32: 32% ± 1% (31,0% a 33,0%) para Gasolina Comum e Aditivada.'
-                    : abaTeste === 'TEOR_ALCOOLICO_ETANOL'
-                    ? 'Conversão direta e precisa da D20 para teor alcoólico em massa conforme ABNT NBR 5992 (Faixa exigida: 92,5° a 93,8° INPM).'
-                    : 'Parâmetros atualizados e fiscalizados pela Agência Nacional do Petróleo (ANP).'}
-                </p>
-              </div>
-
-              {/* Seletor de Produto - Somente os 5 Combustíveis Principais Solicitados */}
-              <div className="flex flex-wrap gap-1.5">
-                {(abaTeste === 'TESTE_PROVETA_GASOLINA'
-                  ? ['Gasolina Comum', 'Gasolina Aditivada']
-                  : abaTeste === 'TEOR_ALCOOLICO_ETANOL'
-                  ? ['Etanol']
-                  : ['Gasolina Comum', 'Gasolina Aditivada', 'Etanol', 'Diesel S10', 'Diesel S500']
-                ).map((prod) => (
-                  <button
-                    key={prod}
-                    type="button"
-                    onClick={() => {
-                      setProduto(prod);
-                      setCenarioTesteAtivo(null);
-                      // Ajustar densidade típica para teste
-                      if (prod.includes('Gasolina')) {
-                        setDensidadeObservada(0.7420);
-                        setTemperatura(25.0);
-                      } else if (prod === 'Etanol' || prod.includes('Etanol')) {
-                        setDensidadeObservada(0.8040);
-                        setTemperatura(26.8);
-                      } else if (prod === 'Diesel S10' || prod.includes('S10') || prod.includes('S-10')) {
-                        setDensidadeObservada(0.8350);
-                        setTemperatura(20.0);
-                      } else if (prod === 'Diesel S500' || prod.includes('S500') || prod.includes('S-500')) {
-                        setDensidadeObservada(0.8450);
-                        setTemperatura(20.0);
-                      }
-                    }}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                      produto === prod
-                        ? 'bg-slate-900 text-white shadow-xs'
-                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+      {secaoAtiva === 'CALCULADORA' ? (
+        <>
+          {/* Barra de Seleção Rápida do Tipo de Cálculo com Ícones Representativos */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+            {(
+              [
+                {
+                  id: 'DENSIDADE_D20',
+                  titulo: '1. Densidade a 20°C',
+                  sub: 'Termodensímetro (°C + g/cm³)',
+                  icon: Thermometer,
+                },
+                {
+                  id: 'TESTE_PROVETA_GASOLINA',
+                  titulo: '2. Proveta Gasolina',
+                  sub: 'Teor de Etanol (100 mL)',
+                  icon: FlaskConical,
+                },
+                {
+                  id: 'TEOR_ALCOOLICO_ETANOL',
+                  titulo: '3. Etanol (°INPM)',
+                  sub: 'Grau Alcoólico e D20',
+                  icon: Droplets,
+                },
+                {
+                  id: 'RECEBIMENTO_DESCARGA',
+                  titulo: '4. Descarga de NF',
+                  sub: 'Amostra do Caminhão',
+                  icon: Truck,
+                },
+              ] as const
+            ).map((aba) => {
+              const ativa = tipoTeste === aba.id;
+              const AbaIcon = aba.icon;
+              return (
+                <button
+                  key={aba.id}
+                  type="button"
+                  onClick={() => {
+                    setTipoTeste(aba.id);
+                    if (aba.id === 'TESTE_PROVETA_GASOLINA' && !produto.includes('Gasolina')) {
+                      handleTrocarProduto('Gasolina Comum');
+                    } else if (aba.id === 'TEOR_ALCOOLICO_ETANOL') {
+                      handleTrocarProduto('Etanol');
+                    }
+                  }}
+                  className={`p-3.5 rounded-xl border text-left transition cursor-pointer flex items-start gap-3 ${
+                    ativa
+                      ? 'bg-teal-600 text-white border-teal-600 shadow-xs'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  <div
+                    className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
+                      ativa ? 'bg-white/20 text-white' : 'bg-teal-50 text-teal-700'
                     }`}
                   >
-                    {prod}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Barra de Testes Rápidos com Dados Reais Calibrados */}
-            <div className="bg-slate-50 border border-slate-200/90 rounded-xl p-3.5 space-y-2.5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="flex h-2.5 w-2.5 relative">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-teal-600"></span>
-                  </span>
-                  <div>
-                    <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                      <FlaskConical className="w-3.5 h-3.5 text-teal-600" />
-                      Ensaios e Testes com Dados Reais de Bancada / Pátio:
-                    </span>
-                    <span className="text-[11px] text-slate-500">
-                      Clique em qualquer amostra real calibrada para carregar e validar os cálculos instantaneamente:
-                    </span>
+                    <AbaIcon className="w-5 h-5" />
                   </div>
-                </div>
-                {cenarioTesteAtivo && (
-                  <span className="text-[10px] font-semibold text-teal-800 bg-teal-100 border border-teal-200 px-2 py-0.5 rounded-full shrink-0">
-                    Amostra Ativa na Calculadora
-                  </span>
+                  <div className="min-w-0">
+                    <div className="font-bold text-xs sm:text-sm truncate">{aba.titulo}</div>
+                    <div className={`text-[11px] mt-0.5 truncate ${ativa ? 'text-teal-100' : 'text-slate-400'}`}>
+                      {aba.sub}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Grid Principal: Entradas Diretas + Resultado Claro */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Coluna Esquerda: Entradas */}
+            <div className="lg:col-span-7 bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-5">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h3 className="text-sm font-bold text-slate-900">
+                  {editandoId ? 'Alterando Registro Selecionado' : 'Dados da Medição'}
+                </h3>
+                {editandoId && (
+                  <button
+                    type="button"
+                    onClick={limparFormulario}
+                    className="inline-flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-slate-800 cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    Cancelar Edição
+                  </button>
                 )}
               </div>
 
-              {/* Grid de Amostras Reais */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {cenariosTesteReal.map((c) => {
-                  const isAtivo = cenarioTesteAtivo === c.id;
-                  return (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onClick={() => handleExecutarTesteReal(c)}
-                      className={`p-2.5 rounded-lg border text-left transition flex flex-col justify-between ${
-                        isAtivo
-                          ? 'bg-teal-50 border-teal-500 shadow-xs ring-1 ring-teal-500'
-                          : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/80'
-                      }`}
-                      title={c.detalhe}
-                    >
-                      <div>
-                        <div className="flex items-center justify-between gap-1 mb-1">
-                          <span className="font-bold text-[11px] text-slate-900 truncate">
-                            {c.titulo}
-                          </span>
-                          <span
-                            className={`text-[9px] font-extrabold px-1.5 py-0.2 rounded uppercase ${
-                              c.conforme
-                                ? 'bg-emerald-100 text-emerald-800'
-                                : 'bg-red-100 text-red-800'
-                            }`}
-                          >
-                            {c.conforme ? 'OK' : 'ALERTA'}
-                          </span>
-                        </div>
-                        <div className="text-[10px] font-mono text-slate-500">{c.tag}</div>
-                      </div>
-                      <div className="mt-1.5 pt-1 border-t border-slate-100 text-[10px] font-semibold text-teal-700 truncate">
-                        {c.esperado}
-                      </div>
-                    </button>
-                  );
-                })}
+              {/* Combustível com Ícones Representativos */}
+              <div>
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-2">
+                  Combustível Analisado
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {COMBUSTIVEIS_LIST.map((c) => {
+                    const sel = produto === c;
+                    const IconComb = c.includes('Aditivada')
+                      ? Zap
+                      : c.includes('Etanol')
+                      ? Leaf
+                      : c.includes('Diesel')
+                      ? Truck
+                      : Flame;
+                    return (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => handleTrocarProduto(c)}
+                        className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                          sel
+                            ? 'bg-slate-900 text-white border-slate-900 shadow-2xs'
+                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        <IconComb className={`w-3.5 h-3.5 ${sel ? 'text-amber-400' : 'text-slate-500'}`} />
+                        <span>{c}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
 
-            {/* Grid da Calculadora: Inputs à esquerda e Resultado/Laudo à direita */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              {/* Inputs Técnicos (7 colunas) */}
-              <form onSubmit={handleSalvarAnaliseANP} className="lg:col-span-7 space-y-4">
+              {/* Campos Essenciais (Sempre visíveis na Versão Simples) */}
+              {tipoTeste === 'TESTE_PROVETA_GASOLINA' ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {/* Temperatura */}
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Temperatura da Amostra (°C)
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Leitura da Camada Aquosa (mL)
                     </label>
                     <input
                       type="number"
-                      step="0.1"
-                      value={temperatura}
-                      onChange={(e) => setTemperatura(parseFloat(e.target.value) || 20)}
-                      required
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                      step="0.5"
+                      min="50"
+                      max="100"
+                      value={volumeAquosoFinal}
+                      onChange={(e) => setVolumeAquosoFinal(parseFloat(e.target.value) || 50)}
+                      className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-base font-mono font-bold text-slate-900 focus:ring-2 focus:ring-teal-500 focus:outline-none"
                     />
-                    <span className="text-[10px] text-slate-400">
-                      Termômetro de imersão total com certificado INMETRO
-                    </span>
                   </div>
-
-                  {/* Densidade Observada / Medida */}
                   <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="block text-xs font-semibold text-slate-700">
-                        Densidade Medida (g/cm³)
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => setIsModalTabelaOficialAberto(true)}
-                        className="inline-flex items-center gap-1 text-[11px] font-bold text-teal-700 hover:text-teal-900 bg-teal-50 hover:bg-teal-100 border border-teal-200 px-2 py-0.5 rounded-md transition shadow-2xs"
-                        title="Abrir Tabela Oficial Completa de Cruzamento & Verificação ANP"
-                      >
-                        <FileSpreadsheet className="w-3 h-3 text-teal-600" />
-                        Tabela ANP
-                      </button>
-                    </div>
-                    <div className="relative">
-                      <input
-                        type="number"
-                        step="0.0001"
-                        value={densidadeObservada}
-                        onChange={(e) => setDensidadeObservada(parseFloat(e.target.value) || 0)}
-                        required
-                        className="w-full px-3 py-2 pr-8 border border-slate-300 rounded-lg text-sm font-mono font-bold focus:ring-2 focus:ring-teal-500 focus:outline-none"
-                      />
-                      {isDensidadeConforme ? (
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600 absolute right-2.5 top-2.5" />
-                      ) : (
-                        <AlertTriangle className="w-4 h-4 text-amber-500 absolute right-2.5 top-2.5" />
-                      )}
-                    </div>
-                    <div className="mt-1 text-[11px] font-mono text-emerald-800 flex items-center gap-1 font-semibold">
-                      <span>✓ D20:</span>
-                      <strong>{detalhesDensidade.densidadeKgM3.toFixed(1)} kg/m³</strong>
-                      <span className="text-slate-500 font-normal">
-                        (Faixa: {(padraoAtual.densidade20CMin * 1000).toFixed(1)} - {(padraoAtual.densidade20CMax * 1000).toFixed(1)} kg/m³)
-                      </span>
-                    </div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Aspecto Visual
+                    </label>
+                    <select
+                      value={aspecto}
+                      onChange={(e) => setAspecto(e.target.value)}
+                      className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm font-semibold bg-white"
+                    >
+                      <option value="Límpido e Isento (L.I.I.)">Límpido e Isento (L.I.I.)</option>
+                      <option value="Turvo">Turvo / Com Água Livre</option>
+                      <option value="Com Impurezas">Com Impurezas</option>
+                    </select>
                   </div>
                 </div>
-
-                {/* Campos Adicionais para Etanol Hidratado conforme Imagens Oficiais */}
-                {produto.includes('Etanol') && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700 mb-1">
-                        Teor Alcoólico (% M/M)
-                      </label>
-                      <input
-                        type="text"
-                        disabled
-                        value={`${resultadoEtanol.grauINPM}`}
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm font-mono font-bold text-slate-800"
-                      />
-                      <span className="text-[10px] text-teal-700 font-medium block mt-0.5">
-                        Calculado via D20 - Norma ANP 92,5% - 93,8% M/M
-                      </span>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700 mb-1">
-                        Aspecto Visual
-                      </label>
-                      <input
-                        type="text"
-                        readOnly
-                        value={padraoAtual.aspectoEsperado}
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-800 font-medium"
-                      />
-                      <span className="text-[10px] text-slate-400 block mt-0.5">
-                        Inspeção visual na proveta contra fundo claro
-                      </span>
-                    </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Temperatura Lida (°C)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      value={temperatura}
+                      onChange={(e) => setTemperatura(parseFloat(e.target.value) || 0)}
+                      className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-base font-mono font-bold text-slate-900 focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                    />
                   </div>
-                )}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Densidade Lida (g/cm³ ou kg/m³)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.0005"
+                      value={densidadeObservada}
+                      onChange={(e) => setDensidadeObservada(parseFloat(e.target.value) || 0)}
+                      className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-base font-mono font-bold text-slate-900 focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+              )}
 
-                {/* Indicação Rápida de Teor INPM para Etanol */}
-                {produto.includes('Etanol') && abaTeste === 'DENSIDADE_D20' && (
-                  <div className={`p-3 rounded-lg border text-xs flex items-center justify-between ${
-                    resultadoEtanol.isConforme
-                      ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
-                      : 'bg-red-50 border-red-200 text-red-950'
-                  }`}>
-                    <div className="flex items-center gap-2">
-                      <TestTubes className="w-4 h-4 text-blue-700 shrink-0" />
-                      <div>
-                        <div className="font-bold">
-                          Teor em Massa Estimado: <span className="font-mono text-sm">{resultadoEtanol.grauINPM}° INPM</span>
-                        </div>
-                        <div className="text-[11px] opacity-80">
-                          Padrão ANP NBR 5992: 92,5° a 93,8° INPM (% m/m) • {resultadoEtanol.grauGL}° GL
-                        </div>
-                      </div>
-                    </div>
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase ${
-                      resultadoEtanol.isConforme ? 'bg-emerald-200 text-emerald-900' : 'bg-red-200 text-red-900'
-                    }`}>
-                      {resultadoEtanol.isConforme ? 'CONFORME' : 'NÃO CONFORME'}
+              {/* Campos Extras Exibidos Quando "Detalhar Informações" Está Ativo */}
+              {detalharInformacoes && (
+                <div className="pt-4 border-t border-slate-200 space-y-4 animate-in fade-in">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold uppercase text-teal-800">
+                      Parâmetros Detalhados e Rastreabilidade
                     </span>
                   </div>
-                )}
 
-                {/* Campos específicos do Teste da Proveta */}
-                {abaTeste === 'TESTE_PROVETA_GASOLINA' && (
-                  <div className="p-4 bg-teal-50/60 border border-teal-200 rounded-xl space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="font-semibold text-xs text-teal-900 flex items-center gap-1.5">
-                        <Droplets className="w-4 h-4 text-teal-700" />
-                        Medição na Proveta de 100ml com tampa
-                      </div>
-                      <span className="text-[10px] font-bold bg-amber-200/80 text-amber-900 px-2 py-0.5 rounded-full">
-                        Marco D32 • Ago/2026
-                      </span>
-                    </div>
-
-                    <div className="p-2.5 bg-amber-50/90 border border-amber-200 rounded-lg text-xs text-amber-900">
-                      <div className="font-bold flex items-center gap-1 text-[11px] text-amber-950">
-                        ⚖️ Tolerância da gasolina seguindo a resolução de agosto de 2026 D32:
-                      </div>
-                      <div className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
-                        • <strong>Gasolina Comum / Aditivada:</strong> 32% ± 1,0% (Faixa de <strong>31,0% a 33,0%</strong> | Nominal: <strong>32,0%</strong>)<br />
-                        • <strong>Gasolina Premium:</strong> 25% ± 1,0% (Faixa de <strong>24,0% a 26,0%</strong> | Nominal: <strong>25,0%</strong>)
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {tipoTeste === 'TEOR_ALCOOLICO_ETANOL' && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-xs font-medium text-teal-900 mb-1">
-                          Volume Gasolina Inicial (ml)
-                        </label>
-                        <input
-                          type="text"
-                          disabled
-                          value="50.0 ml"
-                          className="w-full px-3 py-1.5 bg-slate-100 border border-slate-300 rounded-lg text-xs font-mono text-slate-600"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-teal-900 mb-1">
-                          Solução Aquosa NaCl 10% (ml)
-                        </label>
-                        <input
-                          type="text"
-                          disabled
-                          value="50.0 ml"
-                          className="w-full px-3 py-1.5 bg-slate-100 border border-slate-300 rounded-lg text-xs font-mono text-slate-600"
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-teal-900 mb-1">
-                        Volume Aquoso Final Lido na Proveta (ml)
-                      </label>
-                      <input
-                        type="number"
-                        step="0.5"
-                        min="50"
-                        max="100"
-                        value={volumeAquosoFinal}
-                        onChange={(e) => setVolumeAquosoFinal(parseFloat(e.target.value) || 50)}
-                        required
-                        className="w-full px-3 py-2 border border-teal-300 bg-white rounded-lg text-sm font-mono font-bold focus:ring-2 focus:ring-teal-500 focus:outline-none"
-                      />
-                      <span className="text-[11px] text-teal-700 block mt-1">
-                        Fórmula ANP: % Etanol = ({volumeAquosoFinal} - 50) × 2 + 1 ={' '}
-                        <strong className="text-teal-900 font-mono text-xs">{resultadoProveta.teorEtanolApurado}%</strong>{' '}
-                        (Tolerância D32: {resultadoProveta.teorReferenciaMin}% a {resultadoProveta.teorReferenciaMax}%)
-                      </span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Campos específicos do Etanol Hidratado */}
-                {abaTeste === 'TEOR_ALCOOLICO_ETANOL' && (
-                  <div className="p-4 bg-teal-50/60 border border-teal-200 rounded-xl space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="font-semibold text-xs text-teal-900 flex items-center gap-1.5">
-                        <TestTubes className="w-4 h-4 text-teal-700" />
-                        Ensaios de Etanol Hidratado (Resoluções ANP & ABNT NBR 5992)
-                      </div>
-                      <span className="text-[10px] font-bold bg-blue-100 text-blue-900 px-2 py-0.5 rounded-full">
-                        Conversão D32 → INPM
-                      </span>
-                    </div>
-
-                    <div className="p-2.5 bg-blue-50/90 border border-blue-200 rounded-lg text-xs text-blue-900">
-                      <div className="font-bold flex items-center gap-1 text-[11px] text-blue-950">
-                        🧪 Conversão da D20 para teor alcoólico em massa:
-                      </div>
-                      <div className="text-[11px] text-blue-800 mt-0.5 leading-relaxed">
-                        Faixa regulamentar: <strong>92,5° a 93,8° INPM</strong> (% em massa) | Volume correspondente: <strong>94,5° a 96,9° GL</strong> a 20°C.
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-xs font-semibold text-teal-900 mb-1">
-                          Condutividade Elétrica a 25°C (µS/m)
+                        <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                          Condutividade Elétrica (µS/m — máx. 350)
                         </label>
                         <input
                           type="number"
                           value={condutividadeEletrica}
                           onChange={(e) => setCondutividadeEletrica(parseFloat(e.target.value) || 0)}
-                          className="w-full px-3 py-2 border border-teal-300 bg-white rounded-lg text-sm font-mono focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono font-bold"
                         />
-                        <span className="text-[10px] text-teal-700">Máximo permitido: 350 µS/m</span>
                       </div>
                       <div>
-                        <label className="block text-xs font-semibold text-teal-900 mb-1">
-                          Potencial Hidrogeniônico (pH)
+                        <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                          pH da Amostra (6,0 a 8,0)
                         </label>
                         <input
                           type="number"
                           step="0.1"
-                          value={phEtanol}
-                          onChange={(e) => setPhEtanol(parseFloat(e.target.value) || 7)}
-                          className="w-full px-3 py-2 border border-teal-300 bg-white rounded-lg text-sm font-mono focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                          value={ph}
+                          onChange={(e) => setPh(parseFloat(e.target.value) || 0)}
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono font-bold"
                         />
-                        <span className="text-[10px] text-teal-700">Faixa permitida: 6,0 a 8,0</span>
                       </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {/* Campos específicos de Descarga de Caminhão-Tanque */}
-                {abaTeste === 'RECEBIMENTO_DESCARGA' && (
-                  <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-xl space-y-3">
-                    <div className="font-semibold text-xs text-blue-900 flex items-center gap-1.5">
-                      <Truck className="w-4 h-4 text-blue-700" />
-                      Dados Obrigatórios de Descarregamento
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-xs font-semibold text-blue-900 mb-1">
-                          Número da Nota Fiscal (NF-e)
-                        </label>
-                        <input
-                          type="text"
-                          placeholder="Ex: 004812"
-                          value={numeroNotaFiscal}
-                          onChange={(e) => setNumeroNotaFiscal(e.target.value)}
-                          required
-                          className="w-full px-3 py-2 border border-blue-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-blue-900 mb-1">
-                          Placa do Caminhão / Carreta
-                        </label>
-                        <input
-                          type="text"
-                          placeholder="Ex: ABC-1D23"
-                          value={placaCaminhao}
-                          onChange={(e) => setPlacaCaminhao(e.target.value)}
-                          required
-                          className="w-full px-3 py-2 border border-blue-300 bg-white rounded-lg text-sm uppercase focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-blue-900 mb-1">
-                          Distribuidora de Combustível
-                        </label>
-                        <input
-                          type="text"
-                          value={distribuidora}
-                          onChange={(e) => setDistribuidora(e.target.value)}
-                          className="w-full px-3 py-2 border border-blue-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-blue-900 mb-1">
-                          Compartimento do Tanque
-                        </label>
-                        <input
-                          type="text"
-                          value={compartimento}
-                          onChange={(e) => setCompartimento(e.target.value)}
-                          className="w-full px-3 py-2 border border-blue-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 pt-2">
-                      <input
-                        type="checkbox"
-                        id="lacreCheck"
-                        checked={lacreConferido}
-                        onChange={(e) => setLacreConferido(e.target.checked)}
-                        className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
-                      />
-                      <label htmlFor="lacreCheck" className="text-xs font-semibold text-blue-900 cursor-pointer">
-                        Lacres intactos e conferidos com a numeração impressa na Nota Fiscal
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                        Data do Ensaio
                       </label>
+                      <input
+                        type="date"
+                        value={dataTeste}
+                        onChange={(e) => setDataTeste(e.target.value)}
+                        className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                        Nota Fiscal
+                      </label>
+                      <input
+                        type="text"
+                        value={numeroNotaFiscal}
+                        onChange={(e) => setNumeroNotaFiscal(e.target.value)}
+                        placeholder="Ex: NF 45920"
+                        className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                        Placa / Distribuidora
+                      </label>
+                      <input
+                        type="text"
+                        value={placaCaminhao}
+                        onChange={(e) => setPlacaCaminhao(e.target.value)}
+                        placeholder="Ex: ABC-1D23"
+                        className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs bg-white"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                        Observações Técnicas
+                      </label>
+                      <input
+                        type="text"
+                        value={observacao}
+                        onChange={(e) => setObservacao(e.target.value)}
+                        placeholder="Anotações sobre lacre, amostra-testemunha, etc."
+                        className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                        Responsável
+                      </label>
+                      <select
+                        value={responsavelId}
+                        onChange={(e) => setResponsavelId(e.target.value)}
+                        className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs bg-white"
+                      >
+                        {funcionarios.map((f) => (
+                          <option key={f.id} value={f.id}>
+                            {f.nome}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   </div>
-                )}
+                </div>
+              )}
 
-                {/* Seção Operacional de Parâmetros Específicos D32 / Resolução ANP Ago/2026 */}
-                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+              {/* Botão rápido na parte inferior do card para alternar detalhes */}
+              <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => setDetalharInformacoes(!detalharInformacoes)}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-teal-700 hover:text-teal-900 cursor-pointer"
+                >
+                  {detalharInformacoes ? (
+                    <>
+                      <ChevronUp className="w-4 h-4" />
+                      Voltar para Versão Simples (ocultar informações extras)
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="w-4 h-4" />
+                      Detalhar Informações (fórmula, tabela NBR 5992, NF e especificações)
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Coluna Direita: Resultado Direto e Claro */}
+            <div className="lg:col-span-5">
+              <div
+                className={`rounded-2xl p-6 border-2 shadow-xs h-full flex flex-col justify-between space-y-4 ${
+                  calculoAtual.isConforme
+                    ? 'bg-emerald-50/70 border-emerald-300'
+                    : 'bg-red-50/70 border-red-300'
+                }`}
+              >
+                <div className="space-y-4">
                   <div className="flex items-center justify-between">
-                    <div className="font-semibold text-xs text-slate-800 flex items-center gap-1.5">
-                      <Scale className="w-4 h-4 text-teal-700" />
-                      Parâmetros Operacionais de Ensaio (Regulamentação D32)
-                    </div>
-                    <span className="text-[10px] font-bold bg-teal-100 text-teal-800 px-2 py-0.5 rounded-full">
-                      Marco D32 • Ago/2026
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                      Resultado Imediato
+                    </span>
+                    <span
+                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black ${
+                        calculoAtual.isConforme
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-red-600 text-white'
+                      }`}
+                    >
+                      {calculoAtual.isConforme ? (
+                        <>
+                          <CheckCircle2 className="w-4 h-4" />
+                          CONFORME
+                        </>
+                      ) : (
+                        <>
+                          <AlertTriangle className="w-4 h-4" />
+                          NÃO CONFORME
+                        </>
+                      )}
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700 mb-1">
-                        Método de Ensaio Regulamentar
-                      </label>
-                      <select
-                        value={metodoEnsaioD32}
-                        onChange={(e) => setMetodoEnsaioD32(e.target.value as 'ABNT NBR 5992' | 'ASTM D1250' | 'DIGITAL')}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white focus:ring-2 focus:ring-teal-500 focus:outline-none"
-                      >
-                        <option value="ABNT NBR 5992">ABNT NBR 5992 (Termodensímetro de Vidro)</option>
-                        <option value="ASTM D1250">ASTM D1250 (Tabela de Redução de Petróleo)</option>
-                        <option value="DIGITAL">Densímetro Digital de Bancada (Oscilação)</option>
-                      </select>
-                      <span className="text-[10px] text-slate-400">
-                        Norma metrológica oficial auditada pela ANP
-                      </span>
+                  <div className="bg-white p-5 rounded-xl border border-slate-200/80">
+                    <div className="text-xs font-semibold text-slate-500">
+                      {calculoAtual.tituloResultado} — {produto}
                     </div>
-
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700 mb-1">
-                        Temperatura Ambiente de Pátio (°C)
-                      </label>
-                      <input
-                        type="number"
-                        step="0.5"
-                        value={temperaturaAmbienteD32}
-                        onChange={(e) => setTemperaturaAmbienteD32(parseFloat(e.target.value) || 25)}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono bg-white focus:ring-2 focus:ring-teal-500 focus:outline-none"
-                      />
-                      <span className="text-[10px] text-slate-400">
-                        Monitoramento térmico do ensaio em pista/laboratório
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Informações Operacionais da Resolução D32 */}
-                  <div className="p-2.5 bg-teal-50/70 border border-teal-200 rounded-lg text-[11px] text-teal-900 space-y-1">
-                    <div className="font-bold flex items-center gap-1 text-teal-950">
-                      <Info className="w-3.5 h-3.5 text-teal-700" />
-                      Critérios Oficiais D32 (Vigência Agosto de 2026):
-                    </div>
-                    <p className="text-teal-800 leading-relaxed">
-                      • <strong>Tolerância de Gasolina:</strong> Mistura padrão de etanol anidro fixada em <strong>32,0%</strong> (tolerância de <strong>31,0% a 33,0%</strong> para comum/aditivada e <strong>24,0% a 26,0%</strong> para premium).<br />
-                      • <strong>Especificação do Etanol:</strong> Faixa de densidade reduzida a 20°C convertida para teor em massa de <strong>92,5° a 93,8° INPM</strong> (94,5° a 96,9° GL).
-                    </p>
-                  </div>
-                </div>
-
-                {/* Responsável e Observações */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Responsável pela Análise
-                    </label>
-                    <select
-                      value={responsavelId}
-                      onChange={(e) => setResponsavelId(e.target.value)}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                    <div
+                      className={`text-3xl font-mono font-black mt-1 ${
+                        calculoAtual.isConforme ? 'text-emerald-700' : 'text-red-700'
+                      }`}
                     >
-                      {funcionarios.map((f) => (
-                        <option key={f.id} value={f.id}>
-                          {f.nome} ({f.cargo})
-                        </option>
-                      ))}
-                    </select>
+                      {calculoAtual.valorPrincipal}
+                    </div>
+                    <div className="text-xs font-medium text-slate-600 mt-1">
+                      {calculoAtual.subvalor}
+                    </div>
+                    <div className="text-[11px] font-semibold text-slate-500 mt-2.5 pt-2 border-t border-slate-100">
+                      {calculoAtual.faixaPermitida}
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Observação Operacional (Opcional)
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Ex: Amostra coletada na boca do caminhão"
-                      value={obsDensidade}
-                      onChange={(e) => setObsDensidade(e.target.value)}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 focus:outline-none"
-                    />
-                  </div>
+
+                  {/* Quando "Detalhar Informações" está ativo, mostra a memória de cálculo e especificações técnicas */}
+                  {detalharInformacoes && (
+                    <div className="p-3.5 bg-white/90 rounded-xl border border-slate-200 space-y-2 text-xs">
+                      <div className="font-bold text-slate-800">Memória de Cálculo Aplicada:</div>
+                      <div className="font-mono text-[11px] text-slate-700 bg-slate-50 p-2 rounded border border-slate-200">
+                        {calculoAtual.formulaDetalhada}
+                      </div>
+                      <div className="text-[11px] text-slate-600">
+                        <strong>Norma:</strong> {calculoAtual.padrao.normaANP} •{' '}
+                        <strong>Cor esperada:</strong> {calculoAtual.padrao.corEsperada}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                {/* Botão de Gravar Laudo */}
-                <button
-                  type="submit"
-                  className="w-full py-3 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-lg text-sm transition flex items-center justify-center gap-2 shadow-sm"
-                >
-                  <FileCheck className="w-4 h-4" />
-                  Salvar Laudo de Conformidade ANP no Sistema
-                </button>
-              </form>
-
-              {/* Card de Parecer Técnico e Resultados ANP (5 colunas) */}
-              <div className="lg:col-span-5 bg-slate-50 border border-slate-200 rounded-2xl p-5 flex flex-col justify-between space-y-4 shadow-xs">
-                <div className="space-y-3.5">
-                  {/* Banner de Status Oficial com Faixa */}
-                  <div
-                    className={`p-3 rounded-xl border flex items-center justify-between text-xs font-bold ${
-                      statusFinalTeste === 'CONFORME'
-                        ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                        : 'bg-red-50 border-red-200 text-red-900'
-                    }`}
+                <div className="pt-3 border-t border-slate-200/60">
+                  <button
+                    type="button"
+                    disabled={salvando}
+                    onClick={handleSalvarRegistro}
+                    className="w-full py-3 px-4 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition shadow-xs cursor-pointer disabled:opacity-50"
                   >
-                    <div className="flex items-center gap-2">
-                      {statusFinalTeste === 'CONFORME' ? (
-                        <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-                      ) : (
-                        <XCircle className="w-5 h-5 text-red-600 shrink-0" />
-                      )}
-                      <span>
-                        {statusFinalTeste === 'CONFORME'
-                          ? `✓ APROVADO - Dentro das especificações ANP (${(padraoAtual.densidade20CMin * 1000).toFixed(1)} - ${(padraoAtual.densidade20CMax * 1000).toFixed(1)} kg/m³)`
-                          : `✕ NÃO CONFORME - Fora das especificações ANP (${(padraoAtual.densidade20CMin * 1000).toFixed(1)} - ${(padraoAtual.densidade20CMax * 1000).toFixed(1)} kg/m³)`}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Card 1: Massa Específica a 20°C (D20) */}
-                  <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-2">
-                    <div className="flex items-center justify-between text-xs font-bold text-slate-600 uppercase tracking-wide">
-                      <span>{produto.toUpperCase()} - MASSA ESPECÍFICA A 20°C</span>
-                      <span className="text-[11px] text-teal-700 font-mono">
-                        {densidadeCalculada20.toFixed(4)} g/cm³
-                      </span>
-                    </div>
-
-                    <div className="flex items-baseline justify-between">
-                      <span
-                        className={`text-3xl font-black font-mono ${
-                          isDensidadeConforme ? 'text-emerald-700' : 'text-red-700'
-                        }`}
-                      >
-                        {detalhesDensidade.densidadeKgM3.toFixed(1)} kg/m³
-                      </span>
-                      <span className="text-[11px] font-semibold text-slate-500">
-                        {isDensidadeConforme ? '✓ D20 Conforme' : '✕ Desvio D20'}
-                      </span>
-                    </div>
-
-                    {/* Barra visual de Faixa Regulamentar */}
-                    <div className="space-y-1 pt-1">
-                      <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden relative">
-                        {/* Faixa ideal */}
-                        <div className="absolute inset-y-0 left-[20%] right-[20%] bg-emerald-200 rounded-sm" />
-                        {/* Ponto medido */}
-                        <div
-                          className={`absolute top-0 bottom-0 w-2.5 rounded-full -ml-1 ${
-                            isDensidadeConforme ? 'bg-emerald-600' : 'bg-red-600'
-                          }`}
-                          style={{
-                            left: `${Math.max(
-                              5,
-                              Math.min(
-                                95,
-                                ((detalhesDensidade.densidadeKgM3 -
-                                  padraoAtual.densidade20CMin * 1000 * 0.98) /
-                                  (padraoAtual.densidade20CMax * 1000 * 1.02 -
-                                    padraoAtual.densidade20CMin * 1000 * 0.98)) *
-                                  100
-                              )
-                            )}%`,
-                          }}
-                        />
-                      </div>
-                      <div className="flex justify-between text-[10px] font-mono text-slate-400">
-                        <span>Mín: {(padraoAtual.densidade20CMin * 1000).toFixed(1)}</span>
-                        <span className="font-semibold text-slate-600">
-                          Medido: {detalhesDensidade.densidadeKgM3.toFixed(1)} kg/m³
-                        </span>
-                        <span>Máx: {(padraoAtual.densidade20CMax * 1000).toFixed(1)}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Card 2: Grau Alcoólico (INPM) ou Especificação Específica do Combustível */}
-                  {produto.includes('Etanol') ? (
-                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-1.5">
-                      <div className="flex items-center justify-between text-xs font-bold text-slate-600 uppercase tracking-wide">
-                        <span>GRAU ALCOÓLICO (INPM)</span>
-                        <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                          {resultadoEtanol.grauGL}° GL
-                        </span>
-                      </div>
-                      <div className="flex items-baseline gap-2">
-                        <span
-                          className={`text-2xl font-black font-mono ${
-                            resultadoEtanol.isConforme ? 'text-emerald-700' : 'text-red-700'
-                          }`}
-                        >
-                          {resultadoEtanol.grauINPM} % m/m
-                        </span>
-                        <span className="text-xs font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-sm">
-                          [OK]
-                        </span>
-                      </div>
-                      <div className="text-[11px] text-slate-500">
-                        Grau alcoólico dentro do especificado (mín. 92.5% m/m - Res. ANP 907/2022)
-                      </div>
-                    </div>
-                  ) : produto.toLowerCase().includes('diesel') ? (
-                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-1.5">
-                      <div className="flex items-center justify-between text-xs font-bold text-slate-600 uppercase tracking-wide">
-                        <span>CONFORMIDADE DO DIESEL (RES. ANP 968/2024)</span>
-                        <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
-                          {padraoAtual.requisitosMistura}
-                        </span>
-                      </div>
-                      <div className="flex items-baseline gap-2">
-                        <span
-                          className={`text-2xl font-black font-mono ${
-                            isDensidadeConforme ? 'text-emerald-700' : 'text-red-700'
-                          }`}
-                        >
-                          {detalhesDensidade.densidadeKgM3.toFixed(1)} kg/m³
-                        </span>
-                        <span
-                          className={`text-xs font-bold px-2 py-0.5 rounded-sm ${
-                            isDensidadeConforme
-                              ? 'text-emerald-800 bg-emerald-100'
-                              : 'text-red-800 bg-red-100'
-                          }`}
-                        >
-                          [{isDensidadeConforme ? 'D20 APROVADA' : 'FORA DOS LIMITES'}]
-                        </span>
-                      </div>
-                      <div className="text-[11px] text-slate-500">
-                        Faixa ANP: {(padraoAtual.densidade20CMin * 1000).toFixed(1)} a {(padraoAtual.densidade20CMax * 1000).toFixed(1)} kg/m³ | Enxofre: {padraoAtual.enxofreMax} | Cor: {padraoAtual.corEsperada}
-                      </div>
-                    </div>
-                  ) : abaTeste === 'TESTE_PROVETA_GASOLINA' ? (
-                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-1.5">
-                      <div className="flex items-center justify-between text-xs font-bold text-slate-600 uppercase tracking-wide">
-                        <span>TEOR DE ETANOL NA GASOLINA (PROVETA)</span>
-                        <span className="text-[10px] text-teal-700 font-bold">Marco D32</span>
-                      </div>
-                      <div className="flex items-baseline gap-2">
-                        <span
-                          className={`text-2xl font-black font-mono ${
-                            resultadoProveta.isConforme ? 'text-emerald-700' : 'text-red-700'
-                          }`}
-                        >
-                          {resultadoProveta.teorEtanolApurado} % v/v
-                        </span>
-                        <span
-                          className={`text-xs font-bold px-2 py-0.5 rounded-sm ${
-                            resultadoProveta.isConforme
-                              ? 'text-emerald-800 bg-emerald-100'
-                              : 'text-red-800 bg-red-100'
-                          }`}
-                        >
-                          [{resultadoProveta.isConforme ? 'OK' : 'FORA'}]
-                        </span>
-                      </div>
-                      <div className="text-[11px] text-slate-500">
-                        Faixa regulamentar: {resultadoProveta.teorReferenciaMin}% a{' '}
-                        {resultadoProveta.teorReferenciaMax}% (Nominal{' '}
-                        {resultadoProveta.teorReferenciaNominal}%)
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {/* Card 3: Especificações ANP 2026 */}
-                  <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-2 text-xs">
-                    <div className="font-bold text-slate-800 uppercase tracking-wide border-b border-slate-100 pb-1.5 flex items-center justify-between">
-                      <span>ESPECIFICAÇÕES ANP - {padraoAtual.normaANP}</span>
-                      <span className="text-[10px] text-teal-700 font-semibold">Ref: 20°C</span>
-                    </div>
-
-                    <div className="space-y-1 text-slate-600 font-medium">
-                      <div className="flex justify-between py-0.5 border-b border-slate-50">
-                        <span>Massa específica a 20°C (mín.):</span>
-                        <strong className="font-mono text-slate-800">
-                          {(padraoAtual.densidade20CMin * 1000).toFixed(1)} kg/m³
-                        </strong>
-                      </div>
-                      <div className="flex justify-between py-0.5 border-b border-slate-50">
-                        <span>Massa específica a 20°C (máx.):</span>
-                        <strong className="font-mono text-slate-800">
-                          {(padraoAtual.densidade20CMax * 1000).toFixed(1)} kg/m³
-                        </strong>
-                      </div>
-
-                      {produto.includes('Etanol') && (
-                        <>
-                          <div className="flex justify-between py-0.5 border-b border-slate-50">
-                            <span>Grau alcoólico (INPM) mín.:</span>
-                            <strong className="font-mono text-slate-800">92,5% m/m</strong>
-                          </div>
-                          <div className="flex justify-between py-0.5 border-b border-slate-50">
-                            <span>Grau alcoólico (INPM) máx.:</span>
-                            <strong className="font-mono text-slate-800">93,8% m/m</strong>
-                          </div>
-                        </>
-                      )}
-
-                      {produto.toLowerCase().includes('diesel') && (
-                        <>
-                          <div className="flex justify-between py-0.5 border-b border-slate-50">
-                            <span>Teor de Biodiesel mandatório:</span>
-                            <strong className="font-mono text-slate-800">{padraoAtual.requisitosMistura}</strong>
-                          </div>
-                          <div className="flex justify-between py-0.5 border-b border-slate-50">
-                            <span>Teor máx. de enxofre:</span>
-                            <strong className="font-mono text-slate-800">{padraoAtual.enxofreMax}</strong>
-                          </div>
-                          <div className="flex justify-between py-0.5 border-b border-slate-50">
-                            <span>Cor regulamentar:</span>
-                            <strong className="text-slate-800">{padraoAtual.corEsperada}</strong>
-                          </div>
-                          <div className="flex justify-between py-0.5 border-b border-slate-50">
-                            <span>Aspecto exigido ANP:</span>
-                            <strong className="text-slate-800">{padraoAtual.aspectoEsperado}</strong>
-                          </div>
-                        </>
-                      )}
-
-                      <div className="flex justify-between py-0.5">
-                        <span>Temperatura de referência:</span>
-                        <strong className="font-mono text-slate-800">20°C</strong>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Card 4: Detalhes do Cálculo (Memória Aritmética) */}
-                  <div className="bg-slate-100/80 p-3.5 rounded-xl border border-slate-200 space-y-2 text-xs">
-                    <div className="flex items-center justify-between font-bold text-slate-700">
-                      <span className="flex items-center gap-1.5 uppercase text-[11px] tracking-wide">
-                        <Calculator className="w-3.5 h-3.5 text-teal-700" />
-                        Detalhes do Cálculo (NBR 5992)
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 text-[11px] bg-white p-2 rounded-lg border border-slate-200 font-mono">
-                      <div>
-                        <span className="text-slate-400 block text-[10px]">Densidade Lida (Dt):</span>
-                        <strong className="text-slate-800">{densidadeObservada.toFixed(4)} g/cm³</strong>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block text-[10px]">Temperatura Lida:</span>
-                        <strong className="text-slate-800">{temperatura.toFixed(1)} °C</strong>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block text-[10px]">Correção Térmica (ΔD):</span>
-                        <strong className="text-teal-800">
-                          {detalhesDensidade.fatorCorrecaoAplicado >= 0 ? '+' : ''}
-                          {detalhesDensidade.fatorCorrecaoAplicado.toFixed(4)} g/cm³
-                        </strong>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block text-[10px]">Diferença (T - 20°C):</span>
-                        <strong className="text-slate-800">
-                          {temperatura - 20 >= 0 ? '+' : ''}
-                          {(temperatura - 20).toFixed(1)} °C
-                        </strong>
-                      </div>
-                    </div>
-
-                    <div className="text-[10px] text-slate-600 bg-teal-50/70 p-2 rounded border border-teal-100 font-mono">
-                      {detalhesDensidade.formulaExplicativa}
-                    </div>
-                  </div>
-
-                  {/* Parecer Técnico Box */}
-                  <div
-                    className={`p-3 rounded-lg border text-xs leading-relaxed ${
-                      statusFinalTeste === 'CONFORME'
-                        ? 'bg-emerald-50/80 border-emerald-200 text-emerald-900'
-                        : 'bg-red-50/80 border-red-200 text-red-900 font-semibold'
-                    }`}
-                  >
-                    <strong>Parecer Técnico:</strong> {parecerTecnicoFinal}
-                  </div>
-                </div>
-
-                {/* Botão de Ação para Abrir Tabela Oficial Completa */}
-                <button
-                  type="button"
-                  onClick={() => setIsModalTabelaOficialAberto(true)}
-                  className="w-full py-2.5 px-3 bg-slate-900 hover:bg-slate-800 text-teal-400 font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 border border-slate-700 shadow-xs"
-                >
-                  <FileSpreadsheet className="w-4 h-4 text-teal-400" />
-                  Abrir Tabela Oficial Completa de Cruzamento & Verificação ANP
-                </button>
-
-                <div className="text-[11px] text-slate-400 border-t border-slate-200 pt-3">
-                  Registro em conformidade com as normas ABNT NBR 5992, ASTM D1250 e fiscalização do posto revendedor.
+                    <Save className="w-4 h-4" />
+                    {salvando
+                      ? 'Salvando...'
+                      : editandoId
+                      ? 'Salvar Alterações do Registro'
+                      : 'Salvar Registro no Histórico'}
+                  </button>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Tabela de Histórico de Análises de Combustíveis */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
-              <span className="font-semibold text-slate-800 text-sm">
-                Histórico de Laudos e Análises ANP Registradas ({densidades.length})
-              </span>
-              <button
-                type="button"
-                onClick={() => setIsModalLimparLaudos(true)}
-                disabled={densidades.length === 0}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-red-700 bg-red-50 hover:bg-red-100 rounded-lg border border-red-200 transition disabled:opacity-40 disabled:cursor-not-allowed"
-                title="Excluir todos os laudos registrados"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                Limpar Histórico
-              </button>
+          {/* Seção Extra Exibida SOMENTE quando o usuário clica em "Detalhar Informações" */}
+          {detalharInformacoes && (
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-3 animate-in fade-in">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Tabela de Conversão Termodensimétrica (ABNT NBR 5992 — {produto})
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Cruzamento de Densidade Lida vs. Temperatura convertida para 20°C
+                  </p>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-center text-xs border-collapse border border-slate-200">
+                  <thead>
+                    <tr className="bg-slate-100 text-slate-700 font-bold">
+                      <th className="p-2 border border-slate-200">Dens. Lida \ Temp.</th>
+                      {matrizNBR.temperaturas.map((t) => (
+                        <th key={t} className="p-2 border border-slate-200 font-mono">
+                          {t}°C
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {matrizNBR.linhas.map((linha) => (
+                      <tr key={linha.densidadeLida}>
+                        <td className="p-2 border border-slate-200 font-mono font-bold bg-slate-50">
+                          {linha.densidadeLida.toFixed(4)}
+                        </td>
+                        {linha.celulas.map((cel) => (
+                          <td
+                            key={cel.temperatura}
+                            className={`p-2 border border-slate-200 font-mono ${
+                              cel.isCorrente
+                                ? 'ring-2 ring-teal-600 font-black bg-teal-50 text-teal-950'
+                                : cel.isConforme
+                                ? 'text-emerald-800 bg-emerald-50/30'
+                                : 'text-red-700 bg-red-50/40'
+                            }`}
+                          >
+                            {cel.d20.toFixed(4)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
+          )}
+
+          {/* Histórico de Análises Realizadas com Alterar e Excluir */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-900">
+                Histórico de Análises Registradas ({densidades.length})
+              </h3>
+              <span className="text-xs text-slate-400">
+                Altere ou exclua qualquer registro abaixo
+              </span>
+            </div>
+
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs text-slate-600">
-                <thead className="bg-slate-50 text-slate-700 font-semibold uppercase text-[11px]">
-                  <tr>
-                    <th className="px-5 py-3">Data / Hora</th>
-                    <th className="px-5 py-3">Tipo do Ensaio</th>
-                    <th className="px-5 py-3">Produto</th>
-                    <th className="px-5 py-3">Temperatura</th>
-                    <th className="px-5 py-3">Densidade 20°C</th>
-                    <th className="px-5 py-3">Parâmetros ANP</th>
-                    <th className="px-5 py-3">Resultado</th>
-                    <th className="px-5 py-3">Parecer Técnico</th>
-                    <th className="px-5 py-3 text-right">Ações</th>
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase text-[11px]">
+                    <th className="py-3 px-4">Data / Hora</th>
+                    <th className="py-3 px-4">Combustível</th>
+                    <th className="py-3 px-4 text-right">Temp. (°C)</th>
+                    <th className="py-3 px-4 text-right">Dens. Lida</th>
+                    <th className="py-3 px-4 text-right">Resultado 20°C / Proveta</th>
+                    <th className="py-3 px-4 text-center">Status</th>
+                    <th className="py-3 px-4 text-center">Ações</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-200">
+                <tbody className="divide-y divide-slate-100">
                   {densidades.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="px-6 py-8 text-center text-slate-400">
-                        Nenhum laudo de combustível cadastrado até o momento. Utilize a calculadora acima para registrar.
+                      <td colSpan={7} className="py-10 text-center text-slate-400">
+                        Nenhuma análise registrada até o momento.
                       </td>
                     </tr>
                   ) : (
-                    densidades.map((d) => (
-                      <tr key={d.id} className="hover:bg-slate-50 transition">
-                        <td className="px-5 py-3.5">
-                          <div className="font-semibold text-slate-900">{d.data}</div>
-                          <div className="text-[10px] text-slate-400">{d.hora}</div>
-                        </td>
-                        <td className="px-5 py-3.5">
-                          <span className="px-2 py-0.5 rounded font-bold text-[10px] bg-slate-100 text-slate-700">
-                            {d.tipoTeste === 'TESTE_PROVETA_GASOLINA'
-                              ? 'PROVETA (D32)'
-                              : d.tipoTeste === 'TEOR_ALCOOLICO_ETANOL'
-                              ? 'CONVERSÃO D32'
-                              : d.tipoTeste === 'RECEBIMENTO_DESCARGA'
-                              ? 'DESCARGA NF'
-                              : 'DENSIDADE D20'}
-                          </span>
-                        </td>
-                        <td className="px-5 py-3.5 font-medium text-slate-800">{d.produto}</td>
-                        <td className="px-5 py-3.5 font-mono">
-                          <div>{d.temperatura}°C</div>
-                          {d.temperaturaAmbiente !== undefined && (
-                            <div className="text-[10px] text-slate-400">Amb: {d.temperaturaAmbiente}°C</div>
-                          )}
-                        </td>
-                        <td className="px-5 py-3.5 font-mono font-bold text-teal-800">
-                          <div>{d.densidadeCalculada20C.toFixed(4)} g/cm³</div>
-                          {d.densidadeKgM3 !== undefined && (
-                            <div className="text-[10px] font-normal text-slate-500">{d.densidadeKgM3.toFixed(1)} kg/m³</div>
-                          )}
-                        </td>
-                        <td className="px-5 py-3.5 text-slate-600">
-                          {d.metodoEnsaioD32 && (
-                            <div className="text-[10px] text-slate-400 font-semibold">{d.metodoEnsaioD32}</div>
-                          )}
-                          {d.teorEtanolAnidro !== undefined && (
-                            <div>D32 / Álcool: <strong>{d.teorEtanolAnidro}%</strong></div>
-                          )}
-                          {d.grauINPM !== undefined && (
-                            <div>D32 → INPM: <strong>{d.grauINPM}°</strong></div>
-                          )}
-                          {d.numeroNotaFiscal && (
-                            <div>NF: <strong>{d.numeroNotaFiscal}</strong></div>
-                          )}
-                        </td>
-                        <td className="px-5 py-3.5">
-                          <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                              d.resultado === 'CONFORME'
-                                ? 'bg-emerald-100 text-emerald-800'
-                                : 'bg-red-100 text-red-800'
-                            }`}
-                          >
-                            {d.resultado}
-                          </span>
-                        </td>
-                        <td className="px-5 py-3.5 text-[11px] text-slate-500 max-w-xs truncate">
-                          {d.parecerTecnico || d.observacao || 'Conforme especificação ANP'}
-                        </td>
-                        <td className="px-5 py-3.5 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => handleEditarAnalise(d)}
-                              className="p-1.5 text-slate-600 hover:text-teal-700 hover:bg-teal-50 rounded-lg transition border border-transparent hover:border-teal-200"
-                              title="Editar Laudo"
+                    densidades.map((d) => {
+                      const isConf = d.resultado === 'CONFORME';
+                      return (
+                        <tr key={d.id} className="hover:bg-slate-50 transition">
+                          <td className="py-3 px-4 font-mono text-slate-700">
+                            {d.data ? d.data.split('-').reverse().join('/') : '—'} {d.hora || ''}
+                          </td>
+                          <td className="py-3 px-4 font-bold text-slate-900">{d.produto}</td>
+                          <td className="py-3 px-4 text-right font-mono text-slate-700">
+                            {d.temperatura}°C
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono text-slate-700">
+                            {d.densidadeObservada.toFixed(4)}
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono font-bold text-slate-900">
+                            {d.tipoTeste === 'TESTE_PROVETA_GASOLINA' && d.teorEtanolAnidro !== undefined
+                              ? `${d.teorEtanolAnidro}% Etanol`
+                              : d.tipoTeste === 'TEOR_ALCOOLICO_ETANOL' && d.grauINPM !== undefined
+                              ? `${d.grauINPM.toFixed(1)} °INPM (${d.densidadeCalculada20C.toFixed(4)})`
+                              : `${d.densidadeCalculada20C.toFixed(4)} g/cm³`}
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            <span
+                              className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                                isConf
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-red-100 text-red-800'
+                              }`}
                             >
-                              <Pencil className="w-4 h-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleSolicitarExclusaoAnalise(d)}
-                              className="p-1.5 text-slate-400 hover:text-red-700 hover:bg-red-50 rounded-lg transition border border-transparent hover:border-red-200"
-                              title="Excluir Laudo"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
+                              {isConf ? 'CONFORME' : 'NÃO CONFORME'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleEditarRegistro(d)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-[11px] font-bold transition cursor-pointer"
+                                title="Alterar este registro"
+                              >
+                                <Edit2 className="w-3 h-3" />
+                                Alterar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleExcluirRegistro(d.id)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg text-[11px] font-bold transition cursor-pointer"
+                                title="Excluir este registro"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                Excluir
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
             </div>
           </div>
-        </div>
+        </>
       ) : (
-        /* Aba de Checklist Diário de Conformidade & NR-20 */
-        <div className="space-y-4">
-          <div className="flex justify-end">
-            <button
-              onClick={() => setIsModalConformidade(true)}
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition shadow-sm text-sm"
-            >
-              <Plus className="w-4 h-4" />
-              Novo Item de Checklist
-            </button>
-          </div>
+        /* Aba de Checklist de Conformidade Operacional com Alterar e Excluir */
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-5">
+          <h3 className="text-sm font-bold text-slate-900">
+            Checklist de Conformidade Operacional e Ambiental
+          </h3>
 
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
-              <span className="font-semibold text-slate-700 text-sm">
-                Itens Inspecionados de Pátio e Normas Regulamentadoras (NR-20 / CONAMA) ({conformidades.length})
-              </span>
-              <button
-                type="button"
-                onClick={() => setIsModalLimparChecklist(true)}
-                disabled={conformidades.length === 0}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-red-700 bg-red-50 hover:bg-red-100 rounded-lg border border-red-200 transition disabled:opacity-40 disabled:cursor-not-allowed"
-                title="Excluir todos os registros de checklist"
+          <form onSubmit={handleSalvarConformidade} className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end bg-slate-50 p-4 rounded-xl border border-slate-200">
+            <div className="sm:col-span-3">
+              <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">Categoria</label>
+              <select
+                value={confCategoria}
+                onChange={(e) => setConfCategoria(e.target.value as any)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white font-semibold"
               >
-                <Trash2 className="w-3.5 h-3.5" />
-                Limpar Checklist
+                <option value="QUALIDADE">Qualidade ANP</option>
+                <option value="SEGURANCA">Segurança NR-20</option>
+                <option value="MEIO_AMBIENTE">Meio Ambiente</option>
+                <option value="EQUIPAMENTOS">Equipamentos</option>
+                <option value="FISCAL">Fiscal</option>
+              </select>
+            </div>
+            <div className="sm:col-span-4">
+              <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">Item Verificado</label>
+              <input
+                type="text"
+                required
+                value={confItem}
+                onChange={(e) => setConfItem(e.target.value)}
+                placeholder="Ex: Kit de análise ANP aferido e lacrado"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">Status</label>
+              <select
+                value={confStatus}
+                onChange={(e) => setConfStatus(e.target.value as ConformidadeStatus)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white font-semibold"
+              >
+                <option value="CONFORME">Conforme</option>
+                <option value="NAO_CONFORME">Não Conforme</option>
+                <option value="PENDENTE">Pendente</option>
+              </select>
+            </div>
+            <div className="sm:col-span-3 flex gap-2">
+              <button
+                type="submit"
+                className="w-full py-2 px-3 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-xs font-bold transition cursor-pointer"
+              >
+                {editandoConfId ? 'Salvar Alteração' : '+ Registrar Item'}
               </button>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm text-slate-600">
-                <thead className="bg-slate-50 text-slate-700 font-semibold uppercase text-xs">
-                  <tr>
-                    <th className="px-6 py-3">Data</th>
-                    <th className="px-6 py-3">Categoria</th>
-                    <th className="px-6 py-3">Item Avaliado</th>
-                    <th className="px-6 py-3">Status</th>
-                    <th className="px-6 py-3">Observação</th>
-                    <th className="px-6 py-3 text-right">Ações</th>
+          </form>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold">
+                <tr>
+                  <th className="py-2.5 px-4">Data</th>
+                  <th className="py-2.5 px-4">Categoria</th>
+                  <th className="py-2.5 px-4">Item</th>
+                  <th className="py-2.5 px-4 text-center">Status</th>
+                  <th className="py-2.5 px-4 text-center">Ações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {conformidades.map((c) => (
+                  <tr key={c.id} className="hover:bg-slate-50">
+                    <td className="py-2.5 px-4 font-mono">{c.data.split('-').reverse().join('/')}</td>
+                    <td className="py-2.5 px-4 font-semibold">{c.categoria}</td>
+                    <td className="py-2.5 px-4 font-bold text-slate-900">{c.item}</td>
+                    <td className="py-2.5 px-4 text-center">
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          c.status === 'CONFORME'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : c.status === 'NAO_CONFORME'
+                            ? 'bg-red-100 text-red-800'
+                            : 'bg-amber-100 text-amber-800'
+                        }`}
+                      >
+                        {c.status}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-4 text-center">
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditandoConfId(c.id);
+                            setConfCategoria(c.categoria);
+                            setConfItem(c.item);
+                            setConfStatus(c.status);
+                            setConfObs(c.observacao || '');
+                          }}
+                          className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded text-[11px] font-bold"
+                        >
+                          Alterar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleExcluirConformidade(c.id)}
+                          className="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-700 rounded text-[11px] font-bold"
+                        >
+                          Excluir
+                        </button>
+                      </div>
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200">
-                  {conformidades.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="px-6 py-8 text-center text-slate-400">
-                        Nenhum checklist registrado no posto.
-                      </td>
-                    </tr>
-                  ) : (
-                    conformidades.map((c) => (
-                      <tr key={c.id} className="hover:bg-slate-50 transition">
-                        <td className="px-6 py-4 font-mono text-xs">{c.data}</td>
-                        <td className="px-6 py-4">
-                          <span className="px-2 py-0.5 rounded text-xs font-semibold bg-slate-100 text-slate-700">
-                            {c.categoria}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 font-medium text-slate-900">{c.item}</td>
-                        <td className="px-6 py-4">
-                          <span
-                            className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
-                              c.status === 'CONFORME'
-                                ? 'bg-emerald-100 text-emerald-800'
-                                : c.status === 'NAO_CONFORME'
-                                ? 'bg-red-100 text-red-800'
-                                : 'bg-amber-100 text-amber-800'
-                            }`}
-                          >
-                            {c.status}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-xs text-slate-500">{c.observacao || '—'}</td>
-                        <td className="px-6 py-4 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => handleEditarChecklist(c)}
-                              className="p-1.5 text-slate-600 hover:text-teal-700 hover:bg-teal-50 rounded-lg transition border border-transparent hover:border-teal-200"
-                              title="Editar Item"
-                            >
-                              <Pencil className="w-4 h-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleSolicitarExclusaoChecklist(c)}
-                              className="p-1.5 text-slate-400 hover:text-red-700 hover:bg-red-50 rounded-lg transition border border-transparent hover:border-red-200"
-                              title="Excluir Item"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Novo Item de Conformidade */}
-      {isModalConformidade && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
-          <div className="bg-white rounded-xl max-w-md w-full p-6 space-y-4 shadow-xl">
-            <h3 className="text-lg font-bold text-slate-900">Novo Registro de Conformidade</h3>
-            <form onSubmit={handleSalvarConformidade} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Categoria</label>
-                <select
-                  value={categoria}
-                  onChange={(e) => setCategoria(e.target.value as any)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
-                >
-                  <option value="SEGURANCA">Segurança e Prevenção (NR-20)</option>
-                  <option value="MEIO_AMBIENTE">Meio Ambiente e Vazamentos</option>
-                  <option value="QUALIDADE">Qualidade e Aferições</option>
-                  <option value="FISCAL">Fiscal e Lacre de Bombas</option>
-                  <option value="EQUIPAMENTOS">Equipamentos e Mangueiras</option>
-                  <option value="UNIFORMES">Uniformes e EPIs</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Item Inspecionado</label>
-                <input
-                  type="text"
-                  value={itemChecklist}
-                  onChange={(e) => setItemChecklist(e.target.value)}
-                  required
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Status</label>
-                <select
-                  value={statusConformidade}
-                  onChange={(e) => setStatusConformidade(e.target.value as any)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
-                >
-                  <option value="CONFORME">Conforme</option>
-                  <option value="NAO_CONFORME">Não Conforme</option>
-                  <option value="PENDENTE">Pendente de Ajuste</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Observações</label>
-                <textarea
-                  value={obsConformidade}
-                  onChange={(e) => setObsConformidade(e.target.value)}
-                  rows={2}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsModalConformidade(false)}
-                  className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-50"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-xs font-semibold shadow-sm"
-                >
-                  Salvar Inspeção
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Tabela Oficial ANP (Normas 2026, Matriz NBR 5992 e Cruzamento de Dados) */}
-      <ModalTabelaOficialANP
-        isOpen={isModalTabelaOficialAberto}
-        onClose={() => setIsModalTabelaOficialAberto(false)}
-        produtoInicial={produto}
-        temperaturaInicial={temperatura}
-        densidadeInicial={densidadeObservada}
-      />
-
-      {/* Modal de Edição de Laudo de Análise ANP */}
-      <ModalEditarAnalise
-        isOpen={isModalEditarAnalise}
-        analise={analiseParaEditar}
-        funcionarios={funcionarios}
-        onClose={() => {
-          setIsModalEditarAnalise(false);
-          setAnaliseParaEditar(null);
-        }}
-        onSalvar={handleSalvarEdicaoAnalise}
-      />
-
-      {/* Modal de Confirmação de Exclusão de Laudo */}
-      {isModalExcluirAnalise && analiseParaExcluir && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95">
-            <div className="flex items-center gap-3 text-red-600 mb-3">
-              <div className="p-2.5 bg-red-50 rounded-xl border border-red-200">
-                <Trash2 className="w-5 h-5" />
-              </div>
-              <div>
-                <h4 className="font-bold text-slate-900 text-base">Excluir Laudo de Combustível</h4>
-                <p className="text-xs text-slate-500">Confirmação de segurança</p>
-              </div>
-            </div>
-
-            <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-700 space-y-1.5 my-4">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Data / Hora:</span>
-                <strong>{analiseParaExcluir.data} às {analiseParaExcluir.hora}</strong>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Combustível:</span>
-                <strong>{analiseParaExcluir.produto}</strong>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Ensaio:</span>
-                <span className="font-semibold">{analiseParaExcluir.tipoTeste}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Densidade 20°C:</span>
-                <strong className="font-mono">{analiseParaExcluir.densidadeCalculada20C.toFixed(4)} g/cm³</strong>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Resultado:</span>
-                <span className={`font-bold ${analiseParaExcluir.resultado === 'CONFORME' ? 'text-emerald-700' : 'text-red-700'}`}>
-                  {analiseParaExcluir.resultado}
-                </span>
-              </div>
-            </div>
-
-            <p className="text-xs text-slate-500 mb-4">
-              Deseja remover permanentemente este laudo de análise? Esta ação será registrada no log de auditoria.
-            </p>
-
-            <div className="flex items-center justify-end gap-2.5">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsModalExcluirAnalise(false);
-                  setAnaliseParaExcluir(null);
-                }}
-                disabled={processandoAcao}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 border border-slate-300 rounded-lg hover:bg-slate-50 transition"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmarExclusaoAnalise}
-                disabled={processandoAcao}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg shadow-sm transition disabled:opacity-50"
-              >
-                <Trash2 className="w-4 h-4" />
-                {processandoAcao ? 'Excluindo...' : 'Confirmar Exclusão'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal de Confirmação de Limpeza de Todos os Laudos */}
-      {isModalLimparLaudos && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-red-200 animate-in fade-in zoom-in-95">
-            <div className="flex items-center gap-3 text-red-600 mb-3">
-              <div className="p-3 bg-red-100 rounded-xl border border-red-200">
-                <AlertCircle className="w-6 h-6" />
-              </div>
-              <div>
-                <h4 className="font-bold text-slate-900 text-base">Limpar Todos os Laudos de Análise?</h4>
-                <p className="text-xs text-red-600 font-semibold">Ação irreversível de limpeza</p>
-              </div>
-            </div>
-
-            <p className="text-xs text-slate-600 leading-relaxed my-4">
-              Você está prestes a remover permanentemente todos os <strong>{densidades.length}</strong> registros
-              de laudos e ensaios de combustíveis salvos para este posto. Deseja prosseguir com a exclusão total?
-            </p>
-
-            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setIsModalLimparLaudos(false)}
-                disabled={processandoAcao}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 border border-slate-300 rounded-lg hover:bg-slate-50 transition"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmarLimpezaLaudos}
-                disabled={processandoAcao}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg shadow-sm transition disabled:opacity-50"
-              >
-                <Trash2 className="w-4 h-4" />
-                {processandoAcao ? 'Limpando...' : 'Sim, Limpar Todos os Laudos'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal de Edição de Item de Checklist */}
-      {isModalEditarChecklist && checklistParaEditar && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
-          <div className="bg-white rounded-xl max-w-md w-full p-6 space-y-4 shadow-xl">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-lg font-bold text-slate-900">Editar Registro de Conformidade</h3>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsModalEditarChecklist(false);
-                  setChecklistParaEditar(null);
-                }}
-                className="text-slate-400 hover:text-slate-600"
-              >
-                ✕
-              </button>
-            </div>
-            <form onSubmit={handleSalvarEdicaoChecklist} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Categoria</label>
-                <select
-                  value={checklistParaEditar.categoria}
-                  onChange={(e) =>
-                    setChecklistParaEditar({
-                      ...checklistParaEditar,
-                      categoria: e.target.value as any,
-                    })
-                  }
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
-                >
-                  <option value="SEGURANCA">Segurança e Prevenção (NR-20)</option>
-                  <option value="MEIO_AMBIENTE">Meio Ambiente e Vazamentos (CONAMA)</option>
-                  <option value="QUALIDADE">Qualidade e Controle de Combustível</option>
-                  <option value="EQUIPAMENTOS">Calibração e Equipamentos</option>
-                  <option value="UNIFORMES">EPIs e Uniformes de Frentistas</option>
-                  <option value="FISCAL">Documentação Fiscal e Alvarás</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Item Inspecionado</label>
-                <input
-                  type="text"
-                  value={checklistParaEditar.item}
-                  onChange={(e) =>
-                    setChecklistParaEditar({
-                      ...checklistParaEditar,
-                      item: e.target.value,
-                    })
-                  }
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Responsável</label>
-                <select
-                  value={checklistParaEditar.responsavelId}
-                  onChange={(e) =>
-                    setChecklistParaEditar({
-                      ...checklistParaEditar,
-                      responsavelId: e.target.value,
-                    })
-                  }
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
-                >
-                  {funcionarios.map((f) => (
-                    <option key={f.id} value={f.id}>
-                      {f.nome} ({f.cargo})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Status</label>
-                <select
-                  value={checklistParaEditar.status}
-                  onChange={(e) =>
-                    setChecklistParaEditar({
-                      ...checklistParaEditar,
-                      status: e.target.value as any,
-                    })
-                  }
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
-                >
-                  <option value="CONFORME">Conforme</option>
-                  <option value="NAO_CONFORME">Não Conforme</option>
-                  <option value="PENDENTE">Pendente de Ajuste</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Observações</label>
-                <textarea
-                  value={checklistParaEditar.observacao || ''}
-                  onChange={(e) =>
-                    setChecklistParaEditar({
-                      ...checklistParaEditar,
-                      observacao: e.target.value,
-                    })
-                  }
-                  rows={2}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsModalEditarChecklist(false);
-                    setChecklistParaEditar(null);
-                  }}
-                  className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-50"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={processandoAcao}
-                  className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-xs font-semibold shadow-sm disabled:opacity-50"
-                >
-                  {processandoAcao ? 'Salvando...' : 'Salvar Alterações'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal de Confirmação de Exclusão de Checklist */}
-      {isModalExcluirChecklist && checklistParaExcluir && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95">
-            <div className="flex items-center gap-3 text-red-600 mb-3">
-              <div className="p-2.5 bg-red-50 rounded-xl border border-red-200">
-                <Trash2 className="w-5 h-5" />
-              </div>
-              <div>
-                <h4 className="font-bold text-slate-900 text-base">Excluir Item de Checklist</h4>
-                <p className="text-xs text-slate-500">Confirmação de segurança</p>
-              </div>
-            </div>
-
-            <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-700 space-y-1.5 my-4">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Data:</span>
-                <strong>{checklistParaExcluir.data}</strong>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Categoria:</span>
-                <span className="font-semibold">{checklistParaExcluir.categoria}</span>
-              </div>
-              <div>
-                <span className="text-slate-500 block mb-0.5">Item:</span>
-                <strong className="text-slate-900">{checklistParaExcluir.item}</strong>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Status:</span>
-                <span className="font-bold">{checklistParaExcluir.status}</span>
-              </div>
-            </div>
-
-            <p className="text-xs text-slate-500 mb-4">
-              Deseja realmente remover este registro de inspeção de pátio?
-            </p>
-
-            <div className="flex items-center justify-end gap-2.5">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsModalExcluirChecklist(false);
-                  setChecklistParaExcluir(null);
-                }}
-                disabled={processandoAcao}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 border border-slate-300 rounded-lg hover:bg-slate-50 transition"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmarExclusaoChecklist}
-                disabled={processandoAcao}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg shadow-sm transition disabled:opacity-50"
-              >
-                <Trash2 className="w-4 h-4" />
-                {processandoAcao ? 'Excluindo...' : 'Confirmar Exclusão'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal de Confirmação de Limpeza de Checklist */}
-      {isModalLimparChecklist && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-red-200 animate-in fade-in zoom-in-95">
-            <div className="flex items-center gap-3 text-red-600 mb-3">
-              <div className="p-3 bg-red-100 rounded-xl border border-red-200">
-                <AlertCircle className="w-6 h-6" />
-              </div>
-              <div>
-                <h4 className="font-bold text-slate-900 text-base">Limpar Todo o Checklist de Pátio?</h4>
-                <p className="text-xs text-red-600 font-semibold">Ação irreversível de limpeza</p>
-              </div>
-            </div>
-
-            <p className="text-xs text-slate-600 leading-relaxed my-4">
-              Você está prestes a remover permanentemente todos os <strong>{conformidades.length}</strong> registros
-              de inspeções de conformidade cadastrados para este posto. Deseja prosseguir com a exclusão total?
-            </p>
-
-            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setIsModalLimparChecklist(false)}
-                disabled={processandoAcao}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 border border-slate-300 rounded-lg hover:bg-slate-50 transition"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmarLimpezaChecklist}
-                disabled={processandoAcao}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg shadow-sm transition disabled:opacity-50"
-              >
-                <Trash2 className="w-4 h-4" />
-                {processandoAcao ? 'Limpando...' : 'Sim, Limpar Todo o Checklist'}
-              </button>
-            </div>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

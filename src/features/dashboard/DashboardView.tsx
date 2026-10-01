@@ -33,6 +33,20 @@ import {
   Sunrise,
   Plus,
   Zap,
+  Cloud,
+  Flame,
+  Leaf,
+  Truck,
+  CreditCard,
+  QrCode,
+  Banknote,
+  Receipt,
+  Thermometer,
+  FlaskConical,
+  BookOpen,
+  FileText,
+  Camera,
+  Coffee,
 } from 'lucide-react';
 import { formatarMoeda } from '../../utils/calculations';
 import { VendasPorBicoChart } from './VendasPorBicoChart';
@@ -297,6 +311,178 @@ export const DashboardView: React.FC<DashboardProps> = ({
         </div>
       </div>
 
+      {/* 2.5. Painel Visual com Vários Ícones de Representação do Posto & Nuvem 24h */}
+      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-2xs">
+              <Cloud className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-sm font-bold text-slate-900">
+                Mapa Visual de Ícones de Representação do Posto (Conectado 24h na Nuvem)
+              </h2>
+              <p className="text-[11px] text-slate-500">
+                Clique em qualquer ícone representativo para abrir diretamente o setor correspondente
+              </p>
+            </div>
+          </div>
+          <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-lg border border-emerald-200">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+            Sincronização Cloud 24h Ativa
+          </span>
+        </div>
+
+        {/* Grade de 12 Ícones de Representação da Operação */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5">
+          {[
+            {
+              aba: 'afericoes',
+              titulo: '2 Bombas (12 Bicos)',
+              sub: '3 Lado A • 3 Lado B',
+              icon: Fuel,
+              cor: 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100',
+            },
+            {
+              aba: 'afericoes',
+              titulo: 'Balde Aferidor 20L',
+              sub: 'Tolerância ±100ml',
+              icon: Gauge,
+              cor: 'bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100',
+            },
+            {
+              aba: 'tanques',
+              titulo: 'Tanques & Régua',
+              sub: 'Conversão cm → L',
+              icon: Droplets,
+              cor: 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100',
+            },
+            {
+              aba: 'analises',
+              titulo: 'Densidade 20°C',
+              sub: 'Termodensímetro',
+              icon: Thermometer,
+              cor: 'bg-teal-50 text-teal-700 border-teal-200 hover:bg-teal-100',
+            },
+            {
+              aba: 'analises',
+              titulo: 'Proveta Gasolina',
+              sub: 'Teor Etanol 100mL',
+              icon: FlaskConical,
+              cor: 'bg-cyan-50 text-cyan-700 border-cyan-200 hover:bg-cyan-100',
+            },
+            {
+              aba: 'lmc',
+              titulo: 'Livro LMC ANP',
+              sub: 'Estoque & Notas NF',
+              icon: BookOpen,
+              cor: 'bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100',
+            },
+            {
+              aba: 'planner',
+              titulo: 'Turnos & Folgas (S)',
+              sub: 'T1, T2, Horista e S',
+              icon: Calendar,
+              cor: 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100',
+            },
+            {
+              aba: 'ia-escala',
+              titulo: 'Scanner de Escala',
+              sub: 'Foto → Planner',
+              icon: Camera,
+              cor: 'bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100',
+            },
+            {
+              aba: 'funcionarios',
+              titulo: 'Equipe de Pista',
+              sub: 'Frentistas & Caixas',
+              icon: Users,
+              cor: 'bg-slate-100 text-slate-800 border-slate-300 hover:bg-slate-200',
+            },
+            {
+              aba: 'fechamento',
+              titulo: 'Caixa, PIX & Cartão',
+              sub: 'Encerrantes e Meios',
+              icon: QrCode,
+              cor: 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100',
+            },
+            {
+              aba: 'sobras-faltas',
+              titulo: 'Rateio de Turno',
+              sub: 'Sobras e Faltas',
+              icon: Scale,
+              cor: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100',
+            },
+            {
+              aba: 'relatorios',
+              titulo: 'Auditoria & PDF',
+              sub: 'Histórico na Nuvem',
+              icon: FileText,
+              cor: 'bg-slate-100 text-slate-800 border-slate-300 hover:bg-slate-200',
+            },
+          ].map((item, idx) => {
+            const ItemIcon = item.icon;
+            return (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => onNavigate(item.aba)}
+                className={`p-3 rounded-xl border text-left transition flex items-center gap-2.5 cursor-pointer ${item.cor}`}
+              >
+                <div className="w-9 h-9 rounded-lg bg-white/90 border border-black/5 flex items-center justify-center shrink-0 shadow-2xs">
+                  <ItemIcon className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="font-bold text-xs truncate">{item.titulo}</div>
+                  <div className="text-[10px] opacity-80 truncate">{item.sub}</div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Faixa de Ícones de Representação de Combustíveis, Turnos e Pagamentos */}
+        <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-600">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="font-bold text-slate-800">Combustíveis:</span>
+            <span className="inline-flex items-center gap-1 text-rose-700 font-semibold">
+              <Flame className="w-3.5 h-3.5" /> Gas. Comum
+            </span>
+            <span className="inline-flex items-center gap-1 text-sky-700 font-semibold">
+              <Zap className="w-3.5 h-3.5" /> Gas. Aditivada
+            </span>
+            <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold">
+              <Leaf className="w-3.5 h-3.5" /> Etanol
+            </span>
+            <span className="inline-flex items-center gap-1 text-amber-700 font-semibold">
+              <Truck className="w-3.5 h-3.5" /> Diesel S10 / S500
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="font-bold text-slate-800">Turnos &amp; Caixa:</span>
+            <span className="inline-flex items-center gap-1 text-amber-700 font-semibold">
+              <Sunrise className="w-3.5 h-3.5" /> T1 Manhã
+            </span>
+            <span className="inline-flex items-center gap-1 text-blue-700 font-semibold">
+              <Sun className="w-3.5 h-3.5" /> T2 Tarde
+            </span>
+            <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold">
+              <Coffee className="w-3.5 h-3.5" /> Folga (S)
+            </span>
+            <span className="inline-flex items-center gap-1 text-slate-700 font-semibold">
+              <CreditCard className="w-3.5 h-3.5" /> Cartão
+            </span>
+            <span className="inline-flex items-center gap-1 text-slate-700 font-semibold">
+              <Banknote className="w-3.5 h-3.5" /> Dinheiro
+            </span>
+            <span className="inline-flex items-center gap-1 text-slate-700 font-semibold">
+              <Receipt className="w-3.5 h-3.5" /> Nota
+            </span>
+          </div>
+        </div>
+      </div>
+
       {/* 3. Indicadores Operacionais Principais (Cards de Métricas Ilustrados) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Equipe em Pista */}
@@ -553,11 +739,13 @@ export const DashboardView: React.FC<DashboardProps> = ({
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {tanques.map((t, idx) => {
+            {tanques.map((t) => {
               const cores = getProdutoColor(t.produto);
-              // Estimativa visual de nível baseada na tabela de calibração ou valor padrão
-              const percentual = 60 + ((idx * 13) % 35); // 60% a 95% para simulação ilustrativa
-              const volumeAtualEstimado = Math.round((t.capacidadeNominal * percentual) / 100);
+              const volumeOperacional = t.capacidadeOperacional || t.capacidadeNominal || 0;
+              const percentual =
+                t.capacidadeNominal > 0
+                  ? Math.min(100, Math.round((volumeOperacional / t.capacidadeNominal) * 100))
+                  : 0;
 
               return (
                 <div
@@ -582,19 +770,18 @@ export const DashboardView: React.FC<DashboardProps> = ({
                       <div className="text-sm font-extrabold text-slate-900 font-mono">
                         {percentual}%
                       </div>
-                      <div className="text-[10px] text-slate-400">nível</div>
+                      <div className="text-[10px] text-slate-400">operacional</div>
                     </div>
                   </div>
 
-                  {/* Ilustração Visual do Tanque (Cilindro com Nível Líquido) */}
+                  {/* Ilustração Visual do Tanque (Cilindro com Capacidade Operacional) */}
                   <div className="relative w-full h-8 bg-slate-100 rounded-xl overflow-hidden border border-slate-200 p-0.5 flex items-center">
-                    {/* Barra de combustível em gradiente */}
                     <div
                       className={`h-full rounded-lg bg-gradient-to-r ${cores.bg} transition-all duration-500 flex items-center justify-end pr-2`}
-                      style={{ width: `${percentual}%` }}
+                      style={{ width: `${Math.max(percentual, 15)}%` }}
                     >
                       <span className="text-[10px] font-bold text-white drop-shadow-xs">
-                        {volumeAtualEstimado.toLocaleString('pt-BR')} L
+                        {volumeOperacional.toLocaleString('pt-BR')} L
                       </span>
                     </div>
                   </div>

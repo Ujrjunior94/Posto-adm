@@ -51,6 +51,7 @@ interface ModalNovoFechamentoProps {
   fechamentos: FechamentoCaixa[];
   postoId: string;
   userProfile: UserProfile | null;
+  fechamentoParaEditar?: FechamentoCaixa | null;
   onFechamentoSalvo: (fechamento: FechamentoCaixa) => void;
   onReload: () => void;
 }
@@ -65,6 +66,7 @@ export const ModalNovoFechamento: React.FC<ModalNovoFechamentoProps> = ({
   fechamentos,
   postoId,
   userProfile,
+  fechamentoParaEditar,
   onFechamentoSalvo,
   onReload,
 }) => {
@@ -94,9 +96,34 @@ export const ModalNovoFechamento: React.FC<ModalNovoFechamentoProps> = ({
   const [outros, setOutros] = useState<number>(0);
   const [outrosDescricao, setOutrosDescricao] = useState<string>('');
 
-  // Inicialização inteligente dos bicos e leitura de encerrantes anteriores
+  // Inicialização inteligente dos bicos e leitura de encerrantes anteriores (ou carregamento para edição)
   useEffect(() => {
     if (!isOpen) return;
+
+    if (fechamentoParaEditar) {
+      setDataFechamento(fechamentoParaEditar.data);
+      setTurno(fechamentoParaEditar.turno);
+      setCaixaId(fechamentoParaEditar.caixaId);
+      setFuncionarioId(fechamentoParaEditar.funcionarioId);
+      setObservacao(fechamentoParaEditar.observacao || '');
+      setOutrasVendasPista(fechamentoParaEditar.outrasVendasPista || 0);
+      if (fechamentoParaEditar.encerrantesBicos && fechamentoParaEditar.encerrantesBicos.length > 0) {
+        setItensBicos(fechamentoParaEditar.encerrantesBicos);
+      }
+      const rec = fechamentoParaEditar.recolhimento;
+      if (rec) {
+        setPix(rec.pix || 0);
+        setCartao(rec.cartao || 0);
+        setNota(rec.nota || 0);
+        setDeposito(rec.deposito || 0);
+        setPixCnpj(rec.pixCnpj || 0);
+        setDespesa(rec.despesa || 0);
+        setDespesaDescricao(rec.despesaDescricao || '');
+        setOutros(rec.outros || 0);
+        setOutrosDescricao(rec.outrosDescricao || '');
+      }
+      return;
+    }
 
     // Se houver bicos cadastrados, mapeia com encerrante inicial inteligente
     if (bicos.length > 0) {
@@ -143,7 +170,7 @@ export const ModalNovoFechamento: React.FC<ModalNovoFechamentoProps> = ({
     if (!funcionarioId && funcionarios.length > 0) {
       setFuncionarioId(funcionarios[0].id);
     }
-  }, [isOpen, bicos, fechamentos]);
+  }, [isOpen, bicos, fechamentos, fechamentoParaEditar]);
 
   // Frentistas escalados no mesmo dia e turno
   const escaladosNoTurno = useMemo(() => {
@@ -280,7 +307,7 @@ export const ModalNovoFechamento: React.FC<ModalNovoFechamentoProps> = ({
   const handleSalvar = async () => {
     setSalvando(true);
     try {
-      const id = `fech-${Date.now()}`;
+      const id = fechamentoParaEditar?.id || `fech-${Date.now()}`;
       const func = funcionarios.find((f) => f.id === funcionarioId);
 
       const valoresRecolhimento: ValoresRecolhimentoCaixa = {

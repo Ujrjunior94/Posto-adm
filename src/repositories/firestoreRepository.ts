@@ -12,9 +12,9 @@ import {
   onSnapshot,
   QueryConstraint,
   addDoc,
-  getDocFromServer
+  getDocFromServer,
 } from 'firebase/firestore';
-import { AuditLog, AuditAcao } from '../types';
+import { AuditAcao } from '../types';
 
 export enum OperationType {
   CREATE = 'create',
@@ -42,7 +42,11 @@ export interface FirestoreErrorInfo {
   };
 }
 
-export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+export function handleFirestoreError(
+  error: unknown,
+  operationType: OperationType,
+  path: string | null
+) {
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
@@ -51,33 +55,57 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
       emailVerified: auth.currentUser?.emailVerified,
       isAnonymous: auth.currentUser?.isAnonymous,
       tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData?.map(provider => ({
-        providerId: provider.providerId,
-        email: provider.email,
-      })) || []
+      providerInfo:
+        auth.currentUser?.providerData?.map((provider) => ({
+          providerId: provider.providerId,
+          email: provider.email,
+        })) || [],
     },
     operationType,
-    path
+    path,
   };
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
 
 /**
- * Validação de conexão inicial com o Firestore conforme SKILL.md
+ * Remove valores undefined recursivamente para evitar erros do SDK do Firestore
  */
-export async function testConnection() {
+function sanitizarParaFirestore<T>(obj: T): T {
+  if (obj === null || obj === undefined || typeof obj !== 'object') {
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj
+      .filter((item) => item !== undefined)
+      .map((item) => sanitizarParaFirestore(item)) as unknown as T;
+  }
+  const limpo: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+    if (value !== undefined) {
+      limpo[key] = sanitizarParaFirestore(value);
+    }
+  }
+  return limpo as T;
+}
+
+/**
+ * Validação de conexão em tempo real 24h com a nuvem Firestore
+ */
+export async function testConnection(): Promise<boolean> {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
+    return true;
   } catch (error) {
     if (error instanceof Error && error.message.includes('the client is offline')) {
       console.error('Please check your Firebase configuration.');
     }
+    return false;
   }
 }
 
 /**
- * Registra auditoria imutável no Firestore (ou local se demo offline)
+ * Registra trilha de auditoria diretamente na nuvem Firestore 24h
  */
 export async function registrarAuditoria(
   postoId: string,
@@ -90,55 +118,30 @@ export async function registrarAuditoria(
   dadosAnteriores?: Record<string, unknown> | null,
   dadosNovos?: Record<string, unknown> | null
 ) {
-  if (!auth.currentUser) {
-    try {
-      const raw = localStorage.getItem(`meuposto_demo_${postoId}_auditoria`);
-      const logs = raw ? JSON.parse(raw) : [];
-      logs.unshift({
-        id: `audit-${Date.now()}`,
-        postoId,
-        usuarioId,
-        usuarioNome,
-        modulo,
-        entidade,
-        entidadeId,
-        acao,
-        dadosAnteriores: dadosAnteriores || null,
-        dadosNovos: dadosNovos || null,
-        timestamp: new Date().toISOString(),
-        dispositivo: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 100) : 'Web App',
-      });
-      localStorage.setItem(`meuposto_demo_${postoId}_auditoria`, JSON.stringify(logs.slice(0, 50)));
-    } catch {
-      // ignore
-    }
-    return;
-  }
-
   const path = `postos/${postoId}/auditoria`;
   try {
     const colRef = collection(db, 'postos', postoId, 'auditoria');
-    await addDoc(colRef, {
+    const payload = sanitizarParaFirestore({
       postoId,
-      usuarioId,
-      usuarioNome,
+      usuarioId: usuarioId || 'operador-nuvem',
+      usuarioNome: usuarioNome || 'Operador',
       modulo,
       entidade,
-      entidadeId,
+      entidadeId: entidadeId || 'geral',
       acao,
       dadosAnteriores: dadosAnteriores || null,
       dadosNovos: dadosNovos || null,
       timestamp: new Date().toISOString(),
-      dispositivo: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 100) : 'Web App',
+      dispositivo: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 100) : 'Web Cloud 24h',
     });
+    await addDoc(colRef, payload);
   } catch (err) {
-    console.error('Falha ao gravar auditoria:', err);
-    handleFirestoreError(err, OperationType.CREATE, path);
+    console.error('Falha ao gravar auditoria na nuvem:', err);
   }
 }
 
 /**
- * Repositório Base Genérico para subcoleções de um Posto
+ * Repositório Base Genérico conectado 24h em tempo real ao Google Cloud Firestore
  */
 export class PostoSubcollectionRepository<T extends { id: string }> {
   constructor(private subcollectionName: string) {}
@@ -147,32 +150,7 @@ export class PostoSubcollectionRepository<T extends { id: string }> {
     return collection(db, 'postos', postoId, this.subcollectionName);
   }
 
-  private getLocalKey(postoId: string) {
-    return `meuposto_demo_${postoId}_${this.subcollectionName}`;
-  }
-
-  private getLocalItems(postoId: string): T[] {
-    try {
-      const raw = localStorage.getItem(this.getLocalKey(postoId));
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  }
-
-  private setLocalItems(postoId: string, items: T[]): void {
-    try {
-      localStorage.setItem(this.getLocalKey(postoId), JSON.stringify(items));
-    } catch {
-      // ignore
-    }
-  }
-
   async getById(postoId: string, id: string): Promise<T | null> {
-    if (!auth.currentUser) {
-      const items = this.getLocalItems(postoId);
-      return items.find((it) => it.id === id) || null;
-    }
     const path = `postos/${postoId}/${this.subcollectionName}/${id}`;
     try {
       const dRef = doc(db, 'postos', postoId, this.subcollectionName, id);
@@ -186,9 +164,6 @@ export class PostoSubcollectionRepository<T extends { id: string }> {
   }
 
   async getAll(postoId: string, ...constraints: QueryConstraint[]): Promise<T[]> {
-    if (!auth.currentUser) {
-      return this.getLocalItems(postoId);
-    }
     const path = `postos/${postoId}/${this.subcollectionName}`;
     try {
       const col = this.getCollection(postoId);
@@ -202,52 +177,34 @@ export class PostoSubcollectionRepository<T extends { id: string }> {
   }
 
   async save(postoId: string, item: T): Promise<void> {
-    if (!auth.currentUser) {
-      const items = this.getLocalItems(postoId);
-      const idx = items.findIndex((it) => it.id === item.id);
-      if (idx >= 0) {
-        items[idx] = { ...items[idx], ...item };
-      } else {
-        items.push(item);
-      }
-      this.setLocalItems(postoId, items);
-      return;
-    }
     const path = `postos/${postoId}/${this.subcollectionName}/${item.id}`;
     try {
       const dRef = doc(db, 'postos', postoId, this.subcollectionName, item.id);
-      await setDoc(dRef, item, { merge: true });
+      const payload = sanitizarParaFirestore({
+        ...item,
+        postoId,
+      });
+      await setDoc(dRef, payload, { merge: true });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, path);
     }
   }
 
   async update(postoId: string, id: string, data: Partial<T>): Promise<void> {
-    if (!auth.currentUser) {
-      const items = this.getLocalItems(postoId);
-      const idx = items.findIndex((it) => it.id === id);
-      if (idx >= 0) {
-        items[idx] = { ...items[idx], ...data };
-        this.setLocalItems(postoId, items);
-      }
-      return;
-    }
     const path = `postos/${postoId}/${this.subcollectionName}/${id}`;
     try {
       const dRef = doc(db, 'postos', postoId, this.subcollectionName, id);
-      await updateDoc(dRef, data as Record<string, unknown>);
+      const payload = sanitizarParaFirestore({
+        ...data,
+        postoId,
+      });
+      await updateDoc(dRef, payload as Record<string, unknown>);
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, path);
     }
   }
 
   async delete(postoId: string, id: string): Promise<void> {
-    if (!auth.currentUser) {
-      const items = this.getLocalItems(postoId);
-      const filtered = items.filter((it) => it.id !== id);
-      this.setLocalItems(postoId, filtered);
-      return;
-    }
     const path = `postos/${postoId}/${this.subcollectionName}/${id}`;
     try {
       const dRef = doc(db, 'postos', postoId, this.subcollectionName, id);
@@ -258,31 +215,26 @@ export class PostoSubcollectionRepository<T extends { id: string }> {
   }
 
   async clearAll(postoId: string): Promise<void> {
-    if (!auth.currentUser) {
-      this.setLocalItems(postoId, []);
-      return;
-    }
     const path = `postos/${postoId}/${this.subcollectionName}`;
     try {
       const col = this.getCollection(postoId);
       const snap = await getDocs(col);
       if (snap.empty) return;
-      const batch = writeBatch(db);
-      snap.docs.forEach((d) => {
-        batch.delete(d.ref);
-      });
-      await batch.commit();
+      // Firestore batch suporta até 500 operações por lote
+      const docs = snap.docs;
+      for (let i = 0; i < docs.length; i += 400) {
+        const batch = writeBatch(db);
+        docs.slice(i, i + 400).forEach((d) => {
+          batch.delete(d.ref);
+        });
+        await batch.commit();
+      }
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, path);
     }
   }
 
   subscribe(postoId: string, onUpdate: (items: T[]) => void, ...constraints: QueryConstraint[]) {
-    if (!auth.currentUser) {
-      const items = this.getLocalItems(postoId);
-      onUpdate(items);
-      return () => {};
-    }
     const path = `postos/${postoId}/${this.subcollectionName}`;
     const col = this.getCollection(postoId);
     const q = query(col, ...constraints);
@@ -293,7 +245,7 @@ export class PostoSubcollectionRepository<T extends { id: string }> {
         onUpdate(items);
       },
       (err) => {
-        console.warn(`Erro no listener da coleção ${this.subcollectionName}:`, err);
+        console.warn(`Erro no listener em nuvem da coleção ${this.subcollectionName}:`, err);
         handleFirestoreError(err, OperationType.LIST, path);
       }
     );
