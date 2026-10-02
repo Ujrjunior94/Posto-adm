@@ -1,5 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Escala, Funcionario, EscalaImportada, EscalaStatus } from '../../types';
+import { ResultadoAuditoriaConflitos } from './detectorConflitosEscala';
+import { normalizarTextoComparacao } from '../../services/geminiOcrService';
 import {
   Calendar,
   Clock,
@@ -43,6 +45,7 @@ interface PainelVisualizacoesPlannerProps {
   onNovoRegistroManual: () => void;
   onEditarRegistroEscala: (esc: Escala) => void;
   onExcluirRegistroEscala: (esc: Escala) => void;
+  resultadoAuditoria?: ResultadoAuditoriaConflitos;
 }
 
 const formatarDataBr = (iso: string) => {
@@ -93,6 +96,7 @@ export const PainelVisualizacoesPlanner: React.FC<PainelVisualizacoesPlannerProp
   onNovoRegistroManual,
   onEditarRegistroEscala,
   onExcluirRegistroEscala,
+  resultadoAuditoria,
 }) => {
   const hojeIso = new Date().toISOString().slice(0, 10);
   const [dataDiaria, setDataDiaria] = useState<string>(
@@ -298,49 +302,78 @@ export const PainelVisualizacoesPlanner: React.FC<PainelVisualizacoesPlannerProp
               <tbody className="divide-y divide-slate-100">
                 {escalasMes
                   .filter((e) => e.data === dataDiaria)
-                  .map((esc) => (
-                    <tr key={esc.id} className="hover:bg-slate-50">
-                      <td className="py-2.5 px-3 font-bold text-slate-900">{esc.funcionarioNome}</td>
-                      <td className="py-2.5 px-3 text-slate-600">
-                        <span className="font-semibold text-slate-800">{esc.setor || 'Pista'}</span> •{' '}
-                        {esc.funcao || 'Frentista'}
-                      </td>
-                      <td className="py-2.5 px-3">
-                        <span
-                          className={`inline-block px-2.5 py-0.5 rounded border text-[11px] font-bold ${obterCorEventoPlanner(
-                            esc
-                          )}`}
-                        >
-                          {esc.status === 'FOLGA' ? 'Folga (S)' : esc.turno}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-3 font-mono font-bold text-slate-800">
-                        {esc.status === 'FOLGA' ? 'Folga' : `${esc.horarioInicio} às ${esc.horarioFim}`}
-                      </td>
-                      <td className="py-2.5 px-3 text-slate-600">{esc.intervalo || '1h'}</td>
-                      <td className="py-2.5 px-3 text-slate-500">{esc.observacao || '—'}</td>
-                      <td className="py-2.5 px-3 text-right">
-                        <div className="inline-flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => onEditarRegistroEscala(esc)}
-                            className="p-1 text-blue-600 hover:bg-blue-50 rounded"
-                            title="Editar horário / turno"
+                  .map((esc) => {
+                    const conflitosEsc = resultadoAuditoria
+                      ? resultadoAuditoria.mapaConflitosPorCelula[`${esc.funcionarioId}_${esc.data}`] ||
+                        resultadoAuditoria.mapaConflitosPorCelula[
+                          `nome:${normalizarTextoComparacao(esc.funcionarioNome)}_${esc.data}`
+                        ] ||
+                        []
+                      : [];
+                    const temConflito = conflitosEsc.length > 0;
+                    const temCritico = conflitosEsc.some((c) => c.severidade === 'CRITICO');
+
+                    return (
+                      <tr key={esc.id} className="hover:bg-slate-50">
+                        <td className="py-2.5 px-3 font-bold text-slate-900">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span>{esc.funcionarioNome}</span>
+                            {temConflito && (
+                              <span
+                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold border ${
+                                  temCritico
+                                    ? 'bg-red-100 text-red-800 border-red-300'
+                                    : 'bg-amber-100 text-amber-900 border-amber-300'
+                                }`}
+                                title={conflitosEsc.map((c) => `${c.titulo}: ${c.descricao}`).join('\n')}
+                              >
+                                <AlertTriangle className="w-3 h-3 shrink-0" />
+                                {conflitosEsc[0].titulo}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-600">
+                          <span className="font-semibold text-slate-800">{esc.setor || 'Pista'}</span> •{' '}
+                          {esc.funcao || 'Frentista'}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span
+                            className={`inline-block px-2.5 py-0.5 rounded border text-[11px] font-bold ${obterCorEventoPlanner(
+                              esc
+                            )}`}
                           >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onExcluirRegistroEscala(esc)}
-                            className="p-1 text-red-600 hover:bg-red-50 rounded"
-                            title="Excluir registro"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                            {esc.status === 'FOLGA' ? 'Folga (S)' : esc.turno}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 font-mono font-bold text-slate-800">
+                          {esc.status === 'FOLGA' ? 'Folga' : `${esc.horarioInicio} às ${esc.horarioFim}`}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-600">{esc.intervalo || '1h'}</td>
+                        <td className="py-2.5 px-3 text-slate-500">{esc.observacao || '—'}</td>
+                        <td className="py-2.5 px-3 text-right">
+                          <div className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => onEditarRegistroEscala(esc)}
+                              className="p-1 text-blue-600 hover:bg-blue-50 rounded"
+                              title="Editar horário / turno"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onExcluirRegistroEscala(esc)}
+                              className="p-1 text-red-600 hover:bg-red-50 rounded"
+                              title="Excluir registro"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 {escalasMes.filter((e) => e.data === dataDiaria).length === 0 && (
                   <tr>
                     <td colSpan={7} className="py-8 text-center text-slate-400">
@@ -410,6 +443,16 @@ export const PainelVisualizacoesPlanner: React.FC<PainelVisualizacoesPlannerProp
                             e.funcionarioNome.toLowerCase() === f.nome.toLowerCase()) &&
                           e.data === dIso
                       );
+
+                      const conflitosEsc = resultadoAuditoria
+                        ? resultadoAuditoria.mapaConflitosPorCelula[`${f.id}_${dIso}`] ||
+                          resultadoAuditoria.mapaConflitosPorCelula[
+                            `nome:${normalizarTextoComparacao(f.nome)}_${dIso}`
+                          ] ||
+                          []
+                        : [];
+                      const temConflito = conflitosEsc.length > 0;
+
                       return (
                         <td
                           key={dIso}
@@ -418,14 +461,26 @@ export const PainelVisualizacoesPlanner: React.FC<PainelVisualizacoesPlannerProp
                         >
                           {esc ? (
                             <div
-                              className={`p-1.5 rounded-lg border text-[11px] ${obterCorEventoPlanner(
+                              className={`p-1.5 rounded-lg border text-[11px] relative ${obterCorEventoPlanner(
                                 esc
-                              )}`}
+                              )} ${temConflito ? 'ring-2 ring-red-500 ring-inset shadow-xs' : ''}`}
+                              title={
+                                temConflito
+                                  ? `🚨 CONFLITO NA ESCALA:\n${conflitosEsc
+                                      .map((c) => `• ${c.titulo}: ${c.descricao}`)
+                                      .join('\n')}`
+                                  : undefined
+                              }
                             >
-                              <div className="font-bold">
-                                {esc.status === 'FOLGA'
-                                  ? 'FOLGA (S)'
-                                  : `${esc.horarioInicio} - ${esc.horarioFim}`}
+                              <div className="font-bold flex items-center justify-center gap-1">
+                                <span>
+                                  {esc.status === 'FOLGA'
+                                    ? 'FOLGA (S)'
+                                    : `${esc.horarioInicio} - ${esc.horarioFim}`}
+                                </span>
+                                {temConflito && (
+                                  <AlertTriangle className="w-3 h-3 text-red-600 shrink-0 animate-pulse" />
+                                )}
                               </div>
                               <div className="text-[10px] opacity-80 truncate">
                                 {esc.setor || f.setor || 'Pista'}

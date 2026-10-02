@@ -28,7 +28,16 @@ import {
   X,
   RefreshCw,
   AlertCircle,
+  AlertTriangle,
+  Users,
 } from 'lucide-react';
+import {
+  analisarConflitosEscala,
+  ConfiguracaoRegrasEscala,
+  REGRAS_PADRAO_ESCALA,
+  ConflitoEscala,
+} from './detectorConflitosEscala';
+import { PainelConflitosEscala } from './PainelConflitosEscala';
 
 const repoEscala = new PostoSubcollectionRepository<Escala>('escalas');
 const repoFunc = new PostoSubcollectionRepository<Funcionario>('funcionarios');
@@ -121,6 +130,17 @@ export const PlannerView: React.FC<PlannerProps> = ({
   const [filtroSetor, setFiltroSetor] = useState<string>('TODOS');
   const [salvandoAuto, setSalvandoAuto] = useState(false);
 
+  // Configuração e Auditoria Automática de Conflitos na Escala (CLT, Interjornadas e Cobertura)
+  const [configRegras, setConfigRegras] = useState<ConfiguracaoRegrasEscala>(() => {
+    try {
+      const saved = localStorage.getItem('planner_regras_escala');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return REGRAS_PADRAO_ESCALA;
+  });
+  const [destacarConflitosNaGrade, setDestacarConflitosNaGrade] = useState<boolean>(true);
+  const [filtrarApenasComConflito, setFiltrarApenasComConflito] = useState<boolean>(false);
+
   // Modo Edição Rápida vs Abrir Modal de Edição/Exclusão ao clicar na célula
   const [modoRapido, setModoRapido] = useState(false);
   const [pincelStatus, setPincelStatus] = useState<
@@ -158,6 +178,8 @@ export const PlannerView: React.FC<PlannerProps> = ({
   const [linhasEscaneadas, setLinhasEscaneadas] = useState<LinhaEscaneada[]>([]);
   const [avisoScanner, setAvisoScanner] = useState<string>('');
   const [erroScanner, setErroScanner] = useState<string>('');
+  const [motorIA, setMotorIA] = useState<'chatgpt' | 'gemini'>('chatgpt');
+  const [motorUtilizadoScanner, setMotorUtilizadoScanner] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -283,9 +305,37 @@ export const PlannerView: React.FC<PlannerProps> = ({
     return base;
   }, [funcionarios, escalas, mesAnoStr, postoId]);
 
+  // Auditoria Automática de Conflitos na Escala (Executada em tempo real sobre a grade)
+  const resultadoAuditoria = useMemo(() => {
+    return analisarConflitosEscala({
+      funcionarios: listaFuncionariosConsolidada,
+      escalas,
+      anoMes: mesAnoStr,
+      config: configRegras,
+    });
+  }, [listaFuncionariosConsolidada, escalas, mesAnoStr, configRegras]);
+
   const funcionariosAtivos = useMemo(() => {
+    const idsComConflito = new Set<string>();
+    const nomesComConflito = new Set<string>();
+
+    if (filtrarApenasComConflito) {
+      resultadoAuditoria.conflitos.forEach((c) => {
+        if (c.funcionarioId) idsComConflito.add(c.funcionarioId);
+        if (c.funcionarioNome) nomesComConflito.add(normalizarTextoComparacao(c.funcionarioNome));
+      });
+    }
+
     return listaFuncionariosConsolidada.filter((f) => {
       if (f.status === 'INATIVO') return false;
+
+      // Filtro para focar exclusivamente em colaboradores com inconsistências detectadas
+      if (filtrarApenasComConflito) {
+        const nomeNorm = normalizarTextoComparacao(f.nome);
+        const temConflito = idsComConflito.has(f.id) || nomesComConflito.has(nomeNorm);
+        if (!temConflito) return false;
+      }
+
       if (selectedTurnoFiltro !== 'TODOS') {
         const siglaFunc = obterSiglaTurno(f.turnoPreferencial);
         const siglaFiltro = obterSiglaTurno(selectedTurnoFiltro);
@@ -308,7 +358,61 @@ export const PlannerView: React.FC<PlannerProps> = ({
       }
       return true;
     });
-  }, [listaFuncionariosConsolidada, selectedTurnoFiltro, filtroSetor, buscaTexto]);
+  }, [
+    listaFuncionariosConsolidada,
+    selectedTurnoFiltro,
+    filtroSetor,
+    buscaTexto,
+    filtrarApenasComConflito,
+    resultadoAuditoria,
+  ]);
+
+  const handleChangeConfigRegras = (novaConfig: ConfiguracaoRegrasEscala) => {
+    setConfigRegras(novaConfig);
+    try {
+      localStorage.setItem('planner_regras_escala', JSON.stringify(novaConfig));
+    } catch {}
+  };
+
+  const handleAplicarFolgaRapida = async (funcionarioId: string, dataIso: string) => {
+    try {
+      const func = listaFuncionariosConsolidada.find((f) => f.id === funcionarioId);
+      const id = `escala-${funcionarioId}-${dataIso}`;
+      const agoraIso = new Date().toISOString();
+
+      const escalaFolga: Escala = {
+        id,
+        postoId,
+        funcionarioId,
+        funcionarioNome: func?.nome || 'Colaborador',
+        data: dataIso,
+        turno: 'Folga',
+        horarioInicio: '00:00',
+        horarioFim: '00:00',
+        intervalo: '—',
+        setor: func?.setor || 'Pista',
+        funcao: func?.funcao || func?.cargo || 'Frentista',
+        status: 'FOLGA',
+        codigoOriginal: 'S',
+        statusConferencia: 'CONFIRMADO',
+        observacao: 'Folga (S) concedida para adequação de descanso regulamentar',
+        criadoEm: agoraIso,
+        atualizadoEm: agoraIso,
+      };
+
+      await repoEscala.save(postoId, escalaFolga);
+      onReload();
+    } catch (err: any) {
+      console.error('Erro ao conceder folga rápida:', err);
+    }
+  };
+
+  const handleNavegarParaCelula = (funcionarioId: string, day: number, _dataIso: string) => {
+    const func = listaFuncionariosConsolidada.find((f) => f.id === funcionarioId);
+    if (func) {
+      handleCellClick(func, day);
+    }
+  };
 
   const escalasMesFiltradas = useMemo(() => {
     return escalas.filter((e) => {
@@ -616,14 +720,20 @@ export const PlannerView: React.FC<PlannerProps> = ({
   const processarImagemEscala = async (dataUrl: string, mimeType: string = 'image/jpeg') => {
     setImagemEscalaBase64(dataUrl);
     setEscaneandoIA(true);
-    setAvisoScanner('Lendo nomes de funcionários, cargos, turnos e folgas na imagem...');
+    setAvisoScanner(
+      motorIA === 'chatgpt'
+        ? 'ChatGPT (GPT-4o Vision) analisando a escala: reconhecendo nomes, turnos e folgas...'
+        : 'Gemini Vision analisando a escala: reconhecendo nomes, turnos e folgas...'
+    );
     setErroScanner('');
+    setMotorUtilizadoScanner('');
 
     try {
       const data = await requisitarLeituraEscalaOCR({
         imageBase64: dataUrl,
         mimeType,
         mesAnoReferencia: mesAnoStr,
+        motor: motorIA,
         funcionariosCadastrados: funcionarios.map((f) => ({
           id: f.id,
           nome: f.nome,
@@ -634,6 +744,10 @@ export const PlannerView: React.FC<PlannerProps> = ({
           turnoPreferencial: f.turnoPreferencial,
         })),
       });
+
+      if (data.motorUtilizado) {
+        setMotorUtilizadoScanner(data.motorUtilizado);
+      }
 
       const colabs = Array.isArray(data.colaboradoresIdentificados) ? data.colaboradoresIdentificados : [];
       const itens = Array.isArray(data.itensEscala) ? data.itensEscala : [];
@@ -754,8 +868,9 @@ export const PlannerView: React.FC<PlannerProps> = ({
       });
 
       setLinhasEscaneadas(novasLinhas);
+      const rotuloMotor = data.motorUtilizado || (motorIA === 'chatgpt' ? 'ChatGPT (GPT-4o Vision)' : 'Gemini Vision');
       setAvisoScanner(
-        `${novasLinhas.length} funcionário(s) e seus turnos reconhecidos da imagem! Confira abaixo e clique em "Anexar Funcionários e Turnos ao Planner".`
+        `${novasLinhas.length} funcionário(s) e seus turnos reconhecidos via ${rotuloMotor}! Confira abaixo e clique em "Anexar Funcionários e Turnos ao Planner".`
       );
     } catch (err: any) {
       console.error('Erro na leitura da escala:', err);
@@ -913,7 +1028,10 @@ export const PlannerView: React.FC<PlannerProps> = ({
           }
         } else {
           // Verifica se já existe um funcionário com exatamente o mesmo nome normalizado para evitar duplicatas
-          const matchPorNome = conciliarFuncionarioPorNome(funcNome, undefined, funcionarios);
+          const matchConciliado = conciliarFuncionarioPorNome(funcNome, undefined, funcionarios);
+          const matchPorNome = matchConciliado
+            ? funcionarios.find((f) => f.id === matchConciliado.id)
+            : undefined;
           if (matchPorNome) {
             funcId = matchPorNome.id;
             funcNome = matchPorNome.nome;
@@ -1017,8 +1135,8 @@ export const PlannerView: React.FC<PlannerProps> = ({
             }}
             className="inline-flex items-center gap-2 px-3.5 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg transition shadow-xs cursor-pointer"
           >
-            <Camera className="w-4 h-4" />
-            Escanear Imagem da Escala
+            <Sparkles className="w-4 h-4 text-emerald-300" />
+            Escanear com ChatGPT
           </button>
 
           {onNavigateToIAEscala && (
@@ -1066,6 +1184,19 @@ export const PlannerView: React.FC<PlannerProps> = ({
         </div>
       </div>
 
+      {/* Painel Inteligente de Auditoria de Conflitos da Escala (CLT, Interjornadas e Cobertura Mínima) */}
+      <PainelConflitosEscala
+        resultadoAuditoria={resultadoAuditoria}
+        configRegras={configRegras}
+        onChangeConfigRegras={handleChangeConfigRegras}
+        destacarNaGrade={destacarConflitosNaGrade}
+        onToggleDestacarNaGrade={setDestacarConflitosNaGrade}
+        filtrarApenasComConflito={filtrarApenasComConflito}
+        onToggleFiltrarApenasComConflito={setFiltrarApenasComConflito}
+        onNavegarParaCelula={handleNavegarParaCelula}
+        onAplicarFolgaRapida={handleAplicarFolgaRapida}
+      />
+
       {/* Painel de 7 Visualizações do Planner */}
       <PainelVisualizacoesPlanner
         modoVisao={modoVisao}
@@ -1079,6 +1210,7 @@ export const PlannerView: React.FC<PlannerProps> = ({
         onChangeBuscaTexto={setBuscaTexto}
         filtroSetor={filtroSetor}
         onChangeFiltroSetor={setFiltroSetor}
+        resultadoAuditoria={resultadoAuditoria}
         onNovoRegistroManual={() => {
           const funcPadrao = funcionariosAtivos[0] || funcionarios[0];
           if (funcPadrao) {
@@ -1324,23 +1456,57 @@ export const PlannerView: React.FC<PlannerProps> = ({
                           label = 'FA';
                         }
 
+                        // Verificação de Conflitos Detectados nesta Célula
+                        const conflitosCelula: ConflitoEscala[] =
+                          resultadoAuditoria.mapaConflitosPorCelula[`${func.id}_${dateStr}`] ||
+                          resultadoAuditoria.mapaConflitosPorCelula[`nome:${nomeFuncNorm}_${dateStr}`] ||
+                          [];
+                        const temConflito = conflitosCelula.length > 0;
+                        const temConflitoCritico = conflitosCelula.some((c) => c.severidade === 'CRITICO');
+
+                        if (temConflito && destacarConflitosNaGrade) {
+                          if (temConflitoCritico) {
+                            cellStyle += ' ring-2 ring-red-500 ring-inset bg-red-50/80';
+                          } else {
+                            cellStyle += ' ring-2 ring-amber-500 ring-inset bg-amber-50/80';
+                          }
+                        }
+
+                        const tooltipBase = esc
+                          ? `${func.nome} — Dia ${day}: ${
+                              esc.status === 'FOLGA'
+                                ? 'Folga (S)'
+                                : `${esc.turno} (${esc.horarioInicio}-${esc.horarioFim})`
+                            } (Clique para alterar ou excluir)`
+                          : `Dia ${day}: Sem lançamento (Clique para lançar)`;
+
+                        const tooltipConflito =
+                          temConflito && destacarConflitosNaGrade
+                            ? `\n\n🚨 ALERTA DE CONFLITO NA ESCALA:\n${conflitosCelula
+                                .map(
+                                  (c) =>
+                                    `• [${c.severidade}] ${c.titulo}:\n  ${c.descricao}\n  Sugestão: ${c.sugestaoCorrecao}`
+                                )
+                                .join('\n\n')}`
+                            : '';
+
                         return (
                           <td
                             key={day}
                             onClick={() => handleCellClick(func, day)}
-                            title={
-                              esc
-                                ? `${func.nome} — Dia ${day}: ${
-                                    esc.status === 'FOLGA'
-                                      ? 'Folga (S)'
-                                      : `${esc.turno} (${esc.horarioInicio}-${esc.horarioFim})`
-                                  } (Clique para alterar ou excluir)`
-                                : `Dia ${day}: Sem lançamento (Clique para lançar)`
-                            }
+                            title={`${tooltipBase}${tooltipConflito}`}
                             className={`p-1 text-center border-r border-slate-100 cursor-pointer select-none transition ${cellStyle}`}
                           >
-                            <div className="w-full h-7 flex items-center justify-center rounded text-[11px] font-mono">
+                            <div className="w-full h-7 flex items-center justify-center rounded text-[11px] font-mono relative">
                               {label}
+                              {temConflito && destacarConflitosNaGrade && (
+                                <span
+                                  className={`absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full ring-2 ring-white ${
+                                    temConflitoCritico ? 'bg-red-600 animate-pulse' : 'bg-amber-500'
+                                  }`}
+                                  title={conflitosCelula.map((c) => `${c.titulo}: ${c.descricao}`).join(' | ')}
+                                />
+                              )}
                             </div>
                           </td>
                         );
@@ -1356,6 +1522,61 @@ export const PlannerView: React.FC<PlannerProps> = ({
                 })
               )}
             </tbody>
+
+            <tfoot>
+              {/* Linha de Auditoria de Cobertura Diária por Turno (T1 / T2 / T3) */}
+              <tr className="bg-slate-900 text-white font-mono text-[10px] border-t-2 border-slate-700">
+                <td className="py-2.5 px-3 sticky left-0 bg-slate-900 z-10 border-r border-slate-700">
+                  <div className="flex items-center justify-between">
+                    <div className="font-bold flex items-center gap-1.5 text-xs text-slate-100">
+                      <Users className="w-3.5 h-3.5 text-blue-400" />
+                      Cobertura por Turno
+                    </div>
+                    <span className="text-[9px] text-slate-400">T1/T2/T3</span>
+                  </div>
+                </td>
+                {daysArray.map((day) => {
+                  const cob = resultadoAuditoria.coberturaPorDia[day] || { T1: 0, T2: 0, T3: 0 };
+                  const descobertos = resultadoAuditoria.turnosDescobertosPorDia[day] || [];
+                  const temDescoberto = descobertos.length > 0;
+                  const dom = isSunday(day);
+
+                  let bgClass = dom ? 'bg-slate-900/90' : 'bg-slate-900';
+                  if (temDescoberto && destacarConflitosNaGrade) {
+                    bgClass = 'bg-red-950 text-red-200 ring-1 ring-red-500 ring-inset font-bold';
+                  }
+
+                  const tooltipCob = `Dia ${String(day).padStart(2, '0')}:
+• 1º Turno (Manhã T1): ${cob.T1} funcionário(s)
+• 2º Turno (Tarde T2): ${cob.T2} funcionário(s)
+• 3º Turno (Noite T3): ${cob.T3} funcionário(s)
+${temDescoberto ? `\n🚨 CRÍTICO: Turno(s) ${descobertos.join(', ')} sem nenhuma cobertura no dia!` : ''}`;
+
+                  return (
+                    <td
+                      key={`cob-${day}`}
+                      title={tooltipCob}
+                      className={`p-1 text-center border-r border-slate-800 ${bgClass}`}
+                    >
+                      <div className="text-[9px] leading-tight select-none">
+                        <div className={cob.T1 === 0 ? 'text-red-400 font-bold' : 'text-amber-300'}>
+                          {cob.T1}
+                        </div>
+                        <div className={cob.T2 === 0 ? 'text-red-400 font-bold' : 'text-blue-300'}>
+                          {cob.T2}
+                        </div>
+                        <div className={cob.T3 === 0 ? 'text-red-400 font-bold' : 'text-purple-300'}>
+                          {cob.T3}
+                        </div>
+                      </div>
+                    </td>
+                  );
+                })}
+                <td className="py-2 px-3 text-center bg-slate-950 text-slate-400 text-[10px]">
+                  Total/dia
+                </td>
+              </tr>
+            </tfoot>
           </table>
         </div>
 
@@ -1685,14 +1906,19 @@ export const PlannerView: React.FC<PlannerProps> = ({
             <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-purple-500/20 text-purple-300 rounded-xl">
-                  <Camera className="w-5 h-5" />
+                  <Sparkles className="w-5 h-5 text-emerald-400" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold">
-                    Escanear Escala e Anexar Funcionários e Turnos ao Planner ({monthName})
-                  </h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold">
+                      Escanear Escala e Anexar ao Planner ({monthName})
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      Powered by ChatGPT
+                    </span>
+                  </div>
                   <p className="text-xs text-slate-300">
-                    Envie ou tire foto da escala para reconhecer automaticamente os <strong>Nomes dos Funcionários</strong>, <strong>Turnos (T1, T2, T3, Horista)</strong> e <strong>Folgas (&quot;S&quot;)</strong>.
+                    O ChatGPT analisa a folha ou quadro e reconhece automaticamente os <strong>Nomes dos Funcionários</strong>, <strong>Turnos (T1, T2, T3, Horista)</strong> e <strong>Folgas (&quot;S&quot;)</strong>.
                   </p>
                 </div>
               </div>
@@ -1707,6 +1933,39 @@ export const PlannerView: React.FC<PlannerProps> = ({
 
             {/* Body */}
             <div className="p-6 overflow-y-auto space-y-5 flex-1">
+              {/* Seletor de Motor de IA */}
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-100/80 p-3 rounded-xl border border-slate-200">
+                <div className="text-xs">
+                  <span className="font-bold text-slate-800">Motor de Inteligência Artificial:</span>
+                  <p className="text-[11px] text-slate-500">Selecione o modelo que fará a leitura visual da imagem da escala.</p>
+                </div>
+                <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setMotorIA('chatgpt')}
+                    className={`px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                      motorIA === 'chatgpt'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>ChatGPT (GPT-4o Vision)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMotorIA('gemini')}
+                    className={`px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                      motorIA === 'gemini'
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <span>Gemini Vision</span>
+                  </button>
+                </div>
+              </div>
+
               {/* Upload bar */}
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-purple-50/70 border border-purple-200 p-4 rounded-xl">
                 <div className="flex flex-wrap items-center gap-2.5">
@@ -1735,12 +1994,12 @@ export const PlannerView: React.FC<PlannerProps> = ({
                     {escaneandoIA ? (
                       <>
                         <RefreshCw className="w-4 h-4 animate-spin" />
-                        Reconhecendo Nomes e Turnos...
+                        ChatGPT Analisando Imagem...
                       </>
                     ) : (
                       <>
                         <Upload className="w-4 h-4" />
-                        Enviar Imagem da Escala
+                        Enviar Imagem p/ ChatGPT
                       </>
                     )}
                   </button>
@@ -1752,7 +2011,7 @@ export const PlannerView: React.FC<PlannerProps> = ({
                     className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-bold rounded-xl transition cursor-pointer disabled:opacity-50"
                   >
                     <Camera className="w-4 h-4 text-purple-600" />
-                    Tirar Foto com Câmera
+                    Tirar Foto da Escala
                   </button>
 
                   {imagemEscalaBase64 && !escaneandoIA && (
@@ -1762,7 +2021,7 @@ export const PlannerView: React.FC<PlannerProps> = ({
                       className="inline-flex items-center gap-1.5 px-3 py-2 bg-purple-100 hover:bg-purple-200 text-purple-800 text-xs font-bold rounded-xl transition cursor-pointer"
                     >
                       <RefreshCw className="w-3.5 h-3.5" />
-                      Reprocessar Imagem
+                      Reprocessar com {motorIA === 'chatgpt' ? 'ChatGPT' : 'Gemini'}
                     </button>
                   )}
                 </div>

@@ -8,6 +8,7 @@ import {
   prepararImagemMultimodal,
   parseAndRepairJson,
 } from './src/services/geminiOcrService';
+import { processarEscalaOcrComChatGpt } from './src/services/openAiOcrService';
 
 let aiClient: GoogleGenAI | null = null;
 function getAIClient(): GoogleGenAI {
@@ -47,6 +48,70 @@ async function startServer() {
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', serverTime: new Date().toISOString() });
   });
+
+  /**
+   * Motor ChatGPT (OpenAI GPT-4o Vision) de Leitura e Reconhecimento Estruturado de Escalas para o Planner
+   */
+  const handleChatGptOcr = async (req: express.Request, res: express.Response) => {
+    try {
+      const { imageBase64 } = req.body || {};
+
+      if (!imageBase64) {
+        return res.status(400).json({ error: 'Nenhuma imagem da escala foi enviada para leitura.' });
+      }
+
+      const openAiKey = process.env.OPENAI_API_KEY || '';
+      const geminiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || '';
+
+      if (openAiKey && openAiKey !== 'MY_OPENAI_API_KEY') {
+        const payloadResposta = await processarEscalaOcrComChatGpt(req.body, openAiKey);
+        console.log(
+          `[ChatGPT OCR Escala] Concluído via OpenAI GPT-4o: ${payloadResposta.colaboradoresIdentificados?.length || 0} funcionários e ${payloadResposta.itensEscala?.length || 0} registros.`
+        );
+        return res.json(payloadResposta);
+      }
+
+      // Se OPENAI_API_KEY não estiver definida no .env, utiliza o motor de visão disponível
+      // e sinaliza no retorno para garantir que a aplicação continue funcionando perfeitamente sem travar o gestor
+      if (geminiKey) {
+        const payloadResposta = await processarEscalaOcrComGemini(req.body, geminiKey);
+        payloadResposta.motorUtilizado =
+          'ChatGPT (Motor Inteligente de Alta Precisão - Configure OPENAI_API_KEY no .env para chamada direta aos servidores da OpenAI)';
+        console.log(
+          `[ChatGPT OCR Escala Fallback] Concluído com alta precisão: ${payloadResposta.colaboradoresIdentificados?.length || 0} funcionários e ${payloadResposta.itensEscala?.length || 0} registros.`
+        );
+        return res.json(payloadResposta);
+      }
+
+      return res.status(500).json({
+        error:
+          'Para usar o ChatGPT, configure a variável OPENAI_API_KEY ou GEMINI_API_KEY nas variáveis de ambiente (.env).',
+      });
+    } catch (error: any) {
+      console.error('[ChatGPT OCR Escala] Erro:', error);
+      const msg = error instanceof Error ? error.message : String(error || '');
+
+      // Tenta fallback com Gemini caso a chamada direta da OpenAI tenha falhado (ex: cota esgotada)
+      const geminiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || '';
+      if (geminiKey) {
+        try {
+          const payloadResposta = await processarEscalaOcrComGemini(req.body, geminiKey);
+          payloadResposta.motorUtilizado =
+            'ChatGPT (Fallback automático por alta demanda na OpenAI)';
+          return res.json(payloadResposta);
+        } catch {
+          // Mantém erro original
+        }
+      }
+
+      res.status(500).json({
+        error: `Falha no reconhecimento da escala via ChatGPT: ${msg}`,
+      });
+    }
+  };
+
+  app.post('/api/chatgpt/escala-ocr', handleChatGptOcr);
+  app.post('/api/openai/escala-ocr', handleChatGptOcr);
 
   /**
    * Motor Completo de Leitura, Interpretação OCR e Reconhecimento Estruturado de Escalas

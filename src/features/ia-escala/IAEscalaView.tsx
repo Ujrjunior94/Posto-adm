@@ -405,6 +405,8 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
   const [salvandoNoPlanner, setSalvandoNoPlanner] = useState(false);
   const [sucessoSalvo, setSucessoSalvo] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [motorIA, setMotorIA] = useState<'chatgpt' | 'gemini'>('chatgpt');
+  const [motorUtilizadoResposta, setMotorUtilizadoResposta] = useState<string>('');
 
   // Filtros e Modo de Visualização da Escala
   const [modoVisualizacao, setModoVisualizacao] = useState<'GRADE' | 'TABELA'>('GRADE');
@@ -661,9 +663,14 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
     if (!baseImg) return;
 
     setProcessando(true);
-    setMensagemStatus('1/3 Carregando, otimizando nitidez/alinhamento e enviando imagem da escala para leitura OCR...');
+    setMensagemStatus(
+      motorIA === 'chatgpt'
+        ? '1/3 Enviando imagem da escala para leitura visual com ChatGPT (OpenAI GPT-4o)...'
+        : '1/3 Otimizando nitidez e enviando imagem da escala para leitura visual com Gemini...'
+    );
     setErroProcessamento('');
     setSucessoSalvo(false);
+    setMotorUtilizadoResposta('');
 
     try {
       const imagemParaEnviar =
@@ -673,6 +680,7 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
         imageBase64: imagemParaEnviar,
         mimeType: imagemMimeType || 'image/jpeg',
         mesAnoReferencia,
+        motor: motorIA,
         funcionariosCadastrados: funcionarios.map((f) => ({
           id: f.id,
           nome: f.nome,
@@ -682,6 +690,10 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
           setor: f.setor,
         })),
       });
+
+      if (data.motorUtilizado) {
+        setMotorUtilizadoResposta(data.motorUtilizado);
+      }
 
       setMensagemStatus('2/3 Processando resposta estruturada e validando campos do JSON...');
       setTituloDocumento(String(data.tituloEscala || 'Escala Operacional de Trabalho').trim());
@@ -849,8 +861,12 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
       });
 
       setItensEscala(itens);
+      const rotuloMotor =
+        data.motorUtilizado ||
+        motorUtilizadoResposta ||
+        (motorIA === 'chatgpt' ? 'ChatGPT (OpenAI GPT-4o)' : 'Gemini Vision');
       setMensagemStatus(
-        `3/3 Leitura e validação JSON concluídas! ${detectados.length} funcionário(s) e ${itens.length} registro(s) extraídos com fidelidade da imagem.`
+        `3/3 Leitura concluída via ${rotuloMotor}! ${detectados.length} funcionário(s) e ${itens.length} registro(s) extraídos com fidelidade para o Planner.`
       );
     } catch (err: any) {
       console.error('Erro no reconhecimento da imagem da escala:', err);
@@ -1915,6 +1931,39 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
               )}
             </div>
 
+            {/* Seletor de Motor de IA */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-100/90 p-3 rounded-xl border border-slate-200">
+              <div className="text-xs">
+                <span className="font-bold text-slate-800">Motor de Leitura OCR:</span>
+                <p className="text-[11px] text-slate-500">Escolha o modelo de IA que interpretará a foto da folha ou quadro.</p>
+              </div>
+              <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setMotorIA('chatgpt')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                    motorIA === 'chatgpt'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>ChatGPT (OpenAI GPT-4o)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMotorIA('gemini')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                    motorIA === 'gemini'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <span>Gemini Vision</span>
+                </button>
+              </div>
+            </div>
+
             {/* Botão de Ação Primária de Reconhecimento */}
             {imagemPreview && !sucessoSalvo && (
               <button
@@ -1925,12 +1974,12 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
                 {processando ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    Processando com Gemini 3.8 Flash...
+                    Processando com {motorIA === 'chatgpt' ? 'ChatGPT (GPT-4o Vision)...' : 'Gemini Vision...'}
                   </>
                 ) : (
                   <>
-                    <Sparkles className="w-4 h-4" />
-                    Reconhecer Funcionários e Escala
+                    <Sparkles className="w-4 h-4 text-emerald-300" />
+                    Reconhecer com {motorIA === 'chatgpt' ? 'ChatGPT (OpenAI GPT-4o)' : 'Gemini Vision'}
                   </>
                 )}
               </button>

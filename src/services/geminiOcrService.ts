@@ -307,6 +307,7 @@ export interface EscalaOcrRequestPayload {
   imageBase64: string;
   mimeType?: string;
   mesAnoReferencia?: string;
+  motor?: 'chatgpt' | 'gemini';
   funcionariosCadastrados?: Array<{
     id: string;
     nome: string;
@@ -770,6 +771,30 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido seguindo exatamente esta estrutura
     throw ultimoErro || new Error('Não foi possível obter resposta estruturada do modelo de visão.');
   }
 
+  return estruturarRespostaEscalaOcr(parsed, payload, 'Gemini Vision');
+}
+
+/**
+ * Normaliza e estrutura a resposta extraída do modelo de IA (ChatGPT ou Gemini)
+ * garantindo conciliação fiel com funcionários, turnos oficiais, folgas e expansão mensal.
+ */
+export function estruturarRespostaEscalaOcr(
+  parsed: any,
+  payload: EscalaOcrRequestPayload,
+  motorUtilizado = 'ChatGPT (OpenAI)'
+): any {
+  const { funcionariosCadastrados = [], mesAnoReferencia } = payload;
+
+  const anoMesAtual =
+    mesAnoReferencia && /^\d{4}-\d{2}$/.test(mesAnoReferencia)
+      ? mesAnoReferencia
+      : `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+  const [anoStr, mesStr] = anoMesAtual.split('-');
+  const anoNum = parseInt(anoStr, 10) || new Date().getFullYear();
+  const mesNum = parseInt(mesStr, 10) || new Date().getMonth() + 1;
+  const diasNoMes = new Date(anoNum, mesNum, 0).getDate();
+  const listaFuncs = Array.isArray(funcionariosCadastrados) ? funcionariosCadastrados : [];
+
   const mapaDiaSemanaIndice: Record<string, number> = {
     DOM: 0,
     DOMINGO: 0,
@@ -1193,6 +1218,7 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido seguindo exatamente esta estrutura
     colaboradoresIdentificados,
     itensEscala,
     conflitosDetectados,
+    motorUtilizado,
     validacaoJson: {
       sintaxeValida: true,
       stringsFechadas: true,
@@ -1207,7 +1233,7 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido seguindo exatamente esta estrutura
 /**
  * Cliente resiliente multi-ambiente para OCR de Escalas:
  * 1. Otimiza/comprime a imagem no cliente para envio rápido
- * 2. Tenta o endpoint `/api/gemini/escala-ocr` (Express ou Vercel Serverless Function)
+ * 2. Tenta o endpoint do ChatGPT (/api/chatgpt/escala-ocr) ou Gemini (/api/gemini/escala-ocr)
  * 3. Caso a chave Gemini esteja disponível no cliente, executa diretamente via SDK `@google/genai`
  * 4. Tenta os endpoints Cloud Run de fallback
  */
@@ -1224,31 +1250,38 @@ export async function requisitarLeituraEscalaOCR(payload: EscalaOcrRequestPayloa
 
   let ultimoErro = '';
 
-  // 1. Tenta rota local /api/gemini/escala-ocr
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 28000);
-    const response = await fetch('/api/gemini/escala-ocr', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(optimizedPayload),
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
+  const preferirChatGpt = payload.motor !== 'gemini';
+  const endpoints = preferirChatGpt
+    ? ['/api/chatgpt/escala-ocr', '/api/gemini/escala-ocr']
+    : ['/api/gemini/escala-ocr', '/api/chatgpt/escala-ocr'];
 
-    if (response.ok) {
-      const rawText = await response.text();
-      const data = parseAndRepairJson(rawText);
-      if (data && (Array.isArray(data.itensEscala) || Array.isArray(data.colaboradoresIdentificados))) {
-        return data;
+  // 1. Tenta endpoints do servidor local (ChatGPT ou Gemini)
+  for (const endpoint of endpoints) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 32000);
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(optimizedPayload),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+
+      if (response.ok) {
+        const rawText = await response.text();
+        const data = parseAndRepairJson(rawText);
+        if (data && (Array.isArray(data.itensEscala) || Array.isArray(data.colaboradoresIdentificados))) {
+          return data;
+        }
+      } else {
+        const errText = await response.text().catch(() => '');
+        const errJson = parseAndRepairJson(errText);
+        ultimoErro = errJson?.error || `Erro HTTP ${response.status} em ${endpoint}`;
       }
-    } else {
-      const errText = await response.text().catch(() => '');
-      const errJson = parseAndRepairJson(errText);
-      ultimoErro = errJson?.error || `Erro HTTP ${response.status}`;
+    } catch (err: any) {
+      ultimoErro = err?.message || `Falha na chamada ao endpoint ${endpoint}`;
     }
-  } catch (err: any) {
-    ultimoErro = err?.message || 'Falha na chamada local de OCR';
   }
 
   // 2. Execução direta via SDK @google/genai caso a chave tenha sido injetada no build
