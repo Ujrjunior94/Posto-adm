@@ -11,7 +11,7 @@ import {
 import {
   construirPromptAnaliseANP,
   gerarParecerLocalANP,
-} from './src/services/chatGptCalculadoraAnpService';
+} from './src/services/geminiCalculadoraAnpService';
 
 let aiClient: GoogleGenAI | null = null;
 function getAIClient(): GoogleGenAI {
@@ -87,8 +87,6 @@ async function startServer() {
   };
 
   app.post('/api/gemini/escala-ocr', handleGeminiEscalaOcr);
-  app.post('/api/chatgpt/escala-ocr', handleGeminiEscalaOcr);
-  app.post('/api/openai/escala-ocr', handleGeminiEscalaOcr);
 
   /**
    * Motor Google Gemini 3.8 Flash para Auditoria e Parecer de Conformidade ANP (Padrões Agosto de 2026)
@@ -126,7 +124,6 @@ async function startServer() {
   };
 
   app.post('/api/gemini/analise-anp', handleAnaliseAnp);
-  app.post('/api/chatgpt/analise-anp', handleAnaliseAnp);
 
   /**
    * Scanner / OCR de Laudos e Provetas ANP com Google Gemini Vision
@@ -203,7 +200,6 @@ Retorne EXCLUSIVAMENTE um JSON:
   };
 
   app.post('/api/gemini/laudo-ocr', handleLaudoOcr);
-  app.post('/api/chatgpt/laudo-ocr', handleLaudoOcr);
 
   /**
    * Motor Completo de Leitura, Interpretação OCR e Reconhecimento Estruturado de Escalas

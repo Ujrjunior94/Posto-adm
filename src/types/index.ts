@@ -401,7 +401,7 @@ export interface RegistroDensidade {
   compartimento?: string;
   lacreConferido?: boolean;
   parecerTecnico?: string;
-  parecerChatGPT?: string;
+  parecerGemini?: string;
   motorIaUtilizado?: string;
   densidadeNfKgM3?: number;
   densidadeProvetaKgM3?: number;

@@ -307,7 +307,7 @@ export interface EscalaOcrRequestPayload {
   imageBase64: string;
   mimeType?: string;
   mesAnoReferencia?: string;
-  motor?: 'chatgpt' | 'gemini';
+  motor?: 'gemini';
   funcionariosCadastrados?: Array<{
     id: string;
     nome: string;
@@ -1229,9 +1229,9 @@ export function estruturarRespostaEscalaOcr(
 }
 
 /**
- * Cliente resiliente multi-ambiente para OCR de Escalas:
+ * Cliente resiliente multi-ambiente para OCR de Escalas via Google Gemini:
  * 1. Otimiza/comprime a imagem no cliente para envio rápido
- * 2. Tenta o endpoint do ChatGPT (/api/chatgpt/escala-ocr) ou Gemini (/api/gemini/escala-ocr)
+ * 2. Envia para o endpoint do Google Gemini (/api/gemini/escala-ocr)
  * 3. Caso a chave Gemini esteja disponível no cliente, executa diretamente via SDK `@google/genai`
  * 4. Tenta os endpoints Cloud Run de fallback
  */
@@ -1248,7 +1248,7 @@ export async function requisitarLeituraEscalaOCR(payload: EscalaOcrRequestPayloa
 
   let ultimoErro = '';
 
-  const endpoints = ['/api/gemini/escala-ocr', '/api/chatgpt/escala-ocr'];
+  const endpoints = ['/api/gemini/escala-ocr'];
 
   // 1. Tenta endpoint do servidor local (Google Gemini)
   for (const endpoint of endpoints) {

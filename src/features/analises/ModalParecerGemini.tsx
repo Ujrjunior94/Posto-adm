@@ -1,5 +1,5 @@
 import React from 'react';
-import { ParecerTecnicoGemini } from '../../services/chatGptCalculadoraAnpService';
+import { ParecerTecnicoGemini } from '../../services/geminiCalculadoraAnpService';
 import {
   X,
   CheckCircle2,
@@ -277,6 +277,3 @@ ${parecer.embasamentoLegal.join('; ')}
     </div>
   );
 };
-
-/** Alias para compatibilidade */
-export const ModalParecerChatGPT = ModalParecerGemini;

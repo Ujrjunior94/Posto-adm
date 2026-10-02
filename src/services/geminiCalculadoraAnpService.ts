@@ -54,9 +54,6 @@ export interface ParecerTecnicoGemini {
   timestamp: string;
 }
 
-/** Alias para compatibilidade com código existente */
-export type ParecerTecnicoChatGPT = ParecerTecnicoGemini;
-
 export interface ResultadoOcrLaudoANP {
   produtoDetectado?: string;
   temperatura?: number;
@@ -151,35 +148,28 @@ RETORNE EXCLUSIVAMENTE UM OBJETO JSON VÁLIDO no seguinte formato (sem markdown 
 export async function requisitarAnaliseCombustivelGemini(
   dados: SolicitacaoAnaliseANP
 ): Promise<ParecerTecnicoGemini> {
-  const endpoints = ['/api/gemini/analise-anp', '/api/chatgpt/analise-anp'];
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 28000);
+    const response = await fetch('/api/gemini/analise-anp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(dados),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
 
-  for (const endpoint of endpoints) {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 28000);
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(dados),
-        signal: controller.signal,
-      });
-      clearTimeout(timer);
-
-      if (response.ok) {
-        const json = await response.json();
-        return json;
-      }
-    } catch (err) {
-      console.warn(`[Gemini Analise ANP] Erro em ${endpoint}:`, err);
+    if (response.ok) {
+      const json = await response.json();
+      return json;
     }
+  } catch (err) {
+    console.warn('[Gemini Analise ANP] Erro na requisição:', err);
   }
 
   // Fallback determinístico de alta precisão caso o servidor local esteja off-line
   return gerarParecerLocalANP(dados);
 }
-
-/** Alias para compatibilidade */
-export const requisitarAnaliseCombustivelChatGPT = requisitarAnaliseCombustivelGemini;
 
 /**
  * Gera parecer técnico metrológico local alinhado rigorosamente aos Padrões ANP de Agosto de 2026
@@ -379,26 +369,22 @@ export async function escanearLaudoCombustivelGemini(
     img = compressed.dataUrl;
   }
 
-  const endpoints = ['/api/gemini/laudo-ocr', '/api/chatgpt/laudo-ocr'];
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 28000);
+    const resp = await fetch('/api/gemini/laudo-ocr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageBase64: img, mimeType }),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
 
-  for (const endpoint of endpoints) {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 28000);
-      const resp = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: img, mimeType }),
-        signal: controller.signal,
-      });
-      clearTimeout(timer);
-
-      if (resp.ok) {
-        return await resp.json();
-      }
-    } catch (e) {
-      console.warn(`[Gemini OCR Laudo] Erro em ${endpoint}:`, e);
+    if (resp.ok) {
+      return await resp.json();
     }
+  } catch (e) {
+    console.warn('[Gemini OCR Laudo] Erro na requisição:', e);
   }
 
   return {
@@ -412,6 +398,3 @@ export async function escanearLaudoCombustivelGemini(
     motorUtilizado: 'Google Gemini 3.8 Flash Vision',
   };
 }
-
-/** Alias para compatibilidade */
-export const escanearLaudoCombustivelChatGPT = escanearLaudoCombustivelGemini;

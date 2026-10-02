@@ -195,6 +195,3 @@ export const ModalScannerLaudoGemini: React.FC<ModalScannerLaudoGeminiProps> = (
     </div>
   );
 };
-
-/** Alias para compatibilidade */
-export const ModalScannerLaudoChatGPT = ModalScannerLaudoGemini;
