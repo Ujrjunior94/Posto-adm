@@ -10,6 +10,7 @@ import {
 import { PostoSubcollectionRepository, registrarAuditoria } from '../../repositories/firestoreRepository';
 import { useAuth } from '../../contexts/AuthContext';
 import { PainelConferenciaEscalaOCR, ItemConferenciaOCR } from './PainelConferenciaEscalaOCR';
+import { requisitarLeituraEscalaOCR } from '../../services/geminiOcrService';
 import {
   Sparkles,
   Camera,
@@ -668,40 +669,19 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
       const imagemParaEnviar =
         imagemPreview || (await processarImagemCanvas(baseImg, rotacao + inclinacaoFina, filtroAtivo));
 
-      const response = await fetch('/api/gemini/escala-ocr', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          imageBase64: imagemParaEnviar,
-          mimeType: imagemMimeType || 'image/jpeg',
-          mesAnoReferencia,
-          funcionariosCadastrados: funcionarios.map((f) => ({
-            id: f.id,
-            nome: f.nome,
-            matricula: f.matricula,
-            cargo: f.cargo,
-            funcao: f.funcao,
-            setor: f.setor,
-          })),
-        }),
+      const data = await requisitarLeituraEscalaOCR({
+        imageBase64: imagemParaEnviar,
+        mimeType: imagemMimeType || 'image/jpeg',
+        mesAnoReferencia,
+        funcionariosCadastrados: funcionarios.map((f) => ({
+          id: f.id,
+          nome: f.nome,
+          matricula: f.matricula,
+          cargo: f.cargo,
+          funcao: f.funcao,
+          setor: f.setor,
+        })),
       });
-
-      const rawResponseText = await response.text();
-      let data: any = {};
-      try {
-        data = rawResponseText ? JSON.parse(rawResponseText) : {};
-      } catch {
-        const cleaned = rawResponseText
-          .trim()
-          .replace(/^```(?:json)?\s*/i, '')
-          .replace(/\s*```$/i, '')
-          .trim();
-        data = JSON.parse(cleaned || '{}');
-      }
-
-      if (!response.ok) {
-        throw new Error(data.error || `Erro HTTP ${response.status}`);
-      }
 
       setMensagemStatus('2/3 Processando resposta estruturada e validando campos do JSON...');
       setTituloDocumento(String(data.tituloEscala || 'Escala Operacional de Trabalho').trim());

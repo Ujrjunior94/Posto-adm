@@ -4,6 +4,7 @@ import { PostoSubcollectionRepository, registrarAuditoria } from '../../reposito
 import { useAuth } from '../../contexts/AuthContext';
 import { calcularAfericao, TOLERANCIA_DESVIO_PADRAO_L } from '../../utils/calculations';
 import { PRECOS_PADRAO_COMBUSTIVEL, formatarPrecoLitro } from '../../utils/pricing';
+import { requisitarLeituraAfericaoOCR } from '../../services/geminiOcrService';
 import {
   Camera,
   Upload,
@@ -386,32 +387,23 @@ export const PainelCadastroERelatorioFoto: React.FC<PainelCadastroERelatorioFoto
       const base64Comprimido = await comprimirImagemParaBase64(file, 720, 0.75);
       setFotoPreview(base64Comprimido);
 
-      const response = await fetch('/api/gemini/afericao-ocr', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          imageBase64: base64Comprimido,
-          mimeType: 'image/jpeg',
-          bicosCadastrados: bicos.map((b) => ({
-            id: b.id,
-            numero: b.numero,
-            bomba: b.bomba,
-            lado: b.lado,
-            produto: b.produto,
-            tanqueId: b.tanqueId,
-          })),
-          tanquesCadastrados: tanques.map((t) => ({
-            id: t.id,
-            codigo: t.codigo,
-            produto: t.produto,
-          })),
-        }),
+      const data = await requisitarLeituraAfericaoOCR({
+        imageBase64: base64Comprimido,
+        mimeType: 'image/jpeg',
+        bicosCadastrados: bicos.map((b) => ({
+          id: b.id,
+          numero: b.numero,
+          bomba: b.bomba,
+          lado: b.lado,
+          produto: b.produto,
+          tanqueId: b.tanqueId,
+        })),
+        tanquesCadastrados: tanques.map((t) => ({
+          id: t.id,
+          codigo: t.codigo,
+          produto: t.produto,
+        })),
       });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Falha ao ler informações da foto.');
-      }
 
       setResultadoFoto(data);
       setItensFotoEditaveis(
