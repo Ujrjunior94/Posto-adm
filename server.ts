@@ -16,7 +16,7 @@ import {
 let aiClient: GoogleGenAI | null = null;
 function getAIClient(): GoogleGenAI {
   if (!aiClient) {
-    const key = process.env.GEMINI_API_KEY;
+    const key = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || '';
     if (!key) {
       throw new Error('A chave de API GEMINI_API_KEY não está configurada no ambiente.');
     }
@@ -391,13 +391,10 @@ REGRAS DE EXTRAÇÃO:
 
       for (const model of modelosCandidatos) {
         try {
-          const modelConfig = model.startsWith('gemini-3')
-            ? { ...config, thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } }
-            : config;
           const response = await ai.models.generateContent({
             model,
             contents,
-            config: modelConfig,
+            config,
           });
           if (response && response.text) {
             const candidateParsed = parseAndRepairJson(response.text);

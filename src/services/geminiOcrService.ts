@@ -733,13 +733,10 @@ Retorne EXCLUSIVAMENTE um objeto JSON estruturado:
 
   for (const model of modelosCandidatos) {
     try {
-      const modelConfig = model.startsWith('gemini-3')
-        ? { ...baseConfig, thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } }
-        : baseConfig;
       const response = await ai.models.generateContent({
         model,
         contents,
-        config: modelConfig,
+        config: baseConfig,
       });
       if (response && response.text) {
         const candidateParsed = parseAndRepairJson(response.text);
