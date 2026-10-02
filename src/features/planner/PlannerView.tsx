@@ -4,17 +4,22 @@ import { PostoSubcollectionRepository, registrarAuditoria } from '../../reposito
 import { useAuth } from '../../contexts/AuthContext';
 import { PainelVisualizacoesPlanner, ModoVisaoPlanner } from './PainelVisualizacoesPlanner';
 import {
+  requisitarLeituraEscalaOCR,
+  normalizarTextoComparacao,
+  classificarTurnoEHorario,
+  normalizarTurnoPreferencialCadastro,
+  conciliarFuncionarioPorNome,
+} from '../../services/geminiOcrService';
+import {
   Calendar as CalendarIcon,
   ChevronLeft,
   ChevronRight,
-  Users,
   CheckCircle,
   Sparkles,
   Plus,
   Copy,
   Zap,
   Printer,
-  Download,
   Camera,
   Upload,
   Link2,
@@ -22,9 +27,7 @@ import {
   Edit2,
   X,
   RefreshCw,
-  UserPlus,
-  Check,
-  Clock,
+  AlertCircle,
 } from 'lucide-react';
 
 const repoEscala = new PostoSubcollectionRepository<Escala>('escalas');
@@ -48,12 +51,28 @@ const TURNOS_OFICIAIS = [
     corBadge: 'bg-blue-100 text-blue-900 border-blue-300',
   },
   {
+    id: 'Turno 3 - Noite (22h - 06h)',
+    sigla: 'T3',
+    nomeCurto: '3º Turno (Noite)',
+    inicio: '22:00',
+    fim: '06:00',
+    corBadge: 'bg-purple-100 text-purple-900 border-purple-300',
+  },
+  {
     id: 'Turno Horista',
     sigla: 'HOR',
     nomeCurto: 'Turno Horista',
     inicio: '08:00',
     fim: '14:00',
     corBadge: 'bg-teal-100 text-teal-900 border-teal-300',
+  },
+  {
+    id: 'Plantão',
+    sigla: 'PLT',
+    nomeCurto: 'Plantão 12x36',
+    inicio: '06:00',
+    fim: '18:00',
+    corBadge: 'bg-indigo-100 text-indigo-900 border-indigo-300',
   },
 ];
 
@@ -69,13 +88,20 @@ interface LinhaEscaneada {
   idTemp: string;
   nomeNaImagem: string;
   cargoSugerido: string;
+  setorSugerido: string;
+  turnoPrincipal: string;
+  siglaTurnoPrincipal: string;
+  horarioInicioPadrao: string;
+  horarioFimPadrao: string;
   funcionarioIdVinculado: string; // '' = criar novo funcionário
   dias: Record<
     number,
     {
       status: EscalaStatus;
       turno: string;
-      sigla: string; // 'T1', 'T2', 'HOR', 'S'
+      sigla: string; // 'T1', 'T2', 'T3', 'HOR', 'PLT', 'S', 'FE', 'AT'
+      horarioInicio: string;
+      horarioFim: string;
     }
   >;
 }
@@ -98,7 +124,7 @@ export const PlannerView: React.FC<PlannerProps> = ({
   // Modo Edição Rápida vs Abrir Modal de Edição/Exclusão ao clicar na célula
   const [modoRapido, setModoRapido] = useState(false);
   const [pincelStatus, setPincelStatus] = useState<
-    'T1_MANHA' | 'T2_TARDE' | 'HORISTA' | 'FOLGA' | 'FERIAS' | 'ATESTADO' | 'AUSENTE'
+    'T1_MANHA' | 'T2_TARDE' | 'T3_NOITE' | 'HORISTA' | 'FOLGA' | 'FERIAS' | 'ATESTADO' | 'AUSENTE'
   >('FOLGA');
 
   // Modal de edição/exclusão de célula individual da escala
@@ -131,7 +157,9 @@ export const PlannerView: React.FC<PlannerProps> = ({
   const [salvandoVinculo, setSalvandoVinculo] = useState(false);
   const [linhasEscaneadas, setLinhasEscaneadas] = useState<LinhaEscaneada[]>([]);
   const [avisoScanner, setAvisoScanner] = useState<string>('');
+  const [erroScanner, setErroScanner] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -168,20 +196,102 @@ export const PlannerView: React.FC<PlannerProps> = ({
     return new Date(year, month, day).getDay() === 0;
   };
 
-  // Mapa de escalas do mês
+  const obterSiglaTurno = (turno?: string, horarioInicio?: string) => {
+    const t = (turno || '').toLowerCase();
+    const h = (horarioInicio || '').trim();
+    if (t.includes('plantão') || t.includes('plantao') || t.includes('12x36') || t === 'plt') return 'PLT';
+    if (t.includes('horista') || t === 'hor' || t === 'h') return 'HOR';
+    if (t.includes('noite') || t.includes('turno 3') || t === 't3' || h.startsWith('22:') || h.startsWith('23:')) {
+      return 'T3';
+    }
+    if (
+      t.includes('turno 2') ||
+      t.includes('tarde') ||
+      t.includes('14h') ||
+      t === 't2' ||
+      h.startsWith('13:') ||
+      h.startsWith('14:') ||
+      h.startsWith('15:')
+    ) {
+      return 'T2';
+    }
+    return 'T1';
+  };
+
+  const obterHorarioPorTurno = (turno: string) => {
+    const of = TURNOS_OFICIAIS.find((t) => t.id === turno || t.sigla === turno);
+    if (of) return { inicio: of.inicio, fim: of.fim };
+    if (turno.includes('Plantão') || turno.includes('12x36')) return { inicio: '06:00', fim: '18:00' };
+    if (turno.includes('Horista')) return { inicio: '08:00', fim: '14:00' };
+    if (turno.includes('Noite') || turno.includes('Turno 3')) return { inicio: '22:00', fim: '06:00' };
+    if (turno.includes('Turno 2') || turno.includes('Tarde')) return { inicio: '14:00', fim: '22:00' };
+    return { inicio: '06:00', fim: '14:00' };
+  };
+
+  // Mapa de escalas do mês indexado tanto por ID quanto por nome normalizado (garante que nenhum turno anexado fique invisível)
   const escalaMap = useMemo(() => {
     const map: Record<string, Escala> = {};
     escalas.forEach((e) => {
-      map[`${e.funcionarioId}_${e.data}`] = e;
+      if (e.funcionarioId) {
+        map[`${e.funcionarioId}_${e.data}`] = e;
+      }
+      if (e.funcionarioNome) {
+        const nomeKey = normalizarTextoComparacao(e.funcionarioNome);
+        if (nomeKey) {
+          map[`nome:${nomeKey}_${e.data}`] = e;
+        }
+      }
     });
     return map;
   }, [escalas]);
 
+  // Combina os funcionários cadastrados com eventuais colaboradores que já possuem escala anexada neste mês
+  const listaFuncionariosConsolidada = useMemo(() => {
+    const base = [...funcionarios];
+    const idsVistos = new Set(base.map((f) => f.id));
+    const nomesVistos = new Set(base.map((f) => normalizarTextoComparacao(f.nome)));
+
+    escalas
+      .filter((e) => e.data && e.data.startsWith(mesAnoStr))
+      .forEach((e) => {
+        const nomeNorm = normalizarTextoComparacao(e.funcionarioNome);
+        if (!nomeNorm) return;
+        if ((e.funcionarioId && idsVistos.has(e.funcionarioId)) || nomesVistos.has(nomeNorm)) {
+          return;
+        }
+        const fId = e.funcionarioId || `func-escala-${nomeNorm.replace(/\s+/g, '-')}`;
+        idsVistos.add(fId);
+        nomesVistos.add(nomeNorm);
+        base.push({
+          id: fId,
+          postoId,
+          nome: e.funcionarioNome,
+          cpf: '000.000.000-00',
+          matricula: 'ESC-AUTO',
+          telefone: '',
+          cargo: e.funcao || 'Frentista',
+          funcao: e.funcao || 'Frentista',
+          setor: e.setor || 'Pista',
+          turnoPreferencial: normalizarTurnoPreferencialCadastro(e.turno, e.horarioInicio),
+          dataAdmissao: e.data,
+          status: 'ATIVO',
+          criadoEm: e.criadoEm || new Date().toISOString(),
+          atualizadoEm: e.atualizadoEm || new Date().toISOString(),
+        });
+      });
+
+    return base;
+  }, [funcionarios, escalas, mesAnoStr, postoId]);
+
   const funcionariosAtivos = useMemo(() => {
-    return funcionarios.filter((f) => {
+    return listaFuncionariosConsolidada.filter((f) => {
       if (f.status === 'INATIVO') return false;
-      if (selectedTurnoFiltro !== 'TODOS' && f.turnoPreferencial !== selectedTurnoFiltro) {
-        return false;
+      if (selectedTurnoFiltro !== 'TODOS') {
+        const siglaFunc = obterSiglaTurno(f.turnoPreferencial);
+        const siglaFiltro = obterSiglaTurno(selectedTurnoFiltro);
+        if (f.turnoPreferencial !== selectedTurnoFiltro && siglaFunc !== siglaFiltro) {
+          return false;
+        }
       }
       if (filtroSetor !== 'TODOS' && (f.setor || 'Pista') !== filtroSetor) {
         return false;
@@ -198,7 +308,7 @@ export const PlannerView: React.FC<PlannerProps> = ({
       }
       return true;
     });
-  }, [funcionarios, selectedTurnoFiltro, filtroSetor, buscaTexto]);
+  }, [listaFuncionariosConsolidada, selectedTurnoFiltro, filtroSetor, buscaTexto]);
 
   const escalasMesFiltradas = useMemo(() => {
     return escalas.filter((e) => {
@@ -218,29 +328,14 @@ export const PlannerView: React.FC<PlannerProps> = ({
     });
   }, [escalas, mesAnoStr, filtroSetor, buscaTexto]);
 
-  const obterSiglaTurno = (turno?: string) => {
-    if (!turno) return 'T1';
-    if (turno.includes('Horista') || turno === 'HOR') return 'HOR';
-    if (turno.includes('Turno 2') || turno.includes('Tarde') || turno.includes('14h')) return 'T2';
-    return 'T1';
-  };
-
-  const obterHorarioPorTurno = (turno: string) => {
-    const of = TURNOS_OFICIAIS.find((t) => t.id === turno);
-    if (of) return { inicio: of.inicio, fim: of.fim };
-    if (turno.includes('Horista')) return { inicio: '08:00', fim: '14:00' };
-    if (turno.includes('Turno 2') || turno.includes('Tarde')) return { inicio: '14:00', fim: '22:00' };
-    return { inicio: '06:00', fim: '14:00' };
-  };
-
   // Clique em uma célula do Planner
   const handleCellClick = async (func: Funcionario, day: number) => {
     const dateStr = formatDayDate(day);
-    const key = `${func.id}_${dateStr}`;
-    const current = escalaMap[key];
+    const current =
+      escalaMap[`${func.id}_${dateStr}`] ||
+      escalaMap[`nome:${normalizarTextoComparacao(func.nome)}_${dateStr}`];
 
     if (!modoRapido) {
-      // Abre modal para alterar ou excluir o registro daquele dia
       setCelulaEditando({
         func,
         day,
@@ -285,6 +380,9 @@ export const PlannerView: React.FC<PlannerProps> = ({
     } else if (pincelStatus === 'T2_TARDE') {
       nextStatus = 'TRABALHO';
       nextTurno = 'Turno 2 - Tarde (14h - 22h)';
+    } else if (pincelStatus === 'T3_NOITE') {
+      nextStatus = 'TRABALHO';
+      nextTurno = 'Turno 3 - Noite (22h - 06h)';
     } else if (pincelStatus === 'HORISTA') {
       nextStatus = 'TRABALHO';
       nextTurno = 'Turno Horista';
@@ -375,36 +473,36 @@ export const PlannerView: React.FC<PlannerProps> = ({
     onReload();
   };
 
-  // Excluir registro de escala de um dia específico
   const handleExcluirCelulaModal = async () => {
     if (!celulaEditando?.escalaExistente) return;
     const esc = celulaEditando.escalaExistente;
     await repoEscala.delete(postoId, esc.id);
-    // Caso exista duplicata com prefixo antigo escala-ia-
     await repoEscala.delete(postoId, `escala-${esc.funcionarioId}-${esc.data}`).catch(() => {});
     await repoEscala.delete(postoId, `escala-ia-${esc.funcionarioId}-${esc.data}`).catch(() => {});
     setCelulaEditando(null);
     onReload();
   };
 
-  // Excluir toda a escala do mês de um funcionário
   const handleLimparEscalaFuncionarioMes = async (func: Funcionario) => {
     if (!window.confirm(`Deseja excluir todos os lançamentos de escala de ${func.nome} neste mês?`)) return;
     setSalvandoAuto(true);
     try {
+      const nomeNorm = normalizarTextoComparacao(func.nome);
       const doMes = escalas.filter(
-        (e) => e.funcionarioId === func.id && e.data.startsWith(mesAnoStr)
+        (e) =>
+          (e.funcionarioId === func.id || normalizarTextoComparacao(e.funcionarioNome) === nomeNorm) &&
+          e.data.startsWith(mesAnoStr)
       );
-      for (const item of doMes) {
-        await repoEscala.delete(postoId, item.id);
-      }
+      await repoEscala.deleteBatch(
+        postoId,
+        doMes.map((item) => item.id)
+      );
       onReload();
     } finally {
       setSalvandoAuto(false);
     }
   };
 
-  // Abrir edição de funcionário
   const abrirEdicaoFuncionario = (func: Funcionario) => {
     setFuncEditando(func);
     setEditNome(func.nome);
@@ -436,12 +534,13 @@ export const PlannerView: React.FC<PlannerProps> = ({
     onReload();
   };
 
-  // Preencher escala 6x1 de um funcionário
   const handlePreencherRevezamento6x1 = async (func: Funcionario, folgaInicialDia: number = 7) => {
     setSalvandoAuto(true);
     try {
       const turnoBase = func.turnoPreferencial || 'Turno 1 - Manhã (06h - 14h)';
       const horarios = obterHorarioPorTurno(turnoBase);
+      const lote: Escala[] = [];
+      const agora = new Date().toISOString();
 
       for (let day = 1; day <= daysInMonth; day++) {
         const dateStr = formatDayDate(day);
@@ -449,7 +548,7 @@ export const PlannerView: React.FC<PlannerProps> = ({
         const status: EscalaStatus = isFolga ? 'FOLGA' : 'TRABALHO';
         const id = `escala-${func.id}-${dateStr}`;
 
-        await repoEscala.save(postoId, {
+        lote.push({
           id,
           postoId,
           funcionarioId: func.id,
@@ -460,10 +559,11 @@ export const PlannerView: React.FC<PlannerProps> = ({
           horarioFim: isFolga ? '00:00' : horarios.fim,
           status,
           observacao: isFolga ? 'S (Folga 6x1)' : '',
-          criadoEm: new Date().toISOString(),
-          atualizadoEm: new Date().toISOString(),
+          criadoEm: agora,
+          atualizadoEm: agora,
         });
       }
+      await repoEscala.saveBatch(postoId, lote);
       onReload();
     } finally {
       setSalvandoAuto(false);
@@ -474,11 +574,36 @@ export const PlannerView: React.FC<PlannerProps> = ({
     if (funcionariosAtivos.length === 0) return;
     setSalvandoAuto(true);
     try {
+      const loteTotal: Escala[] = [];
+      const agora = new Date().toISOString();
+
       for (let i = 0; i < funcionariosAtivos.length; i++) {
         const func = funcionariosAtivos[i];
         const diaFolgaBase = (i % 7) + 1;
-        await handlePreencherRevezamento6x1(func, diaFolgaBase);
+        const turnoBase = func.turnoPreferencial || 'Turno 1 - Manhã (06h - 14h)';
+        const horarios = obterHorarioPorTurno(turnoBase);
+
+        for (let day = 1; day <= daysInMonth; day++) {
+          const dateStr = formatDayDate(day);
+          const isFolga = (day - diaFolgaBase) % 7 === 0;
+          loteTotal.push({
+            id: `escala-${func.id}-${dateStr}`,
+            postoId,
+            funcionarioId: func.id,
+            funcionarioNome: func.nome,
+            data: dateStr,
+            turno: isFolga ? 'Folga' : turnoBase,
+            horarioInicio: isFolga ? '00:00' : horarios.inicio,
+            horarioFim: isFolga ? '00:00' : horarios.fim,
+            status: isFolga ? 'FOLGA' : 'TRABALHO',
+            observacao: isFolga ? 'S (Folga 6x1)' : '',
+            criadoEm: agora,
+            atualizadoEm: agora,
+          });
+        }
       }
+
+      await repoEscala.saveBatch(postoId, loteTotal);
       onReload();
     } finally {
       setSalvandoAuto(false);
@@ -488,142 +613,120 @@ export const PlannerView: React.FC<PlannerProps> = ({
   // ============================================================================
   // ESCANEAR IMAGEM DA ESCALA E VINCULAR TURNOS, FOLGAS ('S') E FUNCIONÁRIOS
   // ============================================================================
-  const gerarLinhasPadraoDeContingencia = () => {
-    const baseFuncs =
-      funcionarios.length > 0
-        ? funcionarios.slice(0, 5).map((f, idx) => ({
-            nome: f.nome,
-            cargo: f.cargo || 'Frentista',
-            funcId: f.id,
-            turnoPref:
-              f.turnoPreferencial ||
-              (idx % 3 === 0
-                ? 'Turno 1 - Manhã (06h - 14h)'
-                : idx % 3 === 1
-                ? 'Turno 2 - Tarde (14h - 22h)'
-                : 'Turno Horista'),
-          }))
-        : [
-            { nome: 'Carlos Eduardo Silva', cargo: 'Frentista', funcId: '', turnoPref: 'Turno 1 - Manhã (06h - 14h)' },
-            { nome: 'Juliana Mendes', cargo: 'Operador de Caixa', funcId: '', turnoPref: 'Turno 2 - Tarde (14h - 22h)' },
-            { nome: 'Lucas Andrade', cargo: 'Frentista', funcId: '', turnoPref: 'Turno Horista' },
-            { nome: 'Marcos Vinicius', cargo: 'Frentista', funcId: '', turnoPref: 'Turno 1 - Manhã (06h - 14h)' },
-          ];
-
-    const linhas: LinhaEscaneada[] = baseFuncs.map((bf, idx) => {
-      const diasObj: LinhaEscaneada['dias'] = {};
-      const siglaTurno = obterSiglaTurno(bf.turnoPref);
-      for (let d = 1; d <= daysInMonth; d++) {
-        const ehFolga = (d + idx * 2) % 7 === 0;
-        diasObj[d] = {
-          status: ehFolga ? 'FOLGA' : 'TRABALHO',
-          turno: ehFolga ? 'Folga' : bf.turnoPref,
-          sigla: ehFolga ? 'S' : siglaTurno,
-        };
-      }
-      return {
-        idTemp: `scan-row-${idx}-${Date.now()}`,
-        nomeNaImagem: bf.nome,
-        cargoSugerido: bf.cargo,
-        funcionarioIdVinculado: bf.funcId,
-        dias: diasObj,
-      };
-    });
-    setLinhasEscaneadas(linhas);
-  };
-
   const processarImagemEscala = async (dataUrl: string, mimeType: string = 'image/jpeg') => {
     setImagemEscalaBase64(dataUrl);
     setEscaneandoIA(true);
-    setAvisoScanner('');
+    setAvisoScanner('Lendo nomes de funcionários, cargos, turnos e folgas na imagem...');
+    setErroScanner('');
 
     try {
-      const resp = await fetch('/api/gemini/escala-ocr', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          imageBase64: dataUrl,
-          mimeType,
-          mesAnoReferencia: mesAnoStr,
-          funcionariosCadastrados: funcionarios.map((f) => ({
-            id: f.id,
-            nome: f.nome,
-            matricula: f.matricula,
-            cargo: f.cargo,
-          })),
-        }),
+      const data = await requisitarLeituraEscalaOCR({
+        imageBase64: dataUrl,
+        mimeType,
+        mesAnoReferencia: mesAnoStr,
+        funcionariosCadastrados: funcionarios.map((f) => ({
+          id: f.id,
+          nome: f.nome,
+          matricula: f.matricula,
+          cargo: f.cargo,
+          funcao: f.funcao,
+          setor: f.setor,
+          turnoPreferencial: f.turnoPreferencial,
+        })),
       });
 
-      if (!resp.ok) {
-        throw new Error(`Status ${resp.status}`);
-      }
-
-      const data = await resp.json();
-      const colabs = data.colaboradoresIdentificados || [];
-      const itens = data.itensEscala || [];
-
-      if (colabs.length === 0 && itens.length === 0) {
-        gerarLinhasPadraoDeContingencia();
-        setAvisoScanner('Grade extraída e estruturada para vinculação rápida.');
-        return;
-      }
+      const colabs = Array.isArray(data.colaboradoresIdentificados) ? data.colaboradoresIdentificados : [];
+      const itens = Array.isArray(data.itensEscala) ? data.itensEscala : [];
 
       const nomesUnicos: string[] =
         colabs.length > 0
-          ? colabs.map((c: any) => c.nomeOriginal)
-          : Array.from(new Set(itens.map((i: any) => i.funcionarioNome)));
+          ? colabs.map((c: any) => String(c.nomeOriginal || '').trim()).filter(Boolean)
+          : Array.from(new Set(itens.map((i: any) => String(i.funcionarioNome || '').trim()).filter(Boolean)));
+
+      if (nomesUnicos.length === 0) {
+        setErroScanner(
+          'Não foi possível identificar nomes de funcionários na imagem enviada. Tente uma foto mais nítida ou adicione a linha manualmente abaixo.'
+        );
+        setAvisoScanner('');
+        return;
+      }
 
       const novasLinhas: LinhaEscaneada[] = nomesUnicos.map((nomeOrig, idx) => {
-        const colabMeta = colabs.find((c: any) => c.nomeOriginal === nomeOrig);
-        const matchFunc = funcionarios.find(
-          (f) =>
-            f.id === colabMeta?.funcionarioId ||
-            f.nome.toLowerCase().trim() === nomeOrig.toLowerCase().trim() ||
-            f.nome.toLowerCase().includes(nomeOrig.toLowerCase().trim()) ||
-            nomeOrig.toLowerCase().includes(f.nome.toLowerCase().trim())
+        const colabMeta = colabs.find(
+          (c: any) => normalizarTextoComparacao(c.nomeOriginal) === normalizarTextoComparacao(nomeOrig)
+        );
+        const matchFunc = conciliarFuncionarioPorNome(
+          nomeOrig,
+          colabMeta?.funcionarioId,
+          funcionarios
         );
 
         const itensDeste = itens.filter(
-          (it: any) => String(it.funcionarioNome || '').toLowerCase().trim() === nomeOrig.toLowerCase().trim()
+          (it: any) =>
+            normalizarTextoComparacao(it.funcionarioNome || '') === normalizarTextoComparacao(nomeOrig)
         );
 
-        const turnoPredominante =
-          itensDeste.find((i: any) => i.status === 'TRABALHO')?.turno ||
-          matchFunc?.turnoPreferencial ||
-          (idx % 3 === 0
-            ? 'Turno 1 - Manhã (06h - 14h)'
-            : idx % 3 === 1
-            ? 'Turno 2 - Tarde (14h - 22h)'
-            : 'Turno Horista');
+        const itemTrabRef = itensDeste.find(
+          (i: any) => i.status === 'TRABALHO' || i.status === 'PLANTAO'
+        );
+
+        const classifBase = classificarTurnoEHorario(
+          colabMeta?.turnoPadrao || itemTrabRef?.turno || matchFunc?.turnoPreferencial || 'T1',
+          colabMeta?.siglaTurnoPadrao || itemTrabRef?.codigoOriginal || '',
+          'TRABALHO',
+          colabMeta?.horarioEntradaPadrao || itemTrabRef?.horarioInicio || '',
+          colabMeta?.horarioSaidaPadrao || itemTrabRef?.horarioFim || ''
+        );
+
+        // Identifica em quais dias da semana o colaborador teve folga na imagem para replicar se a imagem for parcial
+        const diasSemanaFolgaLidos = new Set<number>();
+        itensDeste.forEach((it: any) => {
+          if (it.status === 'FOLGA' && it.data) {
+            const dt = new Date(`${it.data}T12:00:00`);
+            if (!isNaN(dt.getTime())) {
+              diasSemanaFolgaLidos.add(dt.getDay());
+            }
+          }
+        });
 
         const diasMap: LinhaEscaneada['dias'] = {};
         for (let d = 1; d <= daysInMonth; d++) {
           const dataIso = formatDayDate(d);
-          const itemDia = itensDeste.find((it: any) => it.data === dataIso || Number(String(it.data).slice(-2)) === d);
+          const itemDia = itensDeste.find(
+            (it: any) => it.data === dataIso || parseInt(String(it.data || '').slice(-2), 10) === d
+          );
 
           if (itemDia) {
-            const stUpper = String(itemDia.status || '').toUpperCase();
-            const tLower = String(itemDia.turno || '').toLowerCase();
-            const ehFolga =
-              stUpper === 'FOLGA' ||
-              stUpper === 'S' ||
-              stUpper === 'F' ||
-              tLower === 'folga' ||
-              tLower === 's' ||
-              tLower === 'f';
-
-            const turnoDia = ehFolga ? 'Folga' : itemDia.turno || turnoPredominante;
+            const classifDia = classificarTurnoEHorario(
+              itemDia.turno || '',
+              itemDia.codigoOriginal || '',
+              itemDia.status || '',
+              itemDia.horarioInicio || '',
+              itemDia.horarioFim || '',
+              classifBase.horarioInicio,
+              classifBase.horarioFim
+            );
             diasMap[d] = {
-              status: ehFolga ? 'FOLGA' : 'TRABALHO',
-              turno: turnoDia,
-              sigla: ehFolga ? 'S' : obterSiglaTurno(turnoDia),
+              status: classifDia.status,
+              turno: classifDia.turno,
+              sigla: classifDia.sigla,
+              horarioInicio: classifDia.horarioInicio,
+              horarioFim: classifDia.horarioFim,
             };
           } else {
-            const ehFolga = (d + idx * 2) % 7 === 0;
+            // Caso a imagem só mostre parte dos dias (ex: quinzena ou lista de turnos), preenche o restante do mês com o turno reconhecido
+            const dt = new Date(year, month, d);
+            const ehFolga =
+              diasSemanaFolgaLidos.size > 0
+                ? diasSemanaFolgaLidos.has(dt.getDay())
+                : (d + idx * 2) % 7 === 0;
+
             diasMap[d] = {
-              status: ehFolga ? 'FOLGA' : 'TRABALHO',
-              turno: ehFolga ? 'Folga' : turnoPredominante,
-              sigla: ehFolga ? 'S' : obterSiglaTurno(turnoPredominante),
+              status: ehFolga ? 'FOLGA' : classifBase.status,
+              turno: ehFolga ? 'Folga' : classifBase.turno,
+              sigla: ehFolga ? 'S' : classifBase.sigla,
+              horarioInicio: ehFolga ? '00:00' : classifBase.horarioInicio,
+              horarioFim: ehFolga ? '00:00' : classifBase.horarioFim,
             };
           }
         }
@@ -631,7 +734,20 @@ export const PlannerView: React.FC<PlannerProps> = ({
         return {
           idTemp: `scan-${idx}-${Date.now()}`,
           nomeNaImagem: nomeOrig,
-          cargoSugerido: colabMeta?.sugestaoCadastroPrevio?.cargo || matchFunc?.cargo || 'Frentista',
+          cargoSugerido:
+            colabMeta?.sugestaoCadastroPrevio?.cargo ||
+            colabMeta?.cargo ||
+            matchFunc?.cargo ||
+            'Frentista',
+          setorSugerido:
+            colabMeta?.sugestaoCadastroPrevio?.setor ||
+            colabMeta?.setor ||
+            matchFunc?.setor ||
+            'Pista',
+          turnoPrincipal: classifBase.turno,
+          siglaTurnoPrincipal: classifBase.sigla,
+          horarioInicioPadrao: classifBase.horarioInicio,
+          horarioFimPadrao: classifBase.horarioFim,
           funcionarioIdVinculado: matchFunc?.id || '',
           dias: diasMap,
         };
@@ -639,14 +755,14 @@ export const PlannerView: React.FC<PlannerProps> = ({
 
       setLinhasEscaneadas(novasLinhas);
       setAvisoScanner(
-        `${novasLinhas.length} funcionários escaneados com seus respectivos turnos (T1, T2, HOR) e folgas (S). Revise os vínculos abaixo e clique em "Vincular e Salvar no Planner".`
+        `${novasLinhas.length} funcionário(s) e seus turnos reconhecidos da imagem! Confira abaixo e clique em "Anexar Funcionários e Turnos ao Planner".`
       );
-    } catch (err) {
-      console.warn('Contingência de leitura de escala ativada:', err);
-      gerarLinhasPadraoDeContingencia();
-      setAvisoScanner(
-        'Imagem processada! Confira abaixo a vinculação de funcionários, turnos (T1, T2, Horista) e folgas (S) para gravar no Planner.'
+    } catch (err: any) {
+      console.error('Erro na leitura da escala:', err);
+      setErroScanner(
+        `Falha ao ler a imagem: ${err?.message || 'Erro de comunicação'}. Tente novamente ou ajuste a foto.`
       );
+      setAvisoScanner('');
     } finally {
       setEscaneandoIA(false);
     }
@@ -663,7 +779,40 @@ export const PlannerView: React.FC<PlannerProps> = ({
     e.target.value = '';
   };
 
-  // Alternar dia na pré-visualização escaneada: T1 -> T2 -> HOR -> S (Folga)
+  // Alterar o turno padrão de toda a linha de um funcionário escaneado (atualiza todos os dias de trabalho daquela linha)
+  const handleAlterarTurnoLinhaEscaneada = (idTemp: string, novaSiglaOuTurno: string) => {
+    const classif = classificarTurnoEHorario(novaSiglaOuTurno, novaSiglaOuTurno, 'TRABALHO', '', '');
+    setLinhasEscaneadas((prev) =>
+      prev.map((linha) => {
+        if (linha.idTemp !== idTemp) return linha;
+        const novosDias: LinhaEscaneada['dias'] = {};
+        for (let d = 1; d <= daysInMonth; d++) {
+          const atual = linha.dias[d];
+          if (atual && (atual.status === 'FOLGA' || atual.sigla === 'S')) {
+            novosDias[d] = atual;
+          } else {
+            novosDias[d] = {
+              status: classif.status,
+              turno: classif.turno,
+              sigla: classif.sigla,
+              horarioInicio: classif.horarioInicio,
+              horarioFim: classif.horarioFim,
+            };
+          }
+        }
+        return {
+          ...linha,
+          turnoPrincipal: classif.turno,
+          siglaTurnoPrincipal: classif.sigla,
+          horarioInicioPadrao: classif.horarioInicio,
+          horarioFimPadrao: classif.horarioFim,
+          dias: novosDias,
+        };
+      })
+    );
+  };
+
+  // Alternar dia na pré-visualização escaneada: T1 -> T2 -> T3 -> HOR -> S (Folga)
   const handleToggleDiaEscaneado = (idTemp: string, dia: number) => {
     setLinhasEscaneadas((prev) =>
       prev.map((linha) => {
@@ -672,17 +821,51 @@ export const PlannerView: React.FC<PlannerProps> = ({
           status: 'TRABALHO' as EscalaStatus,
           turno: 'Turno 1 - Manhã (06h - 14h)',
           sigla: 'T1',
+          horarioInicio: '06:00',
+          horarioFim: '14:00',
         };
 
-        let prox: { status: EscalaStatus; turno: string; sigla: string };
+        let prox: LinhaEscaneada['dias'][number];
         if (atual.sigla === 'T1') {
-          prox = { status: 'TRABALHO', turno: 'Turno 2 - Tarde (14h - 22h)', sigla: 'T2' };
+          prox = {
+            status: 'TRABALHO',
+            turno: 'Turno 2 - Tarde (14h - 22h)',
+            sigla: 'T2',
+            horarioInicio: '14:00',
+            horarioFim: '22:00',
+          };
         } else if (atual.sigla === 'T2') {
-          prox = { status: 'TRABALHO', turno: 'Turno Horista', sigla: 'HOR' };
+          prox = {
+            status: 'TRABALHO',
+            turno: 'Turno 3 - Noite (22h - 06h)',
+            sigla: 'T3',
+            horarioInicio: '22:00',
+            horarioFim: '06:00',
+          };
+        } else if (atual.sigla === 'T3') {
+          prox = {
+            status: 'TRABALHO',
+            turno: 'Turno Horista',
+            sigla: 'HOR',
+            horarioInicio: '08:00',
+            horarioFim: '14:00',
+          };
         } else if (atual.sigla === 'HOR') {
-          prox = { status: 'FOLGA', turno: 'Folga', sigla: 'S' };
+          prox = {
+            status: 'FOLGA',
+            turno: 'Folga',
+            sigla: 'S',
+            horarioInicio: '00:00',
+            horarioFim: '00:00',
+          };
         } else {
-          prox = { status: 'TRABALHO', turno: 'Turno 1 - Manhã (06h - 14h)', sigla: 'T1' };
+          prox = {
+            status: 'TRABALHO',
+            turno: 'Turno 1 - Manhã (06h - 14h)',
+            sigla: 'T1',
+            horarioInicio: '06:00',
+            horarioFim: '14:00',
+          };
         }
 
         return {
@@ -696,68 +879,116 @@ export const PlannerView: React.FC<PlannerProps> = ({
     );
   };
 
-  // Vincular e Salvar todas as linhas escaneadas diretamente no Planner
+  // Vincular e Salvar todas as linhas escaneadas diretamente no Planner usando gravação em lote (saveBatch)
   const handleVincularESalvarNoPlanner = async () => {
     if (linhasEscaneadas.length === 0) return;
     setSalvandoVinculo(true);
+    setErroScanner('');
     try {
-      for (const linha of linhasEscaneadas) {
+      const agoraIso = new Date().toISOString();
+      const funcsParaSalvar: Funcionario[] = [];
+      const escalasParaSalvar: Escala[] = [];
+
+      for (let i = 0; i < linhasEscaneadas.length; i++) {
+        const linha = linhasEscaneadas[i];
         let funcId = linha.funcionarioIdVinculado;
-        let funcNome = linha.nomeNaImagem;
+        let funcNome = linha.nomeNaImagem.trim() || `Colaborador ${i + 1}`;
+        const turnoPref = normalizarTurnoPreferencialCadastro(
+          linha.turnoPrincipal,
+          linha.horarioInicioPadrao
+        );
 
         if (funcId) {
           const existente = funcionarios.find((f) => f.id === funcId);
-          if (existente) funcNome = existente.nome;
+          if (existente) {
+            funcNome = existente.nome;
+            // Atualiza o turnoPreferencial do funcionário existente para refletir o turno anexado
+            funcsParaSalvar.push({
+              ...existente,
+              turnoPreferencial: turnoPref,
+              cargo: linha.cargoSugerido || existente.cargo || 'Frentista',
+              setor: linha.setorSugerido || existente.setor || 'Pista',
+              atualizadoEm: agoraIso,
+            });
+          }
         } else {
-          // Cria novo funcionário automaticamente se não estiver vinculado a um existente
-          funcId = `func-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
-          const novoFunc: Funcionario = {
-            id: funcId,
-            postoId,
-            nome: linha.nomeNaImagem.trim() || 'Novo Colaborador',
-            cpf: '000.000.000-00',
-            matricula: `MAT-${Math.floor(1000 + Math.random() * 9000)}`,
-            telefone: '',
-            cargo: linha.cargoSugerido || 'Frentista',
-            funcao: linha.cargoSugerido || 'Frentista',
-            turnoPreferencial: 'Turno 1 - Manhã (06h - 14h)',
-            dataAdmissao: new Date().toISOString().slice(0, 10),
-            status: 'ATIVO',
-            criadoEm: new Date().toISOString(),
-            atualizadoEm: new Date().toISOString(),
-          };
-          await repoFunc.save(postoId, novoFunc);
+          // Verifica se já existe um funcionário com exatamente o mesmo nome normalizado para evitar duplicatas
+          const matchPorNome = conciliarFuncionarioPorNome(funcNome, undefined, funcionarios);
+          if (matchPorNome) {
+            funcId = matchPorNome.id;
+            funcNome = matchPorNome.nome;
+            funcsParaSalvar.push({
+              ...matchPorNome,
+              turnoPreferencial: turnoPref,
+              atualizadoEm: agoraIso,
+            });
+          } else {
+            funcId = `func-${Date.now()}-${i}-${Math.floor(100 + Math.random() * 900)}`;
+            const novoFunc: Funcionario = {
+              id: funcId,
+              postoId,
+              nome: funcNome,
+              cpf: '000.000.000-00',
+              matricula: `MAT-${Math.floor(1000 + Math.random() * 9000)}`,
+              telefone: '',
+              cargo: linha.cargoSugerido || 'Frentista',
+              funcao: linha.cargoSugerido || 'Frentista',
+              setor: linha.setorSugerido || 'Pista',
+              turnoPreferencial: turnoPref,
+              dataAdmissao: agoraIso.slice(0, 10),
+              status: 'ATIVO',
+              observacoes: 'Cadastrado e anexado ao Planner via Scanner de Escala',
+              criadoEm: agoraIso,
+              atualizadoEm: agoraIso,
+            };
+            funcsParaSalvar.push(novoFunc);
+          }
         }
 
-        // Salva todos os dias do mês para este funcionário no Planner
+        // Prepara todos os dias do mês para este funcionário no Planner
         for (let d = 1; d <= daysInMonth; d++) {
           const infoDia = linha.dias[d];
           if (!infoDia) continue;
           const dateStr = formatDayDate(d);
           const id = `escala-${funcId}-${dateStr}`;
           const ehFolga = infoDia.status === 'FOLGA' || infoDia.sigla === 'S';
-          const horarios = ehFolga ? { inicio: '00:00', fim: '00:00' } : obterHorarioPorTurno(infoDia.turno);
+          const horariosPadrao = obterHorarioPorTurno(infoDia.turno);
+          const hIni = ehFolga ? '00:00' : infoDia.horarioInicio || horariosPadrao.inicio;
+          const hFim = ehFolga ? '00:00' : infoDia.horarioFim || horariosPadrao.fim;
 
-          const novaEscala: Escala = {
+          escalasParaSalvar.push({
             id,
             postoId,
             funcionarioId: funcId,
             funcionarioNome: funcNome,
             data: dateStr,
             turno: ehFolga ? 'Folga' : infoDia.turno,
-            horarioInicio: horarios.inicio,
-            horarioFim: horarios.fim,
-            status: ehFolga ? 'FOLGA' : 'TRABALHO',
-            observacao: ehFolga ? 'S (Folga Escaneada)' : 'Escala Vinculada por Imagem',
-            criadoEm: new Date().toISOString(),
-            atualizadoEm: new Date().toISOString(),
-          };
-          await repoEscala.save(postoId, novaEscala);
+            horarioInicio: hIni,
+            horarioFim: hFim,
+            intervalo: ehFolga ? '—' : '1h (Intrajornada)',
+            setor: linha.setorSugerido || 'Pista',
+            funcao: linha.cargoSugerido || 'Frentista',
+            status: ehFolga ? 'FOLGA' : infoDia.status || 'TRABALHO',
+            codigoOriginal: infoDia.sigla,
+            statusConferencia: 'CONFIRMADO',
+            observacao: ehFolga ? 'S (Folga Escaneada)' : 'Turno Anexado via Scanner de Escala',
+            criadoEm: agoraIso,
+            atualizadoEm: agoraIso,
+          });
         }
+      }
+
+      if (funcsParaSalvar.length > 0) {
+        await repoFunc.saveBatch(postoId, funcsParaSalvar);
+      }
+      if (escalasParaSalvar.length > 0) {
+        await repoEscala.saveBatch(postoId, escalasParaSalvar);
       }
 
       setIsScannerOpen(false);
       await onReload();
+    } catch (err: any) {
+      setErroScanner(`Erro ao gravar no Planner: ${err?.message || 'Falha na gravação'}`);
     } finally {
       setSalvandoVinculo(false);
     }
@@ -773,7 +1004,7 @@ export const PlannerView: React.FC<PlannerProps> = ({
             Planner de Escala Mensal (Turnos, Folgas &quot;S&quot; e Funcionários)
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Clique em qualquer dia para <strong>alterar ou excluir</strong> o turno/folga, ou escaneie a foto da escala para vincular automaticamente.
+            Clique em qualquer dia para <strong>alterar ou excluir</strong> o turno/folga, ou escaneie a foto da escala para anexar funcionários e turnos automaticamente.
           </p>
         </div>
 
@@ -782,9 +1013,7 @@ export const PlannerView: React.FC<PlannerProps> = ({
             type="button"
             onClick={() => {
               setIsScannerOpen(true);
-              if (linhasEscaneadas.length === 0) {
-                gerarLinhasPadraoDeContingencia();
-              }
+              setErroScanner('');
             }}
             className="inline-flex items-center gap-2 px-3.5 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg transition shadow-xs cursor-pointer"
           >
@@ -837,7 +1066,7 @@ export const PlannerView: React.FC<PlannerProps> = ({
         </div>
       </div>
 
-      {/* Painel de 7 Visualizações do Planner (Diária, Semanal, Mensal, Funcionário, Setor, Turno, Histórico) + Legenda */}
+      {/* Painel de 7 Visualizações do Planner */}
       <PainelVisualizacoesPlanner
         modoVisao={modoVisao}
         onChangeModoVisao={setModoVisao}
@@ -858,7 +1087,7 @@ export const PlannerView: React.FC<PlannerProps> = ({
         }}
         onEditarRegistroEscala={(esc) => {
           const func =
-            funcionarios.find((f) => f.id === esc.funcionarioId) || {
+            listaFuncionariosConsolidada.find((f) => f.id === esc.funcionarioId) || {
               id: esc.funcionarioId,
               postoId,
               nome: esc.funcionarioNome,
@@ -917,6 +1146,7 @@ export const PlannerView: React.FC<PlannerProps> = ({
                 [
                   { id: 'T1_MANHA', label: 'T1 — Manhã (06h-14h)', color: 'bg-amber-500 text-white' },
                   { id: 'T2_TARDE', label: 'T2 — Tarde (14h-22h)', color: 'bg-blue-600 text-white' },
+                  { id: 'T3_NOITE', label: 'T3 — Noite (22h-06h)', color: 'bg-purple-600 text-white' },
                   { id: 'HORISTA', label: 'HOR — Horista', color: 'bg-teal-600 text-white' },
                   { id: 'FOLGA', label: 'S / FOLGA', color: 'bg-emerald-600 text-white' },
                   { id: 'FERIAS', label: 'FE — Férias', color: 'bg-purple-600 text-white' },
@@ -995,6 +1225,7 @@ export const PlannerView: React.FC<PlannerProps> = ({
                 funcionariosAtivos.map((func) => {
                   let countTrabalhados = 0;
                   let countFolgas = 0;
+                  const nomeFuncNorm = normalizarTextoComparacao(func.nome);
 
                   return (
                     <tr key={func.id} className="hover:bg-slate-50/80 transition group">
@@ -1006,10 +1237,12 @@ export const PlannerView: React.FC<PlannerProps> = ({
                               <span className="text-[10px] text-slate-500">{func.cargo}</span>
                               <span
                                 className={`text-[9px] px-1.5 py-0.2 rounded font-bold border ${
-                                  func.turnoPreferencial?.includes('Horista')
+                                  obterSiglaTurno(func.turnoPreferencial) === 'HOR'
                                     ? 'bg-teal-50 text-teal-800 border-teal-200'
-                                    : func.turnoPreferencial?.includes('Turno 2')
+                                    : obterSiglaTurno(func.turnoPreferencial) === 'T2'
                                     ? 'bg-blue-50 text-blue-800 border-blue-200'
+                                    : obterSiglaTurno(func.turnoPreferencial) === 'T3'
+                                    ? 'bg-purple-50 text-purple-800 border-purple-200'
                                     : 'bg-amber-50 text-amber-800 border-amber-200'
                                 }`}
                               >
@@ -1049,22 +1282,31 @@ export const PlannerView: React.FC<PlannerProps> = ({
 
                       {daysArray.map((day) => {
                         const dateStr = formatDayDate(day);
-                        const esc = escalaMap[`${func.id}_${dateStr}`];
+                        const esc =
+                          escalaMap[`${func.id}_${dateStr}`] ||
+                          escalaMap[`nome:${nomeFuncNorm}_${dateStr}`];
                         const status = esc?.status;
 
-                        if (status === 'TRABALHO') countTrabalhados++;
+                        if (status === 'TRABALHO' || status === 'PLANTAO') countTrabalhados++;
                         if (status === 'FOLGA') countFolgas++;
 
                         let cellStyle = 'bg-white text-slate-300 hover:bg-slate-100';
                         let label = '·';
 
-                        if (status === 'TRABALHO') {
-                          const sig = obterSiglaTurno(esc?.turno || func.turnoPreferencial);
+                        if (status === 'TRABALHO' || status === 'PLANTAO') {
+                          const sig =
+                            status === 'PLANTAO'
+                              ? 'PLT'
+                              : obterSiglaTurno(esc?.turno || func.turnoPreferencial, esc?.horarioInicio);
                           label = sig;
                           if (sig === 'T1') {
                             cellStyle = 'bg-amber-100 text-amber-900 font-bold hover:bg-amber-200';
                           } else if (sig === 'T2') {
                             cellStyle = 'bg-blue-100 text-blue-900 font-bold hover:bg-blue-200';
+                          } else if (sig === 'T3') {
+                            cellStyle = 'bg-purple-100 text-purple-900 font-bold hover:bg-purple-200';
+                          } else if (sig === 'PLT') {
+                            cellStyle = 'bg-indigo-100 text-indigo-900 font-bold hover:bg-indigo-200';
                           } else {
                             cellStyle = 'bg-teal-100 text-teal-900 font-bold hover:bg-teal-200';
                           }
@@ -1088,7 +1330,11 @@ export const PlannerView: React.FC<PlannerProps> = ({
                             onClick={() => handleCellClick(func, day)}
                             title={
                               esc
-                                ? `${func.nome} — Dia ${day}: ${esc.status === 'FOLGA' ? 'Folga (S)' : esc.turno} (Clique para alterar ou excluir)`
+                                ? `${func.nome} — Dia ${day}: ${
+                                    esc.status === 'FOLGA'
+                                      ? 'Folga (S)'
+                                      : `${esc.turno} (${esc.horarioInicio}-${esc.horarioFim})`
+                                  } (Clique para alterar ou excluir)`
                                 : `Dia ${day}: Sem lançamento (Clique para lançar)`
                             }
                             className={`p-1 text-center border-r border-slate-100 cursor-pointer select-none transition ${cellStyle}`}
@@ -1127,6 +1373,12 @@ export const PlannerView: React.FC<PlannerProps> = ({
                 T2
               </span>
               Turno 2 — Tarde (14h-22h)
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-5 h-5 rounded bg-purple-100 text-purple-900 font-mono font-bold flex items-center justify-center text-[10px]">
+                T3
+              </span>
+              Turno 3 — Noite (22h-06h)
             </span>
             <span className="flex items-center gap-1.5">
               <span className="w-5 h-5 rounded bg-teal-100 text-teal-900 font-mono font-bold flex items-center justify-center text-[10px]">
@@ -1425,7 +1677,7 @@ export const PlannerView: React.FC<PlannerProps> = ({
         </div>
       )}
 
-      {/* MODAL 3: ESCANEAR IMAGEM DA ESCALA E VINCULAR TURNOS, FOLGAS ('S') E FUNCIONÁRIOS */}
+      {/* MODAL 3: ESCANEAR IMAGEM DA ESCALA E ANEXAR FUNCIONÁRIOS E TURNOS AO PLANNER */}
       {isScannerOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-2xl max-w-6xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
@@ -1437,10 +1689,10 @@ export const PlannerView: React.FC<PlannerProps> = ({
                 </div>
                 <div>
                   <h3 className="text-base font-bold">
-                    Escanear Imagem da Escala e Vincular no Planner ({monthName})
+                    Escanear Escala e Anexar Funcionários e Turnos ao Planner ({monthName})
                   </h3>
                   <p className="text-xs text-slate-300">
-                    Envie a foto da escala para identificar e vincular automaticamente <strong>Turnos (T1, T2, Horista)</strong>, <strong>Folgas (&quot;S&quot;)</strong> e <strong>Funcionários</strong>.
+                    Envie ou tire foto da escala para reconhecer automaticamente os <strong>Nomes dos Funcionários</strong>, <strong>Turnos (T1, T2, T3, Horista)</strong> e <strong>Folgas (&quot;S&quot;)</strong>.
                   </p>
                 </div>
               </div>
@@ -1457,7 +1709,7 @@ export const PlannerView: React.FC<PlannerProps> = ({
             <div className="p-6 overflow-y-auto space-y-5 flex-1">
               {/* Upload bar */}
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-purple-50/70 border border-purple-200 p-4 rounded-xl">
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2.5">
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -1465,36 +1717,54 @@ export const PlannerView: React.FC<PlannerProps> = ({
                     onChange={handleUploadImagemScanner}
                     className="hidden"
                   />
+                  <input
+                    ref={cameraInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={handleUploadImagemScanner}
+                    className="hidden"
+                  />
+
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={escaneandoIA}
-                    className="inline-flex items-center gap-2 px-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer"
+                    className="inline-flex items-center gap-2 px-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer disabled:opacity-50"
                   >
                     {escaneandoIA ? (
                       <>
                         <RefreshCw className="w-4 h-4 animate-spin" />
-                        Escaneando Escala...
+                        Reconhecendo Nomes e Turnos...
                       </>
                     ) : (
                       <>
                         <Upload className="w-4 h-4" />
-                        Enviar Foto / Imagem da Escala
+                        Enviar Imagem da Escala
                       </>
                     )}
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => {
-                      gerarLinhasPadraoDeContingencia();
-                      setAvisoScanner('Folha de escala carregada! Confira os vínculos de funcionários, turnos e folgas (S) abaixo.');
-                    }}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-bold rounded-xl transition cursor-pointer"
+                    onClick={() => cameraInputRef.current?.click()}
+                    disabled={escaneandoIA}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-bold rounded-xl transition cursor-pointer disabled:opacity-50"
                   >
-                    <Sparkles className="w-4 h-4 text-purple-600" />
-                    Carregar Folha Exemplo
+                    <Camera className="w-4 h-4 text-purple-600" />
+                    Tirar Foto com Câmera
                   </button>
+
+                  {imagemEscalaBase64 && !escaneandoIA && (
+                    <button
+                      type="button"
+                      onClick={() => processarImagemEscala(imagemEscalaBase64)}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 bg-purple-100 hover:bg-purple-200 text-purple-800 text-xs font-bold rounded-xl transition cursor-pointer"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      Reprocessar Imagem
+                    </button>
+                  )}
                 </div>
 
                 {avisoScanner && (
@@ -1504,12 +1774,30 @@ export const PlannerView: React.FC<PlannerProps> = ({
                 )}
               </div>
 
-              {/* Tabela de Vinculação: Funcionário Escaneado -> Funcionário do Planner + Grade de Turnos e Folgas 'S' */}
+              {erroScanner && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-800 flex items-center gap-2 font-semibold">
+                  <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                  <span>{erroScanner}</span>
+                </div>
+              )}
+
+              {/* Pré-visualização compacta da imagem enviada */}
+              {imagemEscalaBase64 && (
+                <div className="bg-slate-900/5 border border-slate-200 rounded-xl p-2 flex items-center justify-center max-h-44 overflow-hidden">
+                  <img
+                    src={imagemEscalaBase64}
+                    alt="Escala enviada"
+                    className="max-h-40 object-contain rounded"
+                  />
+                </div>
+              )}
+
+              {/* Tabela de Vinculação: Funcionário Escaneado -> Turno -> Funcionário do Planner + Grade de Turnos e Folgas 'S' */}
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <h4 className="text-xs font-bold uppercase text-slate-700 flex items-center gap-2">
                     <Link2 className="w-4 h-4 text-blue-600" />
-                    Vincular Funcionários, Turnos (T1 / T2 / HOR) e Folgas (&quot;S&quot;)
+                    Funcionários e Turnos Reconhecidos ({linhasEscaneadas.length})
                   </h4>
                   <button
                     type="button"
@@ -1521,121 +1809,189 @@ export const PlannerView: React.FC<PlannerProps> = ({
                           status: ehFolga ? 'FOLGA' : 'TRABALHO',
                           turno: ehFolga ? 'Folga' : 'Turno 1 - Manhã (06h - 14h)',
                           sigla: ehFolga ? 'S' : 'T1',
+                          horarioInicio: ehFolga ? '00:00' : '06:00',
+                          horarioFim: ehFolga ? '00:00' : '14:00',
                         };
                       }
                       setLinhasEscaneadas((prev) => [
                         ...prev,
                         {
                           idTemp: `manual-scan-${Date.now()}`,
-                          nomeNaImagem: `Colaborador ${prev.length + 1}`,
+                          nomeNaImagem: `Novo Funcionário ${prev.length + 1}`,
                           cargoSugerido: 'Frentista',
+                          setorSugerido: 'Pista',
+                          turnoPrincipal: 'Turno 1 - Manhã (06h - 14h)',
+                          siglaTurnoPrincipal: 'T1',
+                          horarioInicioPadrao: '06:00',
+                          horarioFimPadrao: '14:00',
                           funcionarioIdVinculado: '',
                           dias: diasObj,
                         },
                       ]);
                     }}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition"
+                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    Adicionar Linha na Escala
+                    Adicionar Funcionário Manualmente
                   </button>
                 </div>
 
-                <div className="border border-slate-200 rounded-xl overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="bg-slate-100 border-b border-slate-200 text-[11px] font-bold text-slate-700">
-                        <th className="p-2.5 min-w-[180px] border-r border-slate-200">Nome Lido na Escala</th>
-                        <th className="p-2.5 min-w-[230px] border-r border-slate-200">Vincular ao Funcionário</th>
-                        {daysArray.map((d) => (
-                          <th key={d} className="p-1 text-center min-w-[32px] border-r border-slate-200 font-mono">
-                            {String(d).padStart(2, '0')}
-                          </th>
-                        ))}
-                        <th className="p-2 text-center">Ação</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200">
-                      {linhasEscaneadas.map((linha, idx) => (
-                        <tr key={linha.idTemp} className="hover:bg-slate-50">
-                          <td className="p-2 border-r border-slate-200">
-                            <input
-                              type="text"
-                              value={linha.nomeNaImagem}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                setLinhasEscaneadas((prev) =>
-                                  prev.map((l, i) => (i === idx ? { ...l, nomeNaImagem: val } : l))
-                                );
-                              }}
-                              className="w-full px-2 py-1 border border-slate-300 rounded text-xs font-bold text-slate-900"
-                            />
-                          </td>
-                          <td className="p-2 border-r border-slate-200">
-                            <select
-                              value={linha.funcionarioIdVinculado}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                setLinhasEscaneadas((prev) =>
-                                  prev.map((l, i) => (i === idx ? { ...l, funcionarioIdVinculado: val } : l))
-                                );
-                              }}
-                              className="w-full px-2 py-1 border border-slate-300 rounded text-xs font-semibold bg-white text-slate-800"
-                            >
-                              <option value="">+ Cadastrar Novo ({linha.nomeNaImagem})</option>
-                              {funcionarios.map((f) => (
-                                <option key={f.id} value={f.id}>
-                                  Vincular: {f.nome} ({f.cargo})
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                          {daysArray.map((d) => {
-                            const cell = linha.dias[d] || { status: 'TRABALHO', turno: 'Turno 1 - Manhã (06h - 14h)', sigla: 'T1' };
-                            const isFolga = cell.status === 'FOLGA' || cell.sigla === 'S';
-                            const badgeColor = isFolga
-                              ? 'bg-emerald-100 text-emerald-900 font-black'
-                              : cell.sigla === 'T2'
-                              ? 'bg-blue-100 text-blue-900 font-bold'
-                              : cell.sigla === 'HOR'
-                              ? 'bg-teal-100 text-teal-900 font-bold'
-                              : 'bg-amber-100 text-amber-900 font-bold';
-
-                            return (
-                              <td
-                                key={d}
-                                onClick={() => handleToggleDiaEscaneado(linha.idTemp, d)}
-                                title="Clique para alternar: T1 -> T2 -> HOR -> S (Folga)"
-                                className={`p-1 text-center border-r border-slate-100 cursor-pointer select-none ${badgeColor}`}
-                              >
-                                <span className="font-mono text-[10px]">{isFolga ? 'S' : cell.sigla}</span>
-                              </td>
-                            );
-                          })}
-                          <td className="p-1.5 text-center">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setLinhasEscaneadas((prev) => prev.filter((l) => l.idTemp !== linha.idTemp))
-                              }
-                              className="p-1 text-red-500 hover:bg-red-50 rounded"
-                              title="Remover linha"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </td>
+                {linhasEscaneadas.length === 0 ? (
+                  <div className="border-2 border-dashed border-slate-200 rounded-xl py-12 text-center space-y-2">
+                    <Camera className="w-8 h-8 text-slate-400 mx-auto" />
+                    <div className="text-xs font-bold text-slate-700">
+                      Envie uma foto ou imagem da escala acima para reconhecer automaticamente os funcionários e seus turnos
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      Ou clique em &quot;+ Adicionar Funcionário Manualmente&quot; para montar a linha direto aqui.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="border border-slate-200 rounded-xl overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-slate-100 border-b border-slate-200 text-[11px] font-bold text-slate-700">
+                          <th className="p-2.5 min-w-[175px] border-r border-slate-200">Nome do Funcionário</th>
+                          <th className="p-2.5 min-w-[165px] border-r border-slate-200">Turno Reconhecido</th>
+                          <th className="p-2.5 min-w-[210px] border-r border-slate-200">Vínculo no Cadastro</th>
+                          {daysArray.map((d) => (
+                            <th key={d} className="p-1 text-center min-w-[32px] border-r border-slate-200 font-mono">
+                              {String(d).padStart(2, '0')}
+                            </th>
+                          ))}
+                          <th className="p-2 text-center">Ação</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200">
+                        {linhasEscaneadas.map((linha, idx) => (
+                          <tr key={linha.idTemp} className="hover:bg-slate-50">
+                            <td className="p-2 border-r border-slate-200">
+                              <input
+                                type="text"
+                                value={linha.nomeNaImagem}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setLinhasEscaneadas((prev) =>
+                                    prev.map((l, i) => (i === idx ? { ...l, nomeNaImagem: val } : l))
+                                  );
+                                }}
+                                className="w-full px-2 py-1 border border-slate-300 rounded text-xs font-bold text-slate-900"
+                                placeholder="Nome do funcionário"
+                              />
+                              <div className="flex items-center gap-1 mt-1">
+                                <select
+                                  value={linha.cargoSugerido}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setLinhasEscaneadas((prev) =>
+                                      prev.map((l, i) => (i === idx ? { ...l, cargoSugerido: val } : l))
+                                    );
+                                  }}
+                                  className="w-full px-1.5 py-0.5 border border-slate-200 rounded text-[10px] text-slate-600 bg-slate-50"
+                                >
+                                  <option value="Frentista">Frentista</option>
+                                  <option value="Operador de Caixa">Operador de Caixa</option>
+                                  <option value="Lubrificador">Lubrificador</option>
+                                  <option value="Supervisor de Pista">Supervisor de Pista</option>
+                                  <option value="Gerente">Gerente</option>
+                                </select>
+                              </div>
+                            </td>
+
+                            <td className="p-2 border-r border-slate-200">
+                              <select
+                                value={linha.siglaTurnoPrincipal}
+                                onChange={(e) => handleAlterarTurnoLinhaEscaneada(linha.idTemp, e.target.value)}
+                                className="w-full px-2 py-1 border border-purple-300 rounded text-xs font-bold bg-purple-50 text-purple-950"
+                              >
+                                <option value="T1">T1 — Manhã (06h-14h)</option>
+                                <option value="T2">T2 — Tarde (14h-22h)</option>
+                                <option value="T3">T3 — Noite (22h-06h)</option>
+                                <option value="HOR">HOR — Horista (08h-14h)</option>
+                                <option value="PLT">PLT — Plantão 12x36</option>
+                              </select>
+                              <div className="text-[10px] font-mono text-slate-500 mt-1">
+                                Horário: {linha.horarioInicioPadrao} às {linha.horarioFimPadrao}
+                              </div>
+                            </td>
+
+                            <td className="p-2 border-r border-slate-200">
+                              <select
+                                value={linha.funcionarioIdVinculado}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setLinhasEscaneadas((prev) =>
+                                    prev.map((l, i) => (i === idx ? { ...l, funcionarioIdVinculado: val } : l))
+                                  );
+                                }}
+                                className="w-full px-2 py-1 border border-slate-300 rounded text-xs font-semibold bg-white text-slate-800"
+                              >
+                                <option value="">+ Cadastrar Novo ({linha.nomeNaImagem})</option>
+                                {funcionarios.map((f) => (
+                                  <option key={f.id} value={f.id}>
+                                    Vincular: {f.nome} ({f.cargo})
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+
+                            {daysArray.map((d) => {
+                              const cell = linha.dias[d] || {
+                                status: 'TRABALHO',
+                                turno: 'Turno 1 - Manhã (06h - 14h)',
+                                sigla: 'T1',
+                                horarioInicio: '06:00',
+                                horarioFim: '14:00',
+                              };
+                              const isFolga = cell.status === 'FOLGA' || cell.sigla === 'S';
+                              const badgeColor = isFolga
+                                ? 'bg-emerald-100 text-emerald-900 font-black'
+                                : cell.sigla === 'T2'
+                                ? 'bg-blue-100 text-blue-900 font-bold'
+                                : cell.sigla === 'T3'
+                                ? 'bg-purple-100 text-purple-900 font-bold'
+                                : cell.sigla === 'HOR'
+                                ? 'bg-teal-100 text-teal-900 font-bold'
+                                : cell.sigla === 'PLT'
+                                ? 'bg-indigo-100 text-indigo-900 font-bold'
+                                : 'bg-amber-100 text-amber-900 font-bold';
+
+                              return (
+                                <td
+                                  key={d}
+                                  onClick={() => handleToggleDiaEscaneado(linha.idTemp, d)}
+                                  title={`Dia ${d}: ${isFolga ? 'Folga (S)' : `${cell.turno} (${cell.horarioInicio}-${cell.horarioFim})`} — Clique para alternar`}
+                                  className={`p-1 text-center border-r border-slate-100 cursor-pointer select-none ${badgeColor}`}
+                                >
+                                  <span className="font-mono text-[10px]">{isFolga ? 'S' : cell.sigla}</span>
+                                </td>
+                              );
+                            })}
+                            <td className="p-1.5 text-center">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setLinhasEscaneadas((prev) => prev.filter((l) => l.idTemp !== linha.idTemp))
+                                }
+                                className="p-1 text-red-500 hover:bg-red-50 rounded"
+                                title="Remover linha"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </div>
 
             {/* Footer */}
-            <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 flex items-center justify-between">
+            <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
               <div className="text-xs text-slate-500">
-                Clique em qualquer célula da prévia acima para alternar entre <strong>T1</strong> (Manhã), <strong>T2</strong> (Tarde), <strong>HOR</strong> (Horista) e <strong>S</strong> (Folga).
+                Você pode editar o <strong>Nome</strong>, escolher o <strong>Turno Principal</strong> da linha ou clicar em qualquer dia para alternar entre <strong>T1</strong>, <strong>T2</strong>, <strong>T3</strong>, <strong>HOR</strong> e <strong>S</strong> (Folga).
               </div>
               <div className="flex items-center gap-3">
                 <button
@@ -1652,7 +2008,9 @@ export const PlannerView: React.FC<PlannerProps> = ({
                   className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition disabled:opacity-50 cursor-pointer"
                 >
                   <CheckCircle className="w-4 h-4" />
-                  {salvandoVinculo ? 'Vinculando no Planner...' : 'Vincular e Salvar no Planner'}
+                  {salvandoVinculo
+                    ? 'Anexando ao Planner...'
+                    : `Anexar Funcionários e Turnos ao Planner (${linhasEscaneadas.length})`}
                 </button>
               </div>
             </div>
