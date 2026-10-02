@@ -24,16 +24,12 @@ import {
   AlertTriangle,
   Trash2,
   Edit2,
-  Printer,
   ChevronDown,
   ChevronUp,
   RotateCcw,
   Save,
   SlidersHorizontal,
-  Sparkles,
-  FileText,
   ClipboardCheck,
-  Plus,
   Thermometer,
   FlaskConical,
   Droplets,
@@ -41,7 +37,6 @@ import {
   Flame,
   Zap,
   Leaf,
-  Fuel,
 } from 'lucide-react';
 
 const repoDensidades = new PostoSubcollectionRepository<RegistroDensidade>('densidades');

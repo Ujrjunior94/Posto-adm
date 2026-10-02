@@ -38,6 +38,7 @@ import {
   ConflitoEscala,
 } from './detectorConflitosEscala';
 import { PainelConflitosEscala } from './PainelConflitosEscala';
+import { ModalImportarEscalaImagem } from './ModalImportarEscalaImagem';
 
 const repoEscala = new PostoSubcollectionRepository<Escala>('escalas');
 const repoFunc = new PostoSubcollectionRepository<Funcionario>('funcionarios');
@@ -169,6 +170,9 @@ export const PlannerView: React.FC<PlannerProps> = ({
   const [editCargo, setEditCargo] = useState('Frentista');
   const [editTurnoPref, setEditTurnoPref] = useState('Turno 1 - Manhã (06h - 14h)');
   const [editStatusFunc, setEditStatusFunc] = useState<FuncionarioStatus>('ATIVO');
+
+  // Modal Importar Escala por Imagem Oficial com Validação Estrita (Posto ADM)
+  const [modalImportarImagemAberto, setModalImportarImagemAberto] = useState(false);
 
   // Modal Escanear Imagem da Escala e Vincular no Planner
   const [isScannerOpen, setIsScannerOpen] = useState(false);
@@ -1129,14 +1133,11 @@ export const PlannerView: React.FC<PlannerProps> = ({
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => {
-              setIsScannerOpen(true);
-              setErroScanner('');
-            }}
-            className="inline-flex items-center gap-2 px-3.5 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg transition shadow-xs cursor-pointer"
+            onClick={() => setModalImportarImagemAberto(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white text-xs font-bold rounded-lg transition shadow-md hover:shadow-lg cursor-pointer transform active:scale-98"
           >
             <Sparkles className="w-4 h-4 text-emerald-300" />
-            Escanear com ChatGPT
+            Importar escala por imagem
           </button>
 
           {onNavigateToIAEscala && (
@@ -2276,6 +2277,15 @@ ${temDescoberto ? `\n🚨 CRÍTICO: Turno(s) ${descobertos.join(', ')} sem nenhu
           </div>
         </div>
       )}
+      {/* MODAL OFICIAL: IMPORTAR ESCALA POR IMAGEM COM VALIDAÇÃO ESTRITA */}
+      <ModalImportarEscalaImagem
+        isOpen={modalImportarImagemAberto}
+        onClose={() => setModalImportarImagemAberto(false)}
+        funcionarios={funcionarios}
+        anoMesAtual={mesAnoStr}
+        currentDate={currentDate}
+        onSuccess={onReload}
+      />
     </div>
   );
 };

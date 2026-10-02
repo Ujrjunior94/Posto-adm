@@ -362,13 +362,19 @@ export interface Afericao {
   criadoEm: string;
 }
 
-export type TipoTesteANP = 'DENSIDADE_D20' | 'TESTE_PROVETA_GASOLINA' | 'TEOR_ALCOOLICO_ETANOL' | 'RECEBIMENTO_DESCARGA';
+export type TipoTesteANP =
+  | 'DENSIDADE_D20'
+  | 'TESTE_PROVETA_GASOLINA'
+  | 'TEOR_ALCOOLICO_ETANOL'
+  | 'RECEBIMENTO_DESCARGA'
+  | 'DIESEL_QUALIDADE';
 
 export interface RegistroDensidade {
   id: string;
   postoId: string;
   produto: string;
   tipoTeste?: TipoTesteANP;
+  padraoRegulatorio?: 'ANP_AGOSTO_2026' | 'ANP_TRANSICAO';
   temperatura: number;
   massa?: number;
   volume?: number;
@@ -382,8 +388,8 @@ export interface RegistroDensidade {
   hora: string;
   // Campos ANP 2026 adicionais
   volumeAquosoFinal?: number; // Para teste da proveta em gasolina (ml)
-  teorEtanolAnidro?: number; // % apurado (26% a 28% comum, 24% a 26% premium)
-  grauINPM?: number; // Teor em massa para etanol hidratado (92,5° a 95,4°)
+  teorEtanolAnidro?: number; // % apurado (31% a 33% para E32 / Ago 2026)
+  grauINPM?: number; // Teor em massa para etanol hidratado (92,5° a 93,8°)
   grauGL?: number; // Teor em volume para etanol hidratado (94,5° a 96,9°)
   condutividadeEletrica?: number; // máx 350 µS/m a 25°C
   ph?: number; // 6,0 a 8,0 para etanol
@@ -395,6 +401,11 @@ export interface RegistroDensidade {
   compartimento?: string;
   lacreConferido?: boolean;
   parecerTecnico?: string;
+  parecerChatGPT?: string;
+  motorIaUtilizado?: string;
+  densidadeNfKgM3?: number;
+  densidadeProvetaKgM3?: number;
+  diferencaNfProveta?: number;
   observacao?: string;
   // Campos específicos de conformidade regulatória para produto D32
   metodoEnsaioD32?: string;

@@ -657,28 +657,34 @@ export interface ResultadoTesteProveta {
 
 export function calcularTesteProvetaGasolina(
   volumeAquosoFinal: number,
-  tipoGasolina: 'COMUM' | 'ADITIVADA' | 'PREMIUM' = 'COMUM'
+  tipoGasolina: 'COMUM' | 'ADITIVADA' | 'PREMIUM' = 'COMUM',
+  padraoRegulatorio: 'ANP_AGOSTO_2026' | 'ANP_TRANSICAO' = 'ANP_AGOSTO_2026'
 ): ResultadoTesteProveta {
   const volFinal = Math.max(50, Math.min(100, volumeAquosoFinal));
   // Fórmula oficial ANP: (V_final - 50) * 2 + 1
   const teorEtanol = Math.round(((volFinal - 50) * 2 + 1) * 10) / 10;
 
   const isPremium = tipoGasolina === 'PREMIUM';
-  // Resolução de Agosto de 2026 (D32 / E32): mistura de 32% ± 1% (31,0% a 33,0%) para comum/aditivada; Premium 25% ± 1%
-  const teorMin = isPremium ? 24.0 : 31.0;
-  const teorMax = isPremium ? 26.0 : 33.0;
-  const teorNominal = isPremium ? 25.0 : 32.0;
+  const isAgosto2026 = padraoRegulatorio === 'ANP_AGOSTO_2026';
+
+  // Padrão de Agosto de 2026 (Lei 14.993/2024 - Combustível do Futuro / E32): 32% ± 1% (31,0% a 33,0%)
+  // Padrão de Transição: 27% ± 1% (26,0% a 28,0%)
+  const teorMin = isPremium ? 24.0 : isAgosto2026 ? 31.0 : 26.0;
+  const teorMax = isPremium ? 26.0 : isAgosto2026 ? 33.0 : 28.0;
+  const teorNominal = isPremium ? 25.0 : isAgosto2026 ? 32.0 : 27.0;
 
   const isConforme = teorEtanol >= teorMin && teorEtanol <= teorMax;
 
   let parecer = isPremium
     ? `Conforme padrão ANP Premium (${teorMin}% a ${teorMax}% | Nominal ${teorNominal}%).`
-    : `Conforme Resolução de Agosto de 2026 D32 / E32 (${teorMin}% a ${teorMax}% | Nominal ${teorNominal}%).`;
+    : isAgosto2026
+    ? `Conforme Resolução de Agosto de 2026 D32 / E32 (${teorMin}% a ${teorMax}% | Nominal ${teorNominal}%).`
+    : `Conforme padrão ANP de Transição (${teorMin}% a ${teorMax}% | Nominal ${teorNominal}%).`;
 
   if (teorEtanol < teorMin) {
-    parecer = `NÃO CONFORME: Teor de etanol abaixo do mínimo regulamentar de ${teorMin}% (Padrão D32/Resolução Ago/2026). Suspeita de fraude ou erro de formulação.`;
+    parecer = `NÃO CONFORME: Teor de etanol abaixo do mínimo regulamentar de ${teorMin}% (${isAgosto2026 ? 'Padrão E32 / Ago 2026' : 'Padrão Transição'}). Suspeita de fraude ou erro de formulação.`;
   } else if (teorEtanol > teorMax) {
-    parecer = `NÃO CONFORME: Teor de etanol acima do teto de ${teorMax}% (Padrão D32/Resolução Ago/2026). Excesso de álcool na gasolina.`;
+    parecer = `NÃO CONFORME: Teor de etanol acima do teto de ${teorMax}% (${isAgosto2026 ? 'Padrão E32 / Ago 2026' : 'Padrão Transição'}). Excesso de álcool na gasolina.`;
   }
 
   return {
