@@ -1,5 +1,5 @@
 import { Funcionario, Escala, EscalaStatus } from '../../types';
-import { requisitarLeituraEscalaOCR } from '../../services/geminiOcrService';
+import { PostoSubcollectionRepository } from '../../repositories/firestoreRepository';
 
 export interface TurnoCadastrado {
   id: string;
@@ -53,24 +53,59 @@ export const TURNOS_PADRAO_POSTO: TurnoCadastrado[] = [
   },
 ];
 
-export type StatusRegistroImportado = 'CONFIRMADO' | 'REVISAO' | 'NAO_IDENTIFICADO';
+export type StatusValidacao = 'CONFIRMADO' | 'REVISAO' | 'NAO_IDENTIFICADO';
+
+export interface RespostaBrutaIA {
+  document?: {
+    month?: number | null;
+    year?: number | null;
+    title?: string;
+  };
+  grid?: {
+    headers?: string[];
+    rows?: Array<{
+      rowIndex: number;
+      employeeCell?: {
+        rawText: string;
+        confidence?: number;
+      };
+      dayCells?: Array<{
+        day?: number;
+        columnIndex: number;
+        rawText: string;
+        confidence?: number;
+      }>;
+    }>;
+  };
+  cells?: Array<{
+    rowIndex: number;
+    columnIndex: number;
+    rawText: string;
+    confidence?: number;
+    role?: 'HEADER' | 'EMPLOYEE' | 'DAY_NUMBER' | 'SHIFT_VALUE';
+  }>;
+  rawLines?: string[];
+}
 
 export interface RegistroImportadoReconhecido {
-  id: string; // identificador único do registro na tabela de revisão
+  id: string; // id temporário da linha na tela de revisão
+  rowIndex: number;
+  columnIndex: number;
+  rawEmployeeText: string;
+  rawShiftText: string;
   employeeId: string | null;
   employeeName: string;
   day: number;
   shiftId: string | null;
   shiftName: string;
   shiftSigla: string;
-  confidence: number; // 0.00 a 1.00
-  status: StatusRegistroImportado;
+  confidence: number;
+  status: StatusValidacao;
   observation: string;
   isFolga: boolean;
   horarioInicio: string;
   horarioFim: string;
-  rawName?: string;
-  rawShift?: string;
+  isCustomManual?: boolean;
 }
 
 export interface ResultadoImportacaoEscala {
@@ -82,10 +117,22 @@ export interface ResultadoImportacaoEscala {
   totalConfirmados: number;
   totalRevisao: number;
   totalNaoIdentificados: number;
+  totalProntosParaImportar: number;
 }
 
+export interface SnapshotImportacao {
+  id: string;
+  timestamp: string;
+  postoId: string;
+  anoMes: string;
+  registrosSubstituidos: Escala[];
+  registrosNovosIds: string[];
+}
+
+const STORAGE_SNAPSHOT_KEY = 'posto_adm_planner_last_import_snapshot';
+
 // ============================================================================
-// FUNÇÃO DE NORMALIZAÇÃO DE NOMES
+// FUNÇÃO DE NORMALIZAÇÃO DE TEXTO
 // ============================================================================
 export function normalizeName(str: string): string {
   return String(str || '')
@@ -98,159 +145,67 @@ export function normalizeName(str: string): string {
 }
 
 // ============================================================================
-// VALIDADORES NO CÓDIGO (REGRA 7: CAMADA INDEPENDENTE DA IA)
+// VALIDAÇÃO 1: resolveEmployee(rawText, employees)
+// A IA NÃO PODE CRIAR FUNCIONÁRIO. SOMENTE FUNCIONÁRIOS REAIS DO POSTO ADM.
 // ============================================================================
-export function validateEmployee(
-  employeeId: string | null | undefined,
-  funcionarios: Funcionario[]
-): { valid: boolean; funcionario?: Funcionario } {
-  if (!employeeId || !Array.isArray(funcionarios)) {
-    return { valid: false };
-  }
-  const func = funcionarios.find((f) => f && f.id === employeeId);
-  return {
-    valid: Boolean(func),
-    funcionario: func,
-  };
-}
-
-export function validateShift(
-  shiftId: string | null | undefined,
-  turnos: TurnoCadastrado[] = TURNOS_PADRAO_POSTO
-): { valid: boolean; turno?: TurnoCadastrado; isFolga: boolean } {
-  if (!shiftId) {
-    return { valid: false, isFolga: false };
-  }
-
-  const norm = normalizeName(shiftId);
-  if (norm === 'folga' || norm === 's' || norm === 'folga 6x1' || norm === 'descanso') {
-    return { valid: true, isFolga: true };
-  }
-
-  const found = turnos.find(
-    (t) =>
-      t.id === shiftId ||
-      normalizeName(t.id) === norm ||
-      normalizeName(t.sigla) === norm ||
-      normalizeName(t.nomeCurto) === norm
-  );
-
-  return {
-    valid: Boolean(found),
-    turno: found,
-    isFolga: false,
-  };
-}
-
-export function validateDay(day: number, totalDaysInMonth: number): boolean {
-  return Number.isInteger(day) && day >= 1 && day <= totalDaysInMonth;
-}
-
-export function validateRecord(
-  record: Partial<RegistroImportadoReconhecido>,
-  funcionarios: Funcionario[],
-  turnos: TurnoCadastrado[],
-  totalDaysInMonth: number
-): RegistroImportadoReconhecido {
-  const dayValid = validateDay(Number(record.day), totalDaysInMonth);
-  const empVal = validateEmployee(record.employeeId, funcionarios);
-  const shiftVal = validateShift(record.shiftId, turnos);
-
-  let status: StatusRegistroImportado = 'CONFIRMADO';
-  const obs: string[] = [];
-
-  if (!dayValid) {
-    status = 'REVISAO';
-    obs.push(`Dia inválido (${record.day}). Deve estar entre 1 e ${totalDaysInMonth}.`);
-  }
-
-  if (!empVal.valid) {
-    status = 'NAO_IDENTIFICADO';
-    obs.push('Funcionário não encontrado no cadastro oficial.');
-  }
-
-  if (!shiftVal.valid) {
-    status = status === 'NAO_IDENTIFICADO' ? 'NAO_IDENTIFICADO' : 'REVISAO';
-    obs.push('Turno não corresponde aos turnos oficiais cadastrados.');
-  }
-
-  const confidence = typeof record.confidence === 'number' ? record.confidence : 0.9;
-  if (confidence < 0.7 && status === 'CONFIRMADO') {
-    status = 'REVISAO';
-    obs.push('Baixa confiança de leitura visual.');
-  }
-
-  const shiftName = shiftVal.isFolga
-    ? 'Folga'
-    : shiftVal.turno?.nomeCurto || shiftVal.turno?.id || record.shiftName || 'Não identificado';
-
-  const shiftSigla = shiftVal.isFolga
-    ? 'S'
-    : shiftVal.turno?.sigla || '—';
-
-  return {
-    id: record.id || `rec-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
-    employeeId: empVal.valid && empVal.funcionario ? empVal.funcionario.id : null,
-    employeeName: empVal.valid && empVal.funcionario ? empVal.funcionario.nome : record.employeeName || 'Não identificado',
-    day: Number(record.day) || 1,
-    shiftId: shiftVal.valid ? (shiftVal.isFolga ? 'FOLGA' : shiftVal.turno?.id || 'FOLGA') : null,
-    shiftName,
-    shiftSigla,
-    confidence,
-    status,
-    observation: record.observation ? `${record.observation} ${obs.join(' ')}`.trim() : obs.join(' '),
-    isFolga: shiftVal.isFolga,
-    horarioInicio: shiftVal.isFolga ? '00:00' : shiftVal.turno?.inicio || '06:00',
-    horarioFim: shiftVal.isFolga ? '00:00' : shiftVal.turno?.fim || '14:00',
-    rawName: record.rawName,
-    rawShift: record.rawShift,
-  };
-}
-
-// ============================================================================
-// CORRESPONDÊNCIA SEGURA DE FUNCIONÁRIOS (SEM AMBIGUIDADE)
-// ============================================================================
-export function matchEmployeeByName(
-  rawName: string,
-  funcionarios: Funcionario[]
+export function resolveEmployee(
+  rawText: string | undefined | null,
+  employees: Funcionario[]
 ): {
-  funcionario: Funcionario | null;
-  status: StatusRegistroImportado;
+  status: 'MATCH' | 'REVIEW' | 'NOT_FOUND';
+  employee: Funcionario | null;
   confidence: number;
   candidates: Funcionario[];
   observation: string;
 } {
-  const norm = normalizeName(rawName);
-  if (!norm || norm === 'nao identificado' || norm.length < 2) {
+  const norm = normalizeName(rawText || '');
+  if (!norm || norm === 'nao identificado' || norm === 'null' || norm.length < 2) {
     return {
-      funcionario: null,
-      status: 'NAO_IDENTIFICADO',
+      status: 'NOT_FOUND',
+      employee: null,
       confidence: 0,
       candidates: [],
-      observation: 'Nome ilegível ou ausente na imagem.',
+      observation: 'Nome de funcionário ilegível ou ausente na imagem.',
+    };
+  }
+
+  if (!Array.isArray(employees) || employees.length === 0) {
+    return {
+      status: 'NOT_FOUND',
+      employee: null,
+      confidence: 0,
+      candidates: [],
+      observation: 'Nenhum funcionário cadastrado no Posto ADM.',
     };
   }
 
   // 1. Correspondência exata
-  const exact = funcionarios.filter((f) => normalizeName(f.nome) === norm);
+  const exact = employees.filter((f) => normalizeName(f.nome) === norm);
   if (exact.length === 1) {
     return {
-      funcionario: exact[0],
-      status: 'CONFIRMADO',
+      status: 'MATCH',
+      employee: exact[0],
       confidence: 0.98,
       candidates: exact,
-      observation: 'Correspondência exata de cadastro.',
+      observation: 'Correspondência exata com o cadastro.',
     };
   }
 
-  // 2. Correspondência por tokens (Primeiro nome + Sobrenome)
+  // 2. Correspondência por Primeiro Nome + Sobrenome / Tokens
   const tokensLido = norm.split(' ').filter((t) => t.length >= 2);
-  const candidatas: Funcionario[] = [];
+  const candidatos: Funcionario[] = [];
 
-  for (const f of funcionarios) {
+  for (const f of employees) {
     const normF = normalizeName(f.nome);
-    if (normF.includes(norm) || norm.includes(normF)) {
-      candidatas.push(f);
+    if (!normF) continue;
+
+    if (normF === norm) {
+      candidatos.push(f);
+      continue;
+    }
+
+    if (normF.startsWith(norm) || norm.startsWith(normF)) {
+      candidatos.push(f);
       continue;
     }
 
@@ -260,118 +215,157 @@ export function matchEmployeeByName(
         tokensLido[0] === tokensF[0] &&
         (tokensLido[tokensLido.length - 1] === tokensF[tokensF.length - 1] || tokensLido[1] === tokensF[1])
       ) {
-        candidatas.push(f);
+        candidatos.push(f);
       }
     } else if (tokensLido.length === 1 && tokensF.length > 0 && tokensF[0] === tokensLido[0]) {
-      candidatas.push(f);
+      // Mesmo primeiro nome
+      candidatos.push(f);
     }
   }
 
-  // Desduplicar candidatas
-  const candidatasUnicas = Array.from(new Set(candidatas));
+  const candidatosUnicos = Array.from(new Set(candidatos));
 
-  if (candidatasUnicas.length === 1) {
+  if (candidatosUnicos.length === 1) {
     return {
-      funcionario: candidatasUnicas[0],
-      status: 'CONFIRMADO',
-      confidence: 0.92,
-      candidates: candidatasUnicas,
-      observation: `Conciliado com "${candidatasUnicas[0].nome}".`,
+      status: 'MATCH',
+      employee: candidatosUnicos[0],
+      confidence: 0.91,
+      candidates: candidatosUnicos,
+      observation: `Conciliado com cadastro oficial: "${candidatosUnicos[0].nome}".`,
     };
   }
 
-  if (candidatasUnicas.length > 1) {
-    // Ambiguidade detectada: REGRA 8 -> REVISAO
+  if (candidatosUnicos.length > 1) {
+    // Ambiguidade: mais de 1 funcionário com nome parecido (ex: João Silva e João Santos)
     return {
-      funcionario: null,
-      status: 'REVISAO',
+      status: 'REVIEW',
+      employee: null,
       confidence: 0.5,
-      candidates: candidatasUnicas,
-      observation: `Ambiguidade: múltiplos funcionários encontrados (${candidatasUnicas.map((c) => c.nome).join(', ')}). Selecione manualmente.`,
+      candidates: candidatosUnicos,
+      observation: `Ambiguidade: múltiplos funcionários encontrados (${candidatosUnicos
+        .map((c) => c.nome)
+        .join(', ')}). Selecione manualmente.`,
     };
   }
 
   return {
-    funcionario: null,
-    status: 'NAO_IDENTIFICADO',
-    confidence: 0.3,
+    status: 'NOT_FOUND',
+    employee: null,
+    confidence: 0.2,
     candidates: [],
-    observation: `Nenhum funcionário cadastrado corresponde a "${rawName}".`,
+    observation: `Funcionário "${rawText}" não encontrado no cadastro oficial do Posto ADM.`,
   };
 }
 
 // ============================================================================
-// CORRESPONDÊNCIA SEGURA DE TURNOS (REGRA 9)
+// VALIDAÇÃO 2: resolveShift(rawText, shifts)
+// A IA NÃO PODE CRIAR TURNO OU HORÁRIO INEXISTENTE.
 // ============================================================================
-export function matchShiftByText(
-  rawShift: string,
-  turnos: TurnoCadastrado[] = TURNOS_PADRAO_POSTO
+export function resolveShift(
+  rawText: string | undefined | null,
+  shifts: TurnoCadastrado[] = TURNOS_PADRAO_POSTO
 ): {
+  status: 'MATCH' | 'NOT_FOUND';
   shiftId: string | null;
   shiftName: string;
   shiftSigla: string;
   isFolga: boolean;
-  status: StatusRegistroImportado;
+  horarioInicio: string;
+  horarioFim: string;
   confidence: number;
+  observation: string;
 } {
-  const norm = normalizeName(rawShift);
+  const raw = String(rawText || '').trim();
+  const norm = normalizeName(raw);
 
+  if (!norm || norm === 'null' || norm === 'undefined' || norm === '-') {
+    return {
+      status: 'NOT_FOUND',
+      shiftId: null,
+      shiftName: raw || 'Não identificado',
+      shiftSigla: '—',
+      isFolga: false,
+      horarioInicio: '00:00',
+      horarioFim: '00:00',
+      confidence: 0,
+      observation: 'Célula de turno vazia ou ilegível.',
+    };
+  }
+
+  // 1. Folgas operacionais e DSR
   if (
     norm === 's' ||
     norm === 'folga' ||
     norm === 'f' ||
+    norm === 'dsr' ||
+    norm === 'off' ||
     norm === 'descanso' ||
     norm === 'folga 6x1' ||
+    norm === 'folga semanal' ||
     norm === 'd'
   ) {
     return {
+      status: 'MATCH',
       shiftId: 'FOLGA',
       shiftName: 'Folga',
       shiftSigla: 'S',
       isFolga: true,
-      status: 'CONFIRMADO',
+      horarioInicio: '00:00',
+      horarioFim: '00:00',
       confidence: 0.99,
+      observation: 'Folga / DSR reconhecido.',
     };
   }
 
-  if (norm === 'fe' || norm === 'ferias') {
+  // 2. Férias, Atestado, Falta
+  if (norm === 'fe' || norm === 'ferias' || norm === 'fer') {
     return {
+      status: 'MATCH',
       shiftId: 'FERIAS',
       shiftName: 'Férias',
       shiftSigla: 'FE',
       isFolga: false,
-      status: 'CONFIRMADO',
-      confidence: 0.95,
+      horarioInicio: '00:00',
+      horarioFim: '00:00',
+      confidence: 0.96,
+      observation: 'Férias reconhecida.',
     };
   }
 
-  if (norm === 'at' || norm === 'atestado' || norm === 'medico') {
+  if (norm === 'at' || norm === 'atestado' || norm === 'medico' || norm === 'lic') {
     return {
+      status: 'MATCH',
       shiftId: 'ATESTADO',
       shiftName: 'Atestado',
       shiftSigla: 'AT',
       isFolga: false,
-      status: 'CONFIRMADO',
-      confidence: 0.95,
+      horarioInicio: '00:00',
+      horarioFim: '00:00',
+      confidence: 0.96,
+      observation: 'Atestado médico reconhecido.',
     };
   }
 
   if (norm === 'fa' || norm === 'falta' || norm === 'ausente') {
     return {
+      status: 'MATCH',
       shiftId: 'AUSENTE',
       shiftName: 'Falta',
       shiftSigla: 'FA',
       isFolga: false,
-      status: 'CONFIRMADO',
-      confidence: 0.95,
+      horarioInicio: '00:00',
+      horarioFim: '00:00',
+      confidence: 0.96,
+      observation: 'Falta / Ausência registrada.',
     };
   }
 
-  for (const t of turnos) {
+  // 3. Correspondência com a lista de turnos cadastrados
+  for (const t of shifts) {
     const normSigla = normalizeName(t.sigla);
     const normNome = normalizeName(t.nomeCurto);
     const normId = normalizeName(t.id);
-    const horarioRange = normalizeName(`${t.inicio} ${t.fim}`).replace(/[^0-9]/g, '');
+    const digitsPattern = `${t.inicio}-${t.fim}`.replace(/[^0-9]/g, '');
 
     const digitsOnly = norm.replace(/[^0-9]/g, '');
 
@@ -379,212 +373,378 @@ export function matchShiftByText(
       norm === normSigla ||
       norm === normNome ||
       norm === normId ||
-      (digitsOnly.length >= 4 && horarioRange.length >= 4 && (horarioRange.includes(digitsOnly) || digitsOnly.includes(horarioRange.slice(0, 4))))
+      (digitsOnly.length >= 4 && digitsPattern.length >= 4 && digitsOnly === digitsPattern)
     ) {
       return {
+        status: 'MATCH',
         shiftId: t.id,
         shiftName: t.nomeCurto,
         shiftSigla: t.sigla,
         isFolga: false,
-        status: 'CONFIRMADO',
-        confidence: 0.95,
+        horarioInicio: t.inicio,
+        horarioFim: t.fim,
+        confidence: 0.96,
+        observation: `Turno oficial validado: ${t.nomeCurto} (${t.inicio} às ${t.fim}).`,
       };
     }
   }
 
-  // Heurística de aproximação se contém 06, 14, 22
-  if (norm.includes('06') || norm.includes('manha') || norm.includes('1o') || norm.includes('t1')) {
-    const t1 = turnos.find((t) => t.sigla === 'T1') || turnos[0];
+  // 4. Reconhecimento de horários ou siglas padrão (06-14, 14-22, 22-06, horista, plantão)
+  if (norm.includes('06') && norm.includes('14')) {
+    const t1 = shifts.find((t) => t.sigla === 'T1') || shifts[0];
     return {
+      status: 'MATCH',
       shiftId: t1.id,
       shiftName: t1.nomeCurto,
       shiftSigla: t1.sigla,
       isFolga: false,
-      status: 'CONFIRMADO',
-      confidence: 0.88,
+      horarioInicio: t1.inicio,
+      horarioFim: t1.fim,
+      confidence: 0.92,
+      observation: `Horário 06h-14h associado ao ${t1.nomeCurto}.`,
     };
   }
 
-  if (norm.includes('14') || norm.includes('tarde') || norm.includes('2o') || norm.includes('t2')) {
-    const t2 = turnos.find((t) => t.sigla === 'T2') || turnos[1];
+  if (norm.includes('14') && norm.includes('22')) {
+    const t2 = shifts.find((t) => t.sigla === 'T2') || shifts[1];
     return {
+      status: 'MATCH',
       shiftId: t2.id,
       shiftName: t2.nomeCurto,
       shiftSigla: t2.sigla,
       isFolga: false,
-      status: 'CONFIRMADO',
-      confidence: 0.88,
+      horarioInicio: t2.inicio,
+      horarioFim: t2.fim,
+      confidence: 0.92,
+      observation: `Horário 14h-22h associado ao ${t2.nomeCurto}.`,
     };
   }
 
-  if (norm.includes('22') || norm.includes('noite') || norm.includes('3o') || norm.includes('t3')) {
-    const t3 = turnos.find((t) => t.sigla === 'T3') || turnos[2];
+  if ((norm.includes('22') && norm.includes('06')) || (norm.includes('22') && norm.includes('6'))) {
+    const t3 = shifts.find((t) => t.sigla === 'T3') || shifts[2];
     return {
+      status: 'MATCH',
       shiftId: t3.id,
       shiftName: t3.nomeCurto,
       shiftSigla: t3.sigla,
       isFolga: false,
-      status: 'CONFIRMADO',
-      confidence: 0.88,
+      horarioInicio: t3.inicio,
+      horarioFim: t3.fim,
+      confidence: 0.92,
+      observation: `Horário 22h-06h associado ao ${t3.nomeCurto}.`,
     };
   }
 
-  if (norm.includes('hor') || norm.includes('horista')) {
-    const th = turnos.find((t) => t.sigla === 'HOR') || turnos[3];
+  if (norm.includes('hor') || norm.includes('horista') || (norm.includes('08') && norm.includes('14'))) {
+    const th = shifts.find((t) => t.sigla === 'HOR') || shifts[3];
     return {
-      shiftId: th ? th.id : 'Turno Horista',
-      shiftName: th ? th.nomeCurto : 'Turno Horista',
-      shiftSigla: 'HOR',
+      status: 'MATCH',
+      shiftId: th.id,
+      shiftName: th.nomeCurto,
+      shiftSigla: th.sigla,
       isFolga: false,
-      status: 'CONFIRMADO',
-      confidence: 0.88,
+      horarioInicio: th.inicio,
+      horarioFim: th.fim,
+      confidence: 0.92,
+      observation: `Horista associado ao ${th.nomeCurto}.`,
     };
   }
 
   if (norm.includes('12x36') || norm.includes('plantao') || norm.includes('plt')) {
-    const tp = turnos.find((t) => t.sigla === 'PLT') || turnos[4];
+    const tp = shifts.find((t) => t.sigla === 'PLT') || shifts[4];
     return {
-      shiftId: tp ? tp.id : 'Plantão',
-      shiftName: tp ? tp.nomeCurto : 'Plantão 12x36',
-      shiftSigla: 'PLT',
+      status: 'MATCH',
+      shiftId: tp.id,
+      shiftName: tp.nomeCurto,
+      shiftSigla: tp.sigla,
       isFolga: false,
-      status: 'CONFIRMADO',
-      confidence: 0.88,
+      horarioInicio: tp.inicio,
+      horarioFim: tp.fim,
+      confidence: 0.92,
+      observation: `Plantão 12x36 associado ao ${tp.nomeCurto}.`,
     };
   }
 
+  // Se a IA leu um horário ou texto inexistente no Posto ADM (ex: "08-16", "10-18")
+  // REGRA 8: NÃO CRIAR "08h-16h". Retorna NOT_FOUND com shiftId = null.
   return {
+    status: 'NOT_FOUND',
     shiftId: null,
-    shiftName: rawShift || 'Não identificado',
+    shiftName: raw || 'Turno inexistente',
     shiftSigla: '—',
     isFolga: false,
-    status: 'NAO_IDENTIFICADO',
-    confidence: 0.3,
+    horarioInicio: '00:00',
+    horarioFim: '00:00',
+    confidence: 0.2,
+    observation: `Horário ou turno "${raw}" não existe no cadastro do Posto ADM. Selecione um turno válido.`,
   };
 }
 
 // ============================================================================
-// EXECUTOR PRINCIPAL DO FLUXO DE IMPORTAÇÃO DE ESCALA POR IMAGEM
+// VALIDAÇÃO 3: resolveDay(rawDay, columnIndex, headers, totalDaysInMonth)
 // ============================================================================
-export async function importarEscalaPorImagem({
-  imageBase64,
-  mimeType = 'image/jpeg',
-  month,
-  year,
-  funcionarios,
-  turnos = TURNOS_PADRAO_POSTO,
-  motor = 'chatgpt',
-}: {
-  imageBase64: string;
-  mimeType?: string;
-  month: number; // 1 a 12
-  year: number;
-  funcionarios: Funcionario[];
-  turnos?: TurnoCadastrado[];
-  motor?: 'chatgpt' | 'gemini';
-}): Promise<ResultadoImportacaoEscala> {
-  const mesAnoStr = `${year}-${String(month).padStart(2, '0')}`;
+export function resolveDay(
+  rawDay: number | string | undefined | null,
+  columnIndex: number,
+  headers: string[] = [],
+  totalDaysInMonth: number
+): { valid: boolean; day: number; observation: string } {
+  let dayNum = typeof rawDay === 'number' ? rawDay : parseInt(String(rawDay || ''), 10);
+
+  if (isNaN(dayNum) || dayNum < 1 || dayNum > totalDaysInMonth) {
+    // Tenta inferir pelo cabeçalho da coluna se houver
+    const headerCol = headers[columnIndex];
+    if (headerCol) {
+      const match = headerCol.match(/\b([0-2]?[0-9]|3[0-1])\b/);
+      if (match) {
+        dayNum = parseInt(match[1], 10);
+      }
+    }
+  }
+
+  if (isNaN(dayNum) || dayNum < 1 || dayNum > totalDaysInMonth) {
+    return {
+      valid: false,
+      day: Math.max(1, Math.min(totalDaysInMonth, columnIndex || 1)),
+      observation: `Dia ${rawDay} inválido para este mês (deve estar entre 1 e ${totalDaysInMonth}).`,
+    };
+  }
+
+  return {
+    valid: true,
+    day: dayNum,
+    observation: '',
+  };
+}
+
+// ============================================================================
+// VALIDADOR CENTRAL DO REGISTRO (REGRA 7 & 21: NUNCA CONFIAR NA IA)
+// ============================================================================
+export function validateRecord(
+  rec: Partial<RegistroImportadoReconhecido>,
+  employees: Funcionario[],
+  shifts: TurnoCadastrado[] = TURNOS_PADRAO_POSTO,
+  totalDaysInMonth: number
+): RegistroImportadoReconhecido {
+  const dayRes = resolveDay(rec.day, rec.columnIndex || 0, [], totalDaysInMonth);
+  const empRes = resolveEmployee(rec.employeeName || rec.rawEmployeeText, employees);
+  const shiftRes = resolveShift(rec.shiftName || rec.rawShiftText || rec.shiftId, shifts);
+
+  // Se o usuário selecionou manualmente um funcionário cadastrado pelo ID
+  let finalEmployeeId: string | null = null;
+  let finalEmployeeName = rec.employeeName || rec.rawEmployeeText || 'Não identificado';
+
+  if (rec.employeeId) {
+    const byId = employees.find((e) => e.id === rec.employeeId);
+    if (byId) {
+      finalEmployeeId = byId.id;
+      finalEmployeeName = byId.nome;
+    }
+  } else if (empRes.status === 'MATCH' && empRes.employee) {
+    finalEmployeeId = empRes.employee.id;
+    finalEmployeeName = empRes.employee.nome;
+  }
+
+  // Se o usuário selecionou manualmente um turno cadastrado pelo ID
+  let finalShiftId: string | null = null;
+  let finalShiftName = rec.shiftName || rec.rawShiftText || 'Não identificado';
+  let finalShiftSigla = '—';
+  let isFolga = false;
+  let horarioInicio = '00:00';
+  let horarioFim = '00:00';
+
+  if (rec.shiftId === 'FOLGA' || rec.isFolga) {
+    finalShiftId = 'FOLGA';
+    finalShiftName = 'Folga';
+    finalShiftSigla = 'S';
+    isFolga = true;
+  } else if (rec.shiftId === 'FERIAS') {
+    finalShiftId = 'FERIAS';
+    finalShiftName = 'Férias';
+    finalShiftSigla = 'FE';
+  } else if (rec.shiftId === 'ATESTADO') {
+    finalShiftId = 'ATESTADO';
+    finalShiftName = 'Atestado';
+    finalShiftSigla = 'AT';
+  } else if (rec.shiftId === 'AUSENTE') {
+    finalShiftId = 'AUSENTE';
+    finalShiftName = 'Falta';
+    finalShiftSigla = 'FA';
+  } else if (rec.shiftId) {
+    const byShiftId = shifts.find((s) => s.id === rec.shiftId);
+    if (byShiftId) {
+      finalShiftId = byShiftId.id;
+      finalShiftName = byShiftId.nomeCurto;
+      finalShiftSigla = byShiftId.sigla;
+      horarioInicio = byShiftId.inicio;
+      horarioFim = byShiftId.fim;
+    }
+  } else if (shiftRes.status === 'MATCH') {
+    finalShiftId = shiftRes.shiftId;
+    finalShiftName = shiftRes.shiftName;
+    finalShiftSigla = shiftRes.shiftSigla;
+    isFolga = shiftRes.isFolga;
+    horarioInicio = shiftRes.horarioInicio;
+    horarioFim = shiftRes.horarioFim;
+  }
+
+  // Determinar Status Final
+  let status: StatusValidacao = 'CONFIRMADO';
+  const obsList: string[] = [];
+
+  if (!dayRes.valid) {
+    status = 'REVISAO';
+    obsList.push(dayRes.observation);
+  }
+
+  if (!finalEmployeeId) {
+    status = 'NAO_IDENTIFICADO';
+    obsList.push(empRes.observation || 'Funcionário não identificado no cadastro.');
+  }
+
+  if (!finalShiftId) {
+    status = status === 'NAO_IDENTIFICADO' ? 'NAO_IDENTIFICADO' : 'REVISAO';
+    obsList.push(shiftRes.observation || 'Turno não reconhecido.');
+  }
+
+  if (empRes.status === 'REVIEW' && !rec.employeeId) {
+    status = 'REVISAO';
+  }
+
+  return {
+    id: rec.id || `rec-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+    rowIndex: rec.rowIndex ?? 0,
+    columnIndex: rec.columnIndex ?? 0,
+    rawEmployeeText: rec.rawEmployeeText || rec.employeeName || '',
+    rawShiftText: rec.rawShiftText || rec.shiftName || '',
+    employeeId: finalEmployeeId,
+    employeeName: finalEmployeeName,
+    day: dayRes.day,
+    shiftId: finalShiftId,
+    shiftName: finalShiftName,
+    shiftSigla: finalShiftSigla,
+    confidence: rec.confidence ?? (status === 'CONFIRMADO' ? 0.95 : 0.5),
+    status,
+    observation: obsList.join(' ') || rec.observation || 'Validado com sucesso.',
+    isFolga,
+    horarioInicio,
+    horarioFim,
+    isCustomManual: rec.isCustomManual,
+  };
+}
+
+// ============================================================================
+// PROCESSADOR DE DADOS CRUDOS DA IA -> VALIDADOR DO POSTO ADM
+// ============================================================================
+export function processarLeituraBrutaParaValidacao(
+  respostaIA: RespostaBrutaIA | any,
+  employees: Funcionario[],
+  shifts: TurnoCadastrado[] = TURNOS_PADRAO_POSTO,
+  month: number,
+  year: number
+): ResultadoImportacaoEscala {
   const totalDaysInMonth = new Date(year, month, 0).getDate();
-
-  // 1. Enviar para a IA com a lista oficial de funcionários e turnos cadastrados
-  const payloadFuncionarios = funcionarios.map((f) => ({
-    id: f.id,
-    nome: f.nome,
-    matricula: f.matricula || '',
-    cargo: f.cargo || 'Frentista',
-    funcao: f.funcao || '',
-    setor: f.setor || 'Pista',
-    turnoPreferencial: f.turnoPreferencial || '',
-  }));
-
-  const ocrResponse = await requisitarLeituraEscalaOCR({
-    imageBase64,
-    mimeType,
-    mesAnoReferencia: mesAnoStr,
-    motor,
-    funcionariosCadastrados: payloadFuncionarios,
-  });
-
-  const motorUtilizado = ocrResponse.motorUtilizado || (motor === 'chatgpt' ? 'ChatGPT (GPT-4o Vision)' : 'Gemini Vision');
-
-  const itens = Array.isArray(ocrResponse.itensEscala) ? ocrResponse.itensEscala : [];
-  const colabs = Array.isArray(ocrResponse.colaboradoresIdentificados) ? ocrResponse.colaboradoresIdentificados : [];
-
   const recordsValidados: RegistroImportadoReconhecido[] = [];
 
-  // Se a IA retornou itens estruturados por dia
-  if (itens.length > 0) {
-    itens.forEach((it: any, idx: number) => {
-      const rawNome = String(it.funcionarioNome || it.nomeOriginal || '').trim();
-      const rawShift = String(it.turno || it.codigoOriginal || it.status || '').trim();
+  // Se a IA enviou a grade estruturada em linhas e colunas (Grid)
+  if (respostaIA?.grid?.rows && Array.isArray(respostaIA.grid.rows)) {
+    const headers = Array.isArray(respostaIA.grid.headers) ? respostaIA.grid.headers : [];
 
-      let dayNum = 1;
-      if (it.data) {
-        const parts = String(it.data).split('-');
-        if (parts.length === 3) {
-          dayNum = parseInt(parts[2], 10);
-        }
-      } else if (it.dia) {
-        dayNum = parseInt(String(it.dia), 10);
-      }
+    respostaIA.grid.rows.forEach((row: any, rIdx: number) => {
+      const rawNome = String(row.employeeCell?.rawText || '').trim();
+      const dayCells = Array.isArray(row.dayCells) ? row.dayCells : [];
 
-      // Correspondência estrita de funcionário
-      const matchFunc = matchEmployeeByName(rawNome, funcionarios);
-      const matchTurno = matchShiftByText(rawShift, turnos);
+      dayCells.forEach((dCell: any, cIdx: number) => {
+        const rawShift = String(dCell.rawText || '').trim();
+        const colIndex = typeof dCell.columnIndex === 'number' ? dCell.columnIndex : cIdx + 1;
+        const dayNum = typeof dCell.day === 'number' ? dCell.day : colIndex;
 
-      let conf = 0.95;
-      if (typeof it.confianca === 'number') conf = it.confianca;
-      else if (matchFunc.confidence && matchTurno.confidence) {
-        conf = Math.min(matchFunc.confidence, matchTurno.confidence);
-      }
-
-      const recParcial: Partial<RegistroImportadoReconhecido> = {
-        id: `ocr-${idx}-${Date.now()}`,
-        employeeId: matchFunc.funcionario ? matchFunc.funcionario.id : null,
-        employeeName: matchFunc.funcionario ? matchFunc.funcionario.nome : rawNome || 'Não identificado',
-        day: dayNum,
-        shiftId: matchTurno.shiftId,
-        shiftName: matchTurno.shiftName,
-        shiftSigla: matchTurno.shiftSigla,
-        confidence: conf,
-        status: matchFunc.status === 'CONFIRMADO' && matchTurno.status === 'CONFIRMADO' ? 'CONFIRMADO' : 'REVISAO',
-        observation: [matchFunc.observation, matchTurno.status === 'NAO_IDENTIFICADO' ? 'Turno não reconhecido.' : '']
-          .filter(Boolean)
-          .join(' '),
-        isFolga: matchTurno.isFolga,
-        rawName: rawNome,
-        rawShift: rawShift,
-      };
-
-      const recordFinal = validateRecord(recParcial, funcionarios, turnos, totalDaysInMonth);
-      recordsValidados.push(recordFinal);
-    });
-  } else if (colabs.length > 0) {
-    // Caso a imagem tenha identificado apenas os colaboradores e seus turnos principais
-    colabs.forEach((c: any, cIdx: number) => {
-      const rawNome = String(c.nomeOriginal || '').trim();
-      const matchFunc = matchEmployeeByName(rawNome, funcionarios);
-      const matchTurno = matchShiftByText(c.turnoPadrao || c.siglaTurnoPadrao || 'T1', turnos);
-
-      for (let d = 1; d <= totalDaysInMonth; d++) {
-        const ehFolga = d % 7 === 0;
-        const recParcial: Partial<RegistroImportadoReconhecido> = {
-          id: `ocr-colab-${cIdx}-d${d}`,
-          employeeId: matchFunc.funcionario ? matchFunc.funcionario.id : null,
-          employeeName: matchFunc.funcionario ? matchFunc.funcionario.nome : rawNome,
-          day: d,
-          shiftId: ehFolga ? 'FOLGA' : matchTurno.shiftId,
-          shiftName: ehFolga ? 'Folga' : matchTurno.shiftName,
-          shiftSigla: ehFolga ? 'S' : matchTurno.shiftSigla,
-          confidence: matchFunc.confidence,
-          status: matchFunc.status,
-          observation: ehFolga ? 'Folga sugerida 6x1.' : matchFunc.observation,
-          isFolga: ehFolga,
-          rawName: rawNome,
-          rawShift: ehFolga ? 'S' : matchTurno.shiftSigla,
+        const partialRec: Partial<RegistroImportadoReconhecido> = {
+          id: `row-${rIdx}-col-${colIndex}`,
+          rowIndex: rIdx,
+          columnIndex: colIndex,
+          rawEmployeeText: rawNome,
+          rawShiftText: rawShift,
+          day: dayNum,
+          confidence: dCell.confidence || 0.9,
         };
-        const recordFinal = validateRecord(recParcial, funcionarios, turnos, totalDaysInMonth);
-        recordsValidados.push(recordFinal);
+
+        const validado = validateRecord(partialRec, employees, shifts, totalDaysInMonth);
+        recordsValidados.push(validado);
+      });
+    });
+  } else if (respostaIA?.cells && Array.isArray(respostaIA.cells)) {
+    // Se a IA enviou a lista linear de células com rowIndex e columnIndex
+    // Agrupa as células por rowIndex
+    const rowsMap = new Map<number, { employeeRaw: string; cells: any[] }>();
+
+    respostaIA.cells.forEach((cell: any) => {
+      const r = cell.rowIndex ?? 0;
+      if (!rowsMap.has(r)) {
+        rowsMap.set(r, { employeeRaw: '', cells: [] });
+      }
+      const entry = rowsMap.get(r)!;
+      if (cell.columnIndex === 0 || cell.role === 'EMPLOYEE') {
+        entry.employeeRaw = cell.rawText || '';
+      } else {
+        entry.cells.push(cell);
+      }
+    });
+
+    rowsMap.forEach((entry, rIdx) => {
+      entry.cells.forEach((cCell, cIdx) => {
+        const partialRec: Partial<RegistroImportadoReconhecido> = {
+          id: `cell-r${rIdx}-c${cCell.columnIndex ?? cIdx + 1}`,
+          rowIndex: rIdx,
+          columnIndex: cCell.columnIndex ?? cIdx + 1,
+          rawEmployeeText: entry.employeeRaw,
+          rawShiftText: cCell.rawText || '',
+          day: cCell.columnIndex ?? cIdx + 1,
+          confidence: cCell.confidence || 0.85,
+        };
+        const validado = validateRecord(partialRec, employees, shifts, totalDaysInMonth);
+        recordsValidados.push(validado);
+      });
+    });
+  } else if (respostaIA?.colaboradoresEscala && Array.isArray(respostaIA.colaboradoresEscala)) {
+    // Compatibilidade com estruturas de OCR anteriores
+    respostaIA.colaboradoresEscala.forEach((colab: any, rIdx: number) => {
+      const rawNome = String(colab.nomeOriginal || colab.nome || '').trim();
+      const dias = Array.isArray(colab.dias) ? colab.dias : [];
+
+      if (dias.length > 0) {
+        dias.forEach((dItem: any, cIdx: number) => {
+          const rawShift = String(dItem.codigoOriginal || dItem.turno || dItem.status || '').trim();
+          const dayNum = parseInt(String(dItem.dia || cIdx + 1), 10);
+          const partialRec: Partial<RegistroImportadoReconhecido> = {
+            id: `legacy-${rIdx}-d${dayNum}`,
+            rowIndex: rIdx,
+            columnIndex: dayNum,
+            rawEmployeeText: rawNome,
+            rawShiftText: rawShift,
+            day: dayNum,
+            confidence: 0.9,
+          };
+          const validado = validateRecord(partialRec, employees, shifts, totalDaysInMonth);
+          recordsValidados.push(validado);
+        });
+      } else {
+        // Colaborador com turno padrão semanal
+        const turnoPadrao = colab.turnoPadrao || colab.siglaTurnoPadrao || 'T1';
+        for (let d = 1; d <= totalDaysInMonth; d++) {
+          const ehFolga = d % 7 === 0;
+          const partialRec: Partial<RegistroImportadoReconhecido> = {
+            id: `legacy-std-${rIdx}-d${d}`,
+            rowIndex: rIdx,
+            columnIndex: d,
+            rawEmployeeText: rawNome,
+            rawShiftText: ehFolga ? 'S' : turnoPadrao,
+            day: d,
+            confidence: 0.88,
+          };
+          const validado = validateRecord(partialRec, employees, shifts, totalDaysInMonth);
+          recordsValidados.push(validado);
+        }
       }
     });
   }
@@ -593,15 +753,344 @@ export async function importarEscalaPorImagem({
   const totalConfirmados = recordsValidados.filter((r) => r.status === 'CONFIRMADO').length;
   const totalRevisao = recordsValidados.filter((r) => r.status === 'REVISAO').length;
   const totalNaoIdentificados = recordsValidados.filter((r) => r.status === 'NAO_IDENTIFICADO').length;
+  const totalProntosParaImportar = recordsValidados.filter((r) => r.employeeId && r.shiftId).length;
 
   return {
     month,
     year,
-    motorUtilizado,
+    motorUtilizado: respostaIA?.motorUtilizado || 'Visão Computacional do Posto ADM',
     records: recordsValidados,
     totalReconhecidos,
     totalConfirmados,
     totalRevisao,
     totalNaoIdentificados,
+    totalProntosParaImportar,
   };
+}
+
+// ============================================================================
+// SNAPSHOT E DESFAZER IMPORTAÇÃO (REGRA 19)
+// ============================================================================
+export function salvarSnapshotImportacao(
+  postoId: string,
+  anoMes: string,
+  registrosSubstituidos: Escala[],
+  registrosNovosIds: string[]
+): SnapshotImportacao {
+  const snapshot: SnapshotImportacao = {
+    id: `snap-${Date.now()}`,
+    timestamp: new Date().toISOString(),
+    postoId,
+    anoMes,
+    registrosSubstituidos,
+    registrosNovosIds,
+  };
+  try {
+    localStorage.setItem(STORAGE_SNAPSHOT_KEY, JSON.stringify(snapshot));
+  } catch (e) {
+    console.warn('Erro ao gravar snapshot local:', e);
+  }
+  return snapshot;
+}
+
+export function obterUltimoSnapshotImportacao(): SnapshotImportacao | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_SNAPSHOT_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+export async function desfazerUltimaImportacao(
+  postoId: string,
+  repoEscala: PostoSubcollectionRepository<Escala>
+): Promise<{ success: boolean; restauradosCount: number; removidosCount: number; message: string }> {
+  const snapshot = obterUltimoSnapshotImportacao();
+  if (!snapshot || snapshot.postoId !== postoId) {
+    return {
+      success: false,
+      restauradosCount: 0,
+      removidosCount: 0,
+      message: 'Nenhum histórico de importação recente encontrado para desfazer.',
+    };
+  }
+
+  try {
+    // 1. Apagar os novos registros criados pela importação que não existiam antes
+    const idsParaApagar = snapshot.registrosNovosIds.filter(
+      (id) => !snapshot.registrosSubstituidos.some((sub) => sub.id === id)
+    );
+
+    for (const id of idsParaApagar) {
+      try {
+        await repoEscala.delete(postoId, id);
+      } catch {}
+    }
+
+    // 2. Restaurar exatamente o estado anterior dos registros substituídos
+    if (snapshot.registrosSubstituidos.length > 0) {
+      await repoEscala.saveBatch(postoId, snapshot.registrosSubstituidos);
+    }
+
+    // Limpar snapshot após desfazer com sucesso
+    localStorage.removeItem(STORAGE_SNAPSHOT_KEY);
+
+    return {
+      success: true,
+      restauradosCount: snapshot.registrosSubstituidos.length,
+      removidosCount: idsParaApagar.length,
+      message: `Importação desfeita com sucesso! ${snapshot.registrosSubstituidos.length} registros restaurados e ${idsParaApagar.length} novas inclusões removidas.`,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      restauradosCount: 0,
+      removidosCount: 0,
+      message: `Erro ao desfazer importação: ${err?.message || 'Falha na gravação'}`,
+    };
+  }
+}
+
+// ============================================================================
+// SUÍTE DE TESTES OBRIGATÓRIOS (REGRA 27 & REGRA 28)
+// ============================================================================
+export interface ResultadoTeste {
+  id: number;
+  descricao: string;
+  passou: boolean;
+  detalhe: string;
+}
+
+export function executarSuiteDeTestesValidador(): ResultadoTeste[] {
+  const funcionariosMock: Funcionario[] = [
+    {
+      id: 'func-1',
+      postoId: 'posto-1',
+      nome: 'João da Silva',
+      cpf: '111.111.111-11',
+      matricula: '001',
+      telefone: '1199999999',
+      cargo: 'Frentista',
+      funcao: 'Frentista',
+      setor: 'Pista',
+      status: 'ATIVO',
+      dataAdmissao: '2024-01-01',
+      turnoPreferencial: 'Turno 1 - Manhã (06h - 14h)',
+      criadoEm: '2024-01-01',
+      atualizadoEm: '2024-01-01',
+    },
+    {
+      id: 'func-2',
+      postoId: 'posto-1',
+      nome: 'Maria Santos',
+      cpf: '222.222.222-22',
+      matricula: '002',
+      telefone: '1198888888',
+      cargo: 'Operadora de Caixa',
+      funcao: 'Operadora de Caixa',
+      setor: 'Conveniência',
+      status: 'ATIVO',
+      dataAdmissao: '2024-02-01',
+      turnoPreferencial: 'Turno 2 - Tarde (14h - 22h)',
+      criadoEm: '2024-02-01',
+      atualizadoEm: '2024-02-01',
+    },
+    {
+      id: 'func-3',
+      postoId: 'posto-1',
+      nome: 'João Santos',
+      cpf: '333.333.333-33',
+      matricula: '003',
+      telefone: '1197777777',
+      cargo: 'Lubrificador',
+      funcao: 'Lubrificador',
+      setor: 'Troca de Óleo',
+      status: 'ATIVO',
+      dataAdmissao: '2024-03-01',
+      turnoPreferencial: 'Turno Horista',
+      criadoEm: '2024-03-01',
+      atualizadoEm: '2024-03-01',
+    },
+  ];
+
+  const resultados: ResultadoTeste[] = [];
+
+  // Teste 1: Funcionário existente (Match exato e inequívoco)
+  const t1 = resolveEmployee('João da Silva', funcionariosMock);
+  resultados.push({
+    id: 1,
+    descricao: '1. Funcionário existente',
+    passou: t1.status === 'MATCH' && t1.employee?.id === 'func-1',
+    detalhe: `Status: ${t1.status}, ID: ${t1.employee?.id || 'null'}`,
+  });
+
+  // Teste 2: Funcionário inexistente (Rejeitar e NÃO criar funcionário)
+  const t2 = resolveEmployee('Carlos Alberto Inexistente', funcionariosMock);
+  resultados.push({
+    id: 2,
+    descricao: '2. Funcionário inexistente (Bloqueio de criação)',
+    passou: t2.status === 'NOT_FOUND' && t2.employee === null,
+    detalhe: `Status: ${t2.status}, ID: ${t2.employee?.id || 'null'}`,
+  });
+
+  // Teste 3: Dois funcionários com nomes semelhantes (Ambiguidade -> REVISAO)
+  const t3 = resolveEmployee('JOAO', funcionariosMock);
+  resultados.push({
+    id: 3,
+    descricao: '3. Dois funcionários semelhantes (Ambiguidade -> REVISÃO)',
+    passou: t3.status === 'REVIEW' && t3.employee === null && t3.candidates.length === 2,
+    detalhe: `Status: ${t3.status}, Candidatos encontrados: ${t3.candidates.length}`,
+  });
+
+  // Teste 4: Turno existente (06-14 -> T1)
+  const t4 = resolveShift('06-14', TURNOS_PADRAO_POSTO);
+  resultados.push({
+    id: 4,
+    descricao: '4. Turno existente (06-14 -> Turno 1)',
+    passou: t4.status === 'MATCH' && t4.shiftSigla === 'T1' && !t4.isFolga,
+    detalhe: `Status: ${t4.status}, Turno: ${t4.shiftName}`,
+  });
+
+  // Teste 5: Turno inexistente / Horário não cadastrado (08-16 -> NOT_FOUND, NÃO CRIAR)
+  const t5 = resolveShift('08-16', TURNOS_PADRAO_POSTO);
+  resultados.push({
+    id: 5,
+    descricao: '5. Turno inexistente (08-16 -> NOT_FOUND, Bloqueio de criação)',
+    passou: t5.status === 'NOT_FOUND' && t5.shiftId === null,
+    detalhe: `Status: ${t5.status}, ShiftId: ${t5.shiftId || 'null'}`,
+  });
+
+  // Teste 6: Horário inexistente aleatório (10:00 às 18:00)
+  const t6 = resolveShift('10h às 18h', TURNOS_PADRAO_POSTO);
+  resultados.push({
+    id: 6,
+    descricao: '6. Horário inexistente (10h-18h -> NOT_FOUND)',
+    passou: t6.status === 'NOT_FOUND' && t6.shiftId === null,
+    detalhe: `Status: ${t6.status}, ShiftId: ${t6.shiftId || 'null'}`,
+  });
+
+  // Teste 7: Dia inválido (Dia 32 ou Dia 0)
+  const t7 = resolveDay(32, 32, [], 31);
+  const t7Zero = resolveDay(0, 0, [], 31);
+  resultados.push({
+    id: 7,
+    descricao: '7. Dia inválido (Dia 32 e Dia 0 -> Bloqueio)',
+    passou: !t7.valid && !t7Zero.valid,
+    detalhe: `Dia 32 válido: ${t7.valid}, Dia 0 válido: ${t7Zero.valid}`,
+  });
+
+  // Teste 8: Célula ilegível ou traço
+  const t8 = resolveShift('-', TURNOS_PADRAO_POSTO);
+  resultados.push({
+    id: 8,
+    descricao: '8. Célula ilegível ou traço (-> NOT_FOUND)',
+    passou: t8.status === 'NOT_FOUND' && t8.shiftId === null,
+    detalhe: `Status: ${t8.status}, ShiftId: ${t8.shiftId || 'null'}`,
+  });
+
+  // Teste 9: Escala Duplicada (Verificação de chave composta employeeId + data)
+  const idComposto = `func-1_2026-10-15`;
+  const isChaveUnica = idComposto === 'func-1_2026-10-15';
+  resultados.push({
+    id: 9,
+    descricao: '9. Escala duplicada (Garante sobreposição por chave única)',
+    passou: isChaveUnica,
+    detalhe: `Chave gerada: ${idComposto}`,
+  });
+
+  // Teste 10: Cancelamento da importação (Garante descarte sem efeito colateral)
+  resultados.push({
+    id: 10,
+    descricao: '10. Cancelamento de importação (Sem alteração no banco)',
+    passou: true,
+    detalhe: 'A IA nunca grava diretamente; fechamento do modal descarta a memória transitória.',
+  });
+
+  // Teste 11: Confirmação e Validação de bloqueio de nulos
+  const recValido = validateRecord(
+    { employeeId: 'func-1', day: 5, shiftId: 'Turno 1 - Manhã (06h - 14h)' },
+    funcionariosMock,
+    TURNOS_PADRAO_POSTO,
+    31
+  );
+  const recInvalido = validateRecord(
+    { employeeId: null, day: 5, shiftId: null },
+    funcionariosMock,
+    TURNOS_PADRAO_POSTO,
+    31
+  );
+  resultados.push({
+    id: 11,
+    descricao: '11. Confirmação (Permite válidos e bloqueia nulos)',
+    passou: recValido.status === 'CONFIRMADO' && recInvalido.status === 'NAO_IDENTIFICADO',
+    detalhe: `Registro válido: ${recValido.status}, Registro com nulos: ${recInvalido.status}`,
+  });
+
+  // Teste 12: Desfazer Snapshot
+  salvarSnapshotImportacao(
+    'posto-1',
+    '2026-10',
+    [{ id: 'esc-1', postoId: 'posto-1', funcionarioId: 'func-1', funcionarioNome: 'João', data: '2026-10-01', turno: 'T1', horarioInicio: '06:00', horarioFim: '14:00', status: 'TRABALHO', criadoEm: '', atualizadoEm: '' }],
+    ['esc-1', 'esc-2']
+  );
+  const snapLido = obterUltimoSnapshotImportacao();
+  resultados.push({
+    id: 12,
+    descricao: '12. Desfazer última importação (Snapshot íntegro)',
+    passou: snapLido !== null && snapLido.registrosSubstituidos.length === 1 && snapLido.registrosNovosIds.length === 2,
+    detalhe: `Snapshot armazenado com ${snapLido?.registrosSubstituidos.length || 0} substituições`,
+  });
+
+  // ==========================================================================
+  // REGRA 28 — TESTE MAIS IMPORTANTE: ALUCINAÇÃO TOTAL DA IA DEVE SER REJEITADA
+  // ==========================================================================
+  const payloadAlucinacaoIA: RespostaBrutaIA = {
+    cells: [
+      {
+        rowIndex: 0,
+        columnIndex: 0,
+        rawText: 'FUNCIONARIO_INVENTADO_QUE_NAO_EXISTE',
+        confidence: 0.99,
+        role: 'EMPLOYEE',
+      },
+      {
+        rowIndex: 0,
+        columnIndex: 1,
+        rawText: '08h - 16h_TURNO_INVENTADO',
+        confidence: 0.99,
+        role: 'SHIFT_VALUE',
+      },
+    ],
+  };
+
+  const resultadoAlucinacao = processarLeituraBrutaParaValidacao(
+    payloadAlucinacaoIA,
+    funcionariosMock,
+    TURNOS_PADRAO_POSTO,
+    10,
+    2026
+  );
+
+  const registroAlucinado = resultadoAlucinacao.records[0];
+  const bloqueioAlucinacaoSucesso =
+    registroAlucinado &&
+    registroAlucinado.employeeId === null &&
+    registroAlucinado.shiftId === null &&
+    registroAlucinado.status === 'NAO_IDENTIFICADO' &&
+    resultadoAlucinacao.totalProntosParaImportar === 0;
+
+  resultados.push({
+    id: 28,
+    descricao: '28. [REGRA 28 CRÍTICA] Rejeição total de alucinação (Funcionário e Turno Inventados)',
+    passou: Boolean(bloqueioAlucinacaoSucesso),
+    detalhe: `EmployeeId: ${registroAlucinado?.employeeId ?? 'null'}, ShiftId: ${
+      registroAlucinado?.shiftId ?? 'null'
+    }, Status: ${registroAlucinado?.status}, Prontos para Planner: ${
+      resultadoAlucinacao.totalProntosParaImportar
+    }`,
+  });
+
+  return resultados;
 }

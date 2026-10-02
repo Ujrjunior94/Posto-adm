@@ -11,7 +11,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 
-interface ModalScannerLaudoChatGPTProps {
+interface ModalScannerLaudoGeminiProps {
   isOpen: boolean;
   onClose: () => void;
   onProcessarImagem: (base64: string, mime: string) => Promise<void>;
@@ -19,7 +19,7 @@ interface ModalScannerLaudoChatGPTProps {
   erro: string;
 }
 
-export const ModalScannerLaudoChatGPT: React.FC<ModalScannerLaudoChatGPTProps> = ({
+export const ModalScannerLaudoGemini: React.FC<ModalScannerLaudoGeminiProps> = ({
   isOpen,
   onClose,
   onProcessarImagem,
@@ -56,13 +56,13 @@ export const ModalScannerLaudoChatGPT: React.FC<ModalScannerLaudoChatGPTProps> =
         {/* Topo do Modal */}
         <div className="p-5 border-b border-slate-200 bg-slate-900 text-white flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-purple-600 text-white">
-              <Sparkles className="w-5 h-5 text-emerald-300" />
+            <div className="p-2 rounded-xl bg-blue-600 text-white">
+              <Sparkles className="w-5 h-5 text-blue-200" />
             </div>
             <div>
-              <h3 className="text-base font-bold">Escanear Laudo ou Proveta com ChatGPT</h3>
+              <h3 className="text-base font-bold">Escanear Laudo ou Proveta com Google Gemini</h3>
               <p className="text-xs text-slate-300">
-                Reconhecimento visual automático via OpenAI GPT-4o Vision
+                Reconhecimento visual automático via Google Gemini 3.8 Flash Vision
               </p>
             </div>
           </div>
@@ -86,7 +86,7 @@ export const ModalScannerLaudoChatGPT: React.FC<ModalScannerLaudoChatGPTProps> =
 
           {!imagemPreview ? (
             <div className="border-2 border-dashed border-slate-300 rounded-2xl p-8 text-center bg-slate-50 hover:bg-slate-100/60 transition space-y-3">
-              <div className="w-12 h-12 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center mx-auto">
+              <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center mx-auto">
                 <FlaskConical className="w-6 h-6" />
               </div>
               <div>
@@ -111,7 +111,7 @@ export const ModalScannerLaudoChatGPT: React.FC<ModalScannerLaudoChatGPTProps> =
                 <button
                   type="button"
                   onClick={() => cameraInputRef.current?.click()}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
                 >
                   <Camera className="w-4 h-4" />
                   Tirar Foto Agora
@@ -152,10 +152,10 @@ export const ModalScannerLaudoChatGPT: React.FC<ModalScannerLaudoChatGPTProps> =
                 </button>
               </div>
 
-              <div className="p-3 bg-purple-50 rounded-xl border border-purple-200 text-purple-900 text-xs flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-purple-600 shrink-0" />
+              <div className="p-3 bg-blue-50 rounded-xl border border-blue-200 text-blue-900 text-xs flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-blue-600 shrink-0" />
                 <span>
-                  O ChatGPT (GPT-4o Vision) analisará a imagem para preencher automaticamente temperatura, densidade, proveta e NF-e.
+                  O Google Gemini 3.8 Flash Vision analisará a imagem para preencher automaticamente temperatura, densidade, proveta e NF-e.
                 </span>
               </div>
             </div>
@@ -176,17 +176,17 @@ export const ModalScannerLaudoChatGPT: React.FC<ModalScannerLaudoChatGPTProps> =
             type="button"
             disabled={!imagemPreview || carregando}
             onClick={handleSubmeter}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold transition shadow-xs cursor-pointer disabled:opacity-50"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition shadow-xs cursor-pointer disabled:opacity-50"
           >
             {carregando ? (
               <>
                 <RefreshCw className="w-4 h-4 animate-spin text-white" />
-                ChatGPT Lendo Imagem...
+                Gemini Lendo Imagem...
               </>
             ) : (
               <>
-                <Sparkles className="w-4 h-4 text-emerald-300" />
-                Extrair Dados com ChatGPT
+                <Sparkles className="w-4 h-4 text-blue-200" />
+                Extrair Dados com Gemini
               </>
             )}
           </button>
@@ -195,3 +195,6 @@ export const ModalScannerLaudoChatGPT: React.FC<ModalScannerLaudoChatGPTProps> =
     </div>
   );
 };
+
+/** Alias para compatibilidade */
+export const ModalScannerLaudoChatGPT = ModalScannerLaudoGemini;

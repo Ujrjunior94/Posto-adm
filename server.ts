@@ -8,8 +8,6 @@ import {
   prepararImagemMultimodal,
   parseAndRepairJson,
 } from './src/services/geminiOcrService';
-import { processarEscalaOcrComChatGpt } from './src/services/openAiOcrService';
-import OpenAI from 'openai';
 import {
   construirPromptAnaliseANP,
   gerarParecerLocalANP,
@@ -55,9 +53,9 @@ async function startServer() {
   });
 
   /**
-   * Motor ChatGPT (OpenAI GPT-4o Vision) de Leitura e Reconhecimento Estruturado de Escalas para o Planner
+   * Motor Google Gemini 3.8 Flash de Leitura e Reconhecimento Estruturado de Escalas para o Planner
    */
-  const handleChatGptOcr = async (req: express.Request, res: express.Response) => {
+  const handleGeminiEscalaOcr = async (req: express.Request, res: express.Response) => {
     try {
       const { imageBase64 } = req.body || {};
 
@@ -65,96 +63,46 @@ async function startServer() {
         return res.status(400).json({ error: 'Nenhuma imagem da escala foi enviada para leitura.' });
       }
 
-      const openAiKey = process.env.OPENAI_API_KEY || '';
       const geminiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || '';
 
-      if (openAiKey && openAiKey !== 'MY_OPENAI_API_KEY') {
-        const payloadResposta = await processarEscalaOcrComChatGpt(req.body, openAiKey);
-        console.log(
-          `[ChatGPT OCR Escala] Concluído via OpenAI GPT-4o: ${payloadResposta.colaboradoresIdentificados?.length || 0} funcionários e ${payloadResposta.itensEscala?.length || 0} registros.`
-        );
-        return res.json(payloadResposta);
-      }
-
-      // Se OPENAI_API_KEY não estiver definida no .env, utiliza o motor de visão disponível
-      // e sinaliza no retorno para garantir que a aplicação continue funcionando perfeitamente sem travar o gestor
       if (geminiKey) {
         const payloadResposta = await processarEscalaOcrComGemini(req.body, geminiKey);
-        payloadResposta.motorUtilizado =
-          'ChatGPT (Motor Inteligente de Alta Precisão - Configure OPENAI_API_KEY no .env para chamada direta aos servidores da OpenAI)';
+        payloadResposta.motorUtilizado = 'Google Gemini 3.8 Flash Vision';
         console.log(
-          `[ChatGPT OCR Escala Fallback] Concluído com alta precisão: ${payloadResposta.colaboradoresIdentificados?.length || 0} funcionários e ${payloadResposta.itensEscala?.length || 0} registros.`
+          `[Gemini OCR Escala] Concluído via Google Gemini: ${payloadResposta.colaboradoresIdentificados?.length || 0} funcionários e ${payloadResposta.itensEscala?.length || 0} registros.`
         );
         return res.json(payloadResposta);
       }
 
       return res.status(500).json({
-        error:
-          'Para usar o ChatGPT, configure a variável OPENAI_API_KEY ou GEMINI_API_KEY nas variáveis de ambiente (.env).',
+        error: 'A chave de API GEMINI_API_KEY não está configurada no ambiente.',
       });
     } catch (error: any) {
-      console.error('[ChatGPT OCR Escala] Erro:', error);
+      console.error('[Gemini OCR Escala] Erro:', error);
       const msg = error instanceof Error ? error.message : String(error || '');
-
-      // Tenta fallback com Gemini caso a chamada direta da OpenAI tenha falhado (ex: cota esgotada)
-      const geminiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || '';
-      if (geminiKey) {
-        try {
-          const payloadResposta = await processarEscalaOcrComGemini(req.body, geminiKey);
-          payloadResposta.motorUtilizado =
-            'ChatGPT (Fallback automático por alta demanda na OpenAI)';
-          return res.json(payloadResposta);
-        } catch {
-          // Mantém erro original
-        }
-      }
-
       res.status(500).json({
-        error: `Falha no reconhecimento da escala via ChatGPT: ${msg}`,
+        error: `Falha no reconhecimento da escala via Gemini: ${msg}`,
       });
     }
   };
 
-  app.post('/api/chatgpt/escala-ocr', handleChatGptOcr);
-  app.post('/api/openai/escala-ocr', handleChatGptOcr);
+  app.post('/api/gemini/escala-ocr', handleGeminiEscalaOcr);
+  app.post('/api/chatgpt/escala-ocr', handleGeminiEscalaOcr);
+  app.post('/api/openai/escala-ocr', handleGeminiEscalaOcr);
 
   /**
-   * Motor ChatGPT (OpenAI GPT-4o) para Auditoria e Parecer de Conformidade ANP (Padrões Agosto de 2026)
+   * Motor Google Gemini 3.8 Flash para Auditoria e Parecer de Conformidade ANP (Padrões Agosto de 2026)
    */
-  app.post('/api/chatgpt/analise-anp', async (req, res) => {
+  const handleAnaliseAnp = async (req: express.Request, res: express.Response) => {
     try {
       const dados = req.body || {};
-      const openAiKey = process.env.OPENAI_API_KEY || '';
       const prompt = construirPromptAnaliseANP(dados);
-
-      if (openAiKey && openAiKey !== 'MY_OPENAI_API_KEY') {
-        const openai = new OpenAI({ apiKey: openAiKey });
-        const completion = await openai.chat.completions.create({
-          model: 'gpt-4o',
-          messages: [
-            {
-              role: 'system',
-              content:
-                'Você é um Perito Metrológico da ANP especialista em fiscalização de combustíveis no Brasil. Sempre responda em formato JSON estrito conforme solicitado.',
-            },
-            { role: 'user', content: prompt },
-          ],
-          response_format: { type: 'json_object' },
-          temperature: 0.1,
-        });
-
-        const raw = completion.choices[0]?.message?.content || '{}';
-        const parsed = parseAndRepairJson(raw);
-        parsed.motorUtilizado = 'ChatGPT (OpenAI GPT-4o - Padrões Oficiais ANP Agosto/2026)';
-        return res.json(parsed);
-      }
-
-      // Fallback Gemini caso OpenAI não esteja com chave direta no .env
       const geminiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || '';
+
       if (geminiKey) {
         const client = getAIClient();
         const geminiRes = await client.models.generateContent({
-          model: 'gemini-2.5-flash',
+          model: 'gemini-3.8-flash',
           contents: prompt,
           config: {
             responseMimeType: 'application/json',
@@ -163,8 +111,7 @@ async function startServer() {
         });
         const raw = geminiRes.text || '{}';
         const parsed = parseAndRepairJson(raw);
-        parsed.motorUtilizado =
-          'ChatGPT (Motor de Inteligência ANP 2026 de Alta Precisão)';
+        parsed.motorUtilizado = 'Google Gemini 3.8 Flash (Padrões Oficiais ANP Agosto/2026)';
         return res.json(parsed);
       }
 
@@ -172,23 +119,25 @@ async function startServer() {
       const localResult = gerarParecerLocalANP(dados);
       return res.json(localResult);
     } catch (error: any) {
-      console.warn('[ChatGPT Analise ANP] Falha na IA, usando gerador regulatório ANP 2026:', error);
+      console.warn('[Gemini Analise ANP] Falha na IA, usando gerador regulatório ANP 2026:', error);
       const fallbackResult = gerarParecerLocalANP(req.body);
       return res.json(fallbackResult);
     }
-  });
+  };
+
+  app.post('/api/gemini/analise-anp', handleAnaliseAnp);
+  app.post('/api/chatgpt/analise-anp', handleAnaliseAnp);
 
   /**
-   * Scanner / OCR de Laudos e Provetas ANP com ChatGPT Vision
+   * Scanner / OCR de Laudos e Provetas ANP com Google Gemini Vision
    */
-  app.post('/api/chatgpt/laudo-ocr', async (req, res) => {
+  const handleLaudoOcr = async (req: express.Request, res: express.Response) => {
     try {
       const { imageBase64, mimeType } = req.body || {};
       if (!imageBase64) {
         return res.status(400).json({ error: 'Nenhuma imagem foi enviada.' });
       }
 
-      const openAiKey = process.env.OPENAI_API_KEY || '';
       const promptOcr = `Você é um leitor óptico de laudos, ensaios e provetas de combustíveis da ANP.
 Analise a imagem enviada (boletim de conformidade BOC, nota fiscal ou foto da proveta/termidensímetro) e extraia os valores:
 Retorne EXCLUSIVAMENTE um JSON:
@@ -205,37 +154,12 @@ Retorne EXCLUSIVAMENTE um JSON:
   "observacoesLaudo": "resumo do que foi lido na imagem"
 }`;
 
-      if (openAiKey && openAiKey !== 'MY_OPENAI_API_KEY') {
-        const { cleanBase64, mimeType: finalMime } = prepararImagemMultimodal(imageBase64, mimeType);
-        const dataUrl = `data:${finalMime};base64,${cleanBase64}`;
-        const openai = new OpenAI({ apiKey: openAiKey });
-        const completion = await openai.chat.completions.create({
-          model: 'gpt-4o',
-          messages: [
-            {
-              role: 'user',
-              content: [
-                { type: 'text', text: promptOcr },
-                { type: 'image_url', image_url: { url: dataUrl } },
-              ],
-            },
-          ],
-          response_format: { type: 'json_object' },
-        });
-
-        const raw = completion.choices[0]?.message?.content || '{}';
-        const parsed = parseAndRepairJson(raw);
-        parsed.motorUtilizado = 'ChatGPT (OpenAI GPT-4o Vision)';
-        return res.json(parsed);
-      }
-
-      // Fallback Gemini Vision
       const geminiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || '';
       if (geminiKey) {
         const client = getAIClient();
         const { cleanBase64, mimeType: finalMime } = prepararImagemMultimodal(imageBase64, mimeType);
         const geminiRes = await client.models.generateContent({
-          model: 'gemini-2.5-flash',
+          model: 'gemini-3.8-flash',
           contents: [
             {
               role: 'user',
@@ -249,7 +173,7 @@ Retorne EXCLUSIVAMENTE um JSON:
         });
         const raw = geminiRes.text || '{}';
         const parsed = parseAndRepairJson(raw);
-        parsed.motorUtilizado = 'ChatGPT (Visão Computacional ANP 2026)';
+        parsed.motorUtilizado = 'Google Gemini 3.8 Flash Vision';
         return res.json(parsed);
       }
 
@@ -261,10 +185,10 @@ Retorne EXCLUSIVAMENTE um JSON:
         aspectoDetectado: 'Límpido e Isento',
         isConformeEstimado: true,
         observacoesLaudo: 'Valores calibrados com os padrões ANP de Agosto de 2026.',
-        motorUtilizado: 'ChatGPT (Simulação Local ANP 2026)',
+        motorUtilizado: 'Google Gemini (Simulação Local ANP 2026)',
       });
     } catch (e: any) {
-      console.warn('[ChatGPT Laudo OCR] Erro:', e);
+      console.warn('[Gemini Laudo OCR] Erro:', e);
       return res.json({
         produtoDetectado: 'Gasolina Comum',
         temperatura: 25.0,
@@ -273,10 +197,13 @@ Retorne EXCLUSIVAMENTE um JSON:
         aspectoDetectado: 'Límpido e Isento',
         isConformeEstimado: true,
         observacoesLaudo: 'Valores calibrados com os padrões ANP de Agosto de 2026.',
-        motorUtilizado: 'ChatGPT (Fallback Regulatório ANP)',
+        motorUtilizado: 'Google Gemini (Fallback Regulatório ANP)',
       });
     }
-  });
+  };
+
+  app.post('/api/gemini/laudo-ocr', handleLaudoOcr);
+  app.post('/api/chatgpt/laudo-ocr', handleLaudoOcr);
 
   /**
    * Motor Completo de Leitura, Interpretação OCR e Reconhecimento Estruturado de Escalas
@@ -459,9 +386,9 @@ REGRAS DE EXTRAÇÃO:
       };
 
       const modelosCandidatos = [
-        'gemini-3-flash-preview',
+        'gemini-3.8-flash',
         'gemini-flash-latest',
-        'gemini-3.1-flash-lite-preview',
+        'gemini-3.1-flash-lite',
       ];
       let parsed: any = null;
       let ultimoErro: any = null;

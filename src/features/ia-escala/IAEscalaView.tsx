@@ -405,8 +405,8 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
   const [salvandoNoPlanner, setSalvandoNoPlanner] = useState(false);
   const [sucessoSalvo, setSucessoSalvo] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [motorIA, setMotorIA] = useState<'chatgpt' | 'gemini'>('chatgpt');
-  const [motorUtilizadoResposta, setMotorUtilizadoResposta] = useState<string>('');
+  const [motorIA, setMotorIA] = useState<'gemini'>('gemini');
+  const [motorUtilizadoResposta, setMotorUtilizadoResposta] = useState<string>('Google Gemini 3.8 Flash');
 
   // Filtros e Modo de Visualização da Escala
   const [modoVisualizacao, setModoVisualizacao] = useState<'GRADE' | 'TABELA'>('GRADE');
@@ -664,9 +664,7 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
 
     setProcessando(true);
     setMensagemStatus(
-      motorIA === 'chatgpt'
-        ? '1/3 Enviando imagem da escala para leitura visual com ChatGPT (OpenAI GPT-4o)...'
-        : '1/3 Otimizando nitidez e enviando imagem da escala para leitura visual com Gemini...'
+      '1/3 Otimizando nitidez e enviando imagem da escala para leitura visual com Google Gemini 3.8 Flash...'
     );
     setErroProcessamento('');
     setSucessoSalvo(false);
@@ -864,7 +862,7 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
       const rotuloMotor =
         data.motorUtilizado ||
         motorUtilizadoResposta ||
-        (motorIA === 'chatgpt' ? 'ChatGPT (OpenAI GPT-4o)' : 'Gemini Vision');
+        'Google Gemini 3.8 Flash Vision';
       setMensagemStatus(
         `3/3 Leitura concluída via ${rotuloMotor}! ${detectados.length} funcionário(s) e ${itens.length} registro(s) extraídos com fidelidade para o Planner.`
       );
@@ -1935,32 +1933,11 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-100/90 p-3 rounded-xl border border-slate-200">
               <div className="text-xs">
                 <span className="font-bold text-slate-800">Motor de Leitura OCR:</span>
-                <p className="text-[11px] text-slate-500">Escolha o modelo de IA que interpretará a foto da folha ou quadro.</p>
+                <p className="text-[11px] text-slate-500">Google Gemini 3.8 Flash Vision configurado para leitura visual de alta precisão.</p>
               </div>
-              <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-slate-200">
-                <button
-                  type="button"
-                  onClick={() => setMotorIA('chatgpt')}
-                  className={`px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
-                    motorIA === 'chatgpt'
-                      ? 'bg-emerald-600 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>ChatGPT (OpenAI GPT-4o)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMotorIA('gemini')}
-                  className={`px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
-                    motorIA === 'gemini'
-                      ? 'bg-blue-600 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <span>Gemini Vision</span>
-                </button>
+              <div className="flex items-center gap-1 bg-blue-600 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold shadow-xs">
+                <Sparkles className="w-3.5 h-3.5 text-blue-200" />
+                <span>Google Gemini 3.8 Flash</span>
               </div>
             </div>
 
@@ -1969,17 +1946,17 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
               <button
                 onClick={handleProcessarComIA}
                 disabled={processando}
-                className="w-full py-3.5 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl text-sm transition flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer"
+                className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-sm transition flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer"
               >
                 {processando ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    Processando com {motorIA === 'chatgpt' ? 'ChatGPT (GPT-4o Vision)...' : 'Gemini Vision...'}
+                    Processando com Google Gemini 3.8 Flash Vision...
                   </>
                 ) : (
                   <>
                     <Sparkles className="w-4 h-4 text-emerald-300" />
-                    Reconhecer com {motorIA === 'chatgpt' ? 'ChatGPT (OpenAI GPT-4o)' : 'Gemini Vision'}
+                    Reconhecer Escala com Google Gemini
                   </>
                 )}
               </button>

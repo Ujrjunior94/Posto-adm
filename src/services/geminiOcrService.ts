@@ -636,68 +636,66 @@ export async function processarEscalaOcrComGemini(
 
   const listaFuncs = Array.isArray(funcionariosCadastrados) ? funcionariosCadastrados : [];
 
-  const prompt = `Você é um motor especialista de OCR e estruturação de escalas de trabalho para anexação direta ao Planner Mensal.
-Analise atentamente TODA a imagem enviada e extraia TODOS os funcionários e seus respectivos turnos, horários e folgas.
+  const prompt = `Você é um leitor óptico puro (OCR/Visão) de escalas de trabalho.
+Sua função é APENAS extrair fielmente os textos brutos, números, células, posições de linhas (rowIndex) e colunas (columnIndex) visíveis na imagem.
 
-A imagem pode estar em QUALQUER um destes formatos:
-1. TABELA MENSAL OU QUINZENAL: Funcionários nas linhas e dias (01 a 31) nas colunas com siglas (T1, T2, T3, M, T, N, HOR, H, F, S, FOLGA, DSR, X, P, 12x36, FE, AT) ou horários.
-2. TABELA SEMANAL: Funcionários nas linhas e dias da semana (SEG, TER, QUA, QUI, SEX, SAB, DOM ou 2ª a Dom) nas colunas.
-3. LISTA / RELAÇÃO DE FUNCIONÁRIOS E TURNOS: Uma lista ou tabela simples onde cada linha tem o Nome do Funcionário, Cargo/Setor, Turno ou Horário (ex: "06:00 às 14:00", "Turno 1", "14h às 22h", "Horista") e opcionalmente o dia de folga (ex: "Folga: Domingo").
-4. QUADRO AGRUPADO POR TURNO: Blocos separados por turno (ex: "MANHÃ / 1º TURNO: João, Carlos", "TARDE / 2º TURNO: Juliana, Marcos", "HORISTA: Lucas"). Neste caso, crie um item em "colaboradoresEscala" para cada nome listado, preenchendo o "turnoPadrao" do bloco correspondente!
-5. DATAS NAS LINHAS E FUNCIONÁRIOS NAS CÉLULAS: Agrupe por funcionário em "colaboradoresEscala" com os respectivos dias.
+REGRA ABSOLUTA:
+- Não tente interpretar, normalizar ou inventar nomes de funcionários.
+- Se a imagem mostrar "JOAO", retorne "JOAO".
+- Não tente interpretar, normalizar ou inventar turnos.
+- Se a imagem mostrar "06-14", retorne "06-14". Se mostrar "08-16", retorne "08-16". Se mostrar "S", retorne "S".
+- Preserve exatamente a posição da linha e da coluna de cada célula.
 
-REGRAS OBRIGATÓRIAS:
-- Extraia TODOS os nomes de funcionários visíveis na imagem exatamente como escritos.
-- Identifique o turno de cada funcionário:
-  * Manhã / 1º Turno / T1 / M / 06:00-14:00 -> turno="T1", horarioInicio="06:00", horarioFim="14:00"
-  * Tarde / 2º Turno / T2 / T / 14:00-22:00 -> turno="T2", horarioInicio="14:00", horarioFim="22:00"
-  * Noite / 3º Turno / T3 / N / 22:00-06:00 -> turno="T3", horarioInicio="22:00", horarioFim="06:00"
-  * Horista / Intermediário / HOR / H / 08:00-14:00 -> turno="HOR", horarioInicio="08:00", horarioFim="14:00"
-  * Plantão / 12x36 / P / PLT -> status="PLANTAO", turno="Plantão"
-  * Folga / DSR / S / F / FOL / OFF / X -> status="FOLGA", turno="Folga", horarioInicio="00:00", horarioFim="00:00"
-  * Férias / FE / FER -> status="FERIAS", turno="Férias"
-  * Atestado / Afastado / AT -> status="AFASTADO", turno="Afastado"
-  * Se houver horário específico escrito (ex: "07:00 às 15:20"), preserve exatamente horarioInicio="07:00" e horarioFim="15:20".
-- Se a imagem mostrar apenas o nome e o turno fixo do funcionário (sem colunas de dias 01..31), preencha "turnoPadrao", "horarioEntradaPadrao", "horarioSaidaPadrao", "folgaPadrao" e deixe "dias": [].
-
-FUNCIONÁRIOS JÁ CADASTRADOS NO POSTO (vincule "funcionarioId" se o nome corresponder):
-${JSON.stringify(
-  listaFuncs.map((f: any) => ({
-    id: f.id,
-    nome: f.nome,
-    cargo: f.cargo,
-    setor: f.setor,
-  }))
-)}
-
-Retorne EXCLUSIVAMENTE um objeto JSON válido seguindo exatamente esta estrutura:
+Retorne EXCLUSIVAMENTE um objeto JSON estruturado:
 {
-  "tituloEscala": "Título ou cabeçalho lido na imagem",
-  "mesReferencia": "${anoMesAtual}",
-  "tipoDocumentoIdentificado": "Descrição do formato da escala",
-  "qualidadeImagem": "BOA",
-  "copiaFielReconhecida": "Resumo fiel das linhas, nomes e horários lidos na imagem",
-  "simbolosEAbreviacoes": ["T1 = Manhã (06:00-14:00)", "T2 = Tarde (14:00-22:00)", "S/F = Folga"],
-  "observacoesGerais": "Observações lidas na folha",
+  "document": {
+    "month": ${mesNum},
+    "year": ${anoNum},
+    "title": "Título ou cabeçalho visual lido na imagem"
+  },
+  "grid": {
+    "headers": ["Funcionário", "01", "02", "03", "04", "05"],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "employeeCell": {
+          "rawText": "Texto exato do nome lido na linha",
+          "confidence": 0.95
+        },
+        "dayCells": [
+          {
+            "day": 1,
+            "columnIndex": 1,
+            "rawText": "Texto exato lido na célula do dia (ex: 06-14, T1, T2, S, Folga, 08-16)",
+            "confidence": 0.98
+          }
+        ]
+      }
+    ]
+  },
+  "cells": [
+    {
+      "rowIndex": 0,
+      "columnIndex": 0,
+      "rawText": "JOAO",
+      "confidence": 0.95,
+      "role": "EMPLOYEE"
+    },
+    {
+      "rowIndex": 0,
+      "columnIndex": 1,
+      "rawText": "06-14",
+      "confidence": 0.98,
+      "role": "SHIFT_VALUE"
+    }
+  ],
   "colaboradoresEscala": [
     {
-      "nomeOriginal": "Nome do Funcionário",
-      "funcionarioId": "id se cadastrado ou vazio",
-      "cargo": "Frentista",
-      "setor": "Pista",
-      "turnoPadrao": "T1 | T2 | T3 | HOR | Plantão",
-      "horarioEntradaPadrao": "06:00",
-      "horarioSaidaPadrao": "14:00",
-      "intervaloPadrao": "1h",
-      "folgaPadrao": "DOM",
+      "nomeOriginal": "Nome exato lido",
       "dias": [
         {
           "dia": "01",
-          "codigoOriginal": "T1",
-          "status": "TRABALHO",
-          "turno": "T1",
-          "horarioInicio": "06:00",
-          "horarioFim": "14:00"
+          "codigoOriginal": "Texto exato da célula"
         }
       ]
     }
@@ -726,9 +724,9 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido seguindo exatamente esta estrutura
   };
 
   const modelosCandidatos = [
-    'gemini-3-flash-preview',
+    'gemini-3.8-flash',
     'gemini-flash-latest',
-    'gemini-3.1-flash-lite-preview',
+    'gemini-3.1-flash-lite',
   ];
   let parsed: any = null;
   let ultimoErro: any = null;
@@ -771,17 +769,17 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido seguindo exatamente esta estrutura
     throw ultimoErro || new Error('Não foi possível obter resposta estruturada do modelo de visão.');
   }
 
-  return estruturarRespostaEscalaOcr(parsed, payload, 'Gemini Vision');
+  return estruturarRespostaEscalaOcr(parsed, payload, 'Google Gemini 3.8 Flash Vision');
 }
 
 /**
- * Normaliza e estrutura a resposta extraída do modelo de IA (ChatGPT ou Gemini)
+ * Normaliza e estrutura a resposta extraída do modelo de IA (Google Gemini)
  * garantindo conciliação fiel com funcionários, turnos oficiais, folgas e expansão mensal.
  */
 export function estruturarRespostaEscalaOcr(
   parsed: any,
   payload: EscalaOcrRequestPayload,
-  motorUtilizado = 'ChatGPT (OpenAI)'
+  motorUtilizado = 'Google Gemini 3.8 Flash Vision'
 ): any {
   const { funcionariosCadastrados = [], mesAnoReferencia } = payload;
 
@@ -1250,12 +1248,9 @@ export async function requisitarLeituraEscalaOCR(payload: EscalaOcrRequestPayloa
 
   let ultimoErro = '';
 
-  const preferirChatGpt = payload.motor !== 'gemini';
-  const endpoints = preferirChatGpt
-    ? ['/api/chatgpt/escala-ocr', '/api/gemini/escala-ocr']
-    : ['/api/gemini/escala-ocr', '/api/chatgpt/escala-ocr'];
+  const endpoints = ['/api/gemini/escala-ocr', '/api/chatgpt/escala-ocr'];
 
-  // 1. Tenta endpoints do servidor local (ChatGPT ou Gemini)
+  // 1. Tenta endpoint do servidor local (Google Gemini)
   for (const endpoint of endpoints) {
     try {
       const controller = new AbortController();

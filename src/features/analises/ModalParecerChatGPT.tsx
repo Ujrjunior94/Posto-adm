@@ -1,5 +1,5 @@
 import React from 'react';
-import { ParecerTecnicoChatGPT } from '../../services/chatGptCalculadoraAnpService';
+import { ParecerTecnicoGemini } from '../../services/chatGptCalculadoraAnpService';
 import {
   X,
   CheckCircle2,
@@ -16,15 +16,15 @@ import {
   Check,
 } from 'lucide-react';
 
-interface ModalParecerChatGPTProps {
+interface ModalParecerGeminiProps {
   isOpen: boolean;
   onClose: () => void;
-  parecer: ParecerTecnicoChatGPT | null;
+  parecer: ParecerTecnicoGemini | null;
   produto: string;
   padraoRegulatorio: 'ANP_AGOSTO_2026' | 'ANP_TRANSICAO';
 }
 
-export const ModalParecerChatGPT: React.FC<ModalParecerChatGPTProps> = ({
+export const ModalParecerGemini: React.FC<ModalParecerGeminiProps> = ({
   isOpen,
   onClose,
   parecer,
@@ -43,7 +43,7 @@ export const ModalParecerChatGPT: React.FC<ModalParecerChatGPTProps> = ({
       : 'Padrão ANP de Transição (E27 e B14)';
 
   const copiarTextoParecer = () => {
-    const texto = `LAUDO TÉCNICO DE CONFORMIDADE ANP (EMITIDO VIA CHATGPT GPT-4o)
+    const texto = `LAUDO TÉCNICO DE CONFORMIDADE ANP (EMITIDO VIA GOOGLE GEMINI)
 Produto: ${produto}
 Data/Hora: ${new Date(parecer.timestamp).toLocaleString('pt-BR')}
 Norma de Referência: ${padraoRotulo}
@@ -86,9 +86,9 @@ ${parecer.embasamentoLegal.join('; ')}
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-base font-bold">Parecer Técnico de Conformidade ANP</h3>
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-purple-500/30 text-purple-200 border border-purple-400/40 text-[10px] font-bold">
-                  <Sparkles className="w-3 h-3 text-purple-300" />
-                  ChatGPT (GPT-4o)
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-500/30 text-blue-200 border border-blue-400/40 text-[10px] font-bold">
+                  <Sparkles className="w-3 h-3 text-blue-300" />
+                  Google Gemini 3.8 Flash
                 </span>
               </div>
               <p className="text-xs text-slate-300 mt-0.5">
@@ -159,7 +159,7 @@ ${parecer.embasamentoLegal.join('; ')}
             </div>
           )}
 
-          {/* Parecer Técnico Detalhado do ChatGPT */}
+          {/* Parecer Técnico Detalhado do Gemini */}
           <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-2">
             <h5 className="font-bold text-slate-900 flex items-center gap-1.5 text-xs uppercase tracking-wider">
               <FileText className="w-4 h-4 text-blue-600" />
@@ -277,3 +277,6 @@ ${parecer.embasamentoLegal.join('; ')}
     </div>
   );
 };
+
+/** Alias para compatibilidade */
+export const ModalParecerChatGPT = ModalParecerGemini;

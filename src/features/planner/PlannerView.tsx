@@ -30,6 +30,7 @@ import {
   AlertCircle,
   AlertTriangle,
   Users,
+  Undo2,
 } from 'lucide-react';
 import {
   analisarConflitosEscala,
@@ -39,6 +40,10 @@ import {
 } from './detectorConflitosEscala';
 import { PainelConflitosEscala } from './PainelConflitosEscala';
 import { ModalImportarEscalaImagem } from './ModalImportarEscalaImagem';
+import {
+  desfazerUltimaImportacao,
+  obterUltimoSnapshotImportacao,
+} from './importadorEscalaImagemService';
 
 const repoEscala = new PostoSubcollectionRepository<Escala>('escalas');
 const repoFunc = new PostoSubcollectionRepository<Funcionario>('funcionarios');
@@ -173,6 +178,41 @@ export const PlannerView: React.FC<PlannerProps> = ({
 
   // Modal Importar Escala por Imagem Oficial com Validação Estrita (Posto ADM)
   const [modalImportarImagemAberto, setModalImportarImagemAberto] = useState(false);
+  const [mensagemUndo, setMensagemUndo] = useState<{ tipo: 'sucesso' | 'erro'; texto: string } | null>(null);
+  const [desfazendoImportacao, setDesfazendoImportacao] = useState(false);
+
+  const handleDesfazerUltimaImportacao = async () => {
+    if (!postoId) return;
+    const snap = obterUltimoSnapshotImportacao();
+    if (!snap) {
+      setMensagemUndo({
+        tipo: 'erro',
+        texto: 'Nenhum histórico de importação recente encontrado para desfazer.',
+      });
+      setTimeout(() => setMensagemUndo(null), 5000);
+      return;
+    }
+
+    if (!window.confirm('Deseja realmente desfazer a última importação de escala e restaurar o estado anterior?')) {
+      return;
+    }
+
+    setDesfazendoImportacao(true);
+    try {
+      const res = await desfazerUltimaImportacao(postoId, repoEscala);
+      if (res.success) {
+        setMensagemUndo({ tipo: 'sucesso', texto: res.message });
+        await onReload();
+      } else {
+        setMensagemUndo({ tipo: 'erro', texto: res.message });
+      }
+    } catch (err: any) {
+      setMensagemUndo({ tipo: 'erro', texto: `Falha ao desfazer: ${err?.message || 'Erro inesperado'}` });
+    } finally {
+      setDesfazendoImportacao(false);
+      setTimeout(() => setMensagemUndo(null), 6000);
+    }
+  };
 
   // Modal Escanear Imagem da Escala e Vincular no Planner
   const [isScannerOpen, setIsScannerOpen] = useState(false);
@@ -182,8 +222,8 @@ export const PlannerView: React.FC<PlannerProps> = ({
   const [linhasEscaneadas, setLinhasEscaneadas] = useState<LinhaEscaneada[]>([]);
   const [avisoScanner, setAvisoScanner] = useState<string>('');
   const [erroScanner, setErroScanner] = useState<string>('');
-  const [motorIA, setMotorIA] = useState<'chatgpt' | 'gemini'>('chatgpt');
-  const [motorUtilizadoScanner, setMotorUtilizadoScanner] = useState<string>('');
+  const [motorIA, setMotorIA] = useState<'gemini'>('gemini');
+  const [motorUtilizadoScanner, setMotorUtilizadoScanner] = useState<string>('Google Gemini 3.8 Flash Vision');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -724,13 +764,9 @@ export const PlannerView: React.FC<PlannerProps> = ({
   const processarImagemEscala = async (dataUrl: string, mimeType: string = 'image/jpeg') => {
     setImagemEscalaBase64(dataUrl);
     setEscaneandoIA(true);
-    setAvisoScanner(
-      motorIA === 'chatgpt'
-        ? 'ChatGPT (GPT-4o Vision) analisando a escala: reconhecendo nomes, turnos e folgas...'
-        : 'Gemini Vision analisando a escala: reconhecendo nomes, turnos e folgas...'
-    );
+    setAvisoScanner('Google Gemini 2.5 Flash Vision analisando a escala: reconhecendo nomes, turnos e folgas...');
     setErroScanner('');
-    setMotorUtilizadoScanner('');
+    setMotorUtilizadoScanner('Google Gemini 2.5 Flash');
 
     try {
       const data = await requisitarLeituraEscalaOCR({
@@ -872,7 +908,7 @@ export const PlannerView: React.FC<PlannerProps> = ({
       });
 
       setLinhasEscaneadas(novasLinhas);
-      const rotuloMotor = data.motorUtilizado || (motorIA === 'chatgpt' ? 'ChatGPT (GPT-4o Vision)' : 'Gemini Vision');
+      const rotuloMotor = data.motorUtilizado || 'Google Gemini 3.8 Flash Vision';
       setAvisoScanner(
         `${novasLinhas.length} funcionário(s) e seus turnos reconhecidos via ${rotuloMotor}! Confira abaixo e clique em "Anexar Funcionários e Turnos ao Planner".`
       );
@@ -1140,6 +1176,17 @@ export const PlannerView: React.FC<PlannerProps> = ({
             Importar escala por imagem
           </button>
 
+          <button
+            type="button"
+            disabled={desfazendoImportacao}
+            onClick={handleDesfazerUltimaImportacao}
+            title="Desfazer a última importação de escala e restaurar o estado anterior"
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 text-xs font-bold rounded-lg transition cursor-pointer disabled:opacity-50"
+          >
+            <Undo2 className="w-3.5 h-3.5 text-slate-600" />
+            {desfazendoImportacao ? 'Restaurando...' : 'Desfazer última importação'}
+          </button>
+
           {onNavigateToIAEscala && (
             <button
               type="button"
@@ -1184,6 +1231,33 @@ export const PlannerView: React.FC<PlannerProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Banner de Notificação de Desfazer Importação */}
+      {mensagemUndo && (
+        <div
+          className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 text-xs font-semibold ${
+            mensagemUndo.tipo === 'sucesso'
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+              : 'bg-red-50 border-red-200 text-red-900'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {mensagemUndo.tipo === 'sucesso' ? (
+              <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+            )}
+            <span>{mensagemUndo.texto}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setMensagemUndo(null)}
+            className="text-slate-400 hover:text-slate-700 p-1"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Painel Inteligente de Auditoria de Conflitos da Escala (CLT, Interjornadas e Cobertura Mínima) */}
       <PainelConflitosEscala
@@ -1914,12 +1988,12 @@ ${temDescoberto ? `\n🚨 CRÍTICO: Turno(s) ${descobertos.join(', ')} sem nenhu
                     <h3 className="text-base font-bold">
                       Escanear Escala e Anexar ao Planner ({monthName})
                     </h3>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                      Powered by ChatGPT
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                      Powered by Google Gemini
                     </span>
                   </div>
                   <p className="text-xs text-slate-300">
-                    O ChatGPT analisa a folha ou quadro e reconhece automaticamente os <strong>Nomes dos Funcionários</strong>, <strong>Turnos (T1, T2, T3, Horista)</strong> e <strong>Folgas (&quot;S&quot;)</strong>.
+                    O Gemini analisa a folha ou quadro e reconhece automaticamente os <strong>Nomes dos Funcionários</strong>, <strong>Turnos (T1, T2, T3, Horista)</strong> e <strong>Folgas (&quot;S&quot;)</strong>.
                   </p>
                 </div>
               </div>
@@ -1938,32 +2012,11 @@ ${temDescoberto ? `\n🚨 CRÍTICO: Turno(s) ${descobertos.join(', ')} sem nenhu
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-100/80 p-3 rounded-xl border border-slate-200">
                 <div className="text-xs">
                   <span className="font-bold text-slate-800">Motor de Inteligência Artificial:</span>
-                  <p className="text-[11px] text-slate-500">Selecione o modelo que fará a leitura visual da imagem da escala.</p>
+                  <p className="text-[11px] text-slate-500">Google Gemini 2.5 Flash Vision configurado para leitura visual da escala.</p>
                 </div>
-                <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-slate-200">
-                  <button
-                    type="button"
-                    onClick={() => setMotorIA('chatgpt')}
-                    className={`px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
-                      motorIA === 'chatgpt'
-                        ? 'bg-emerald-600 text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>ChatGPT (GPT-4o Vision)</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setMotorIA('gemini')}
-                    className={`px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
-                      motorIA === 'gemini'
-                        ? 'bg-blue-600 text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <span>Gemini Vision</span>
-                  </button>
+                <div className="flex items-center gap-1 bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs">
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-300" />
+                  <span>Google Gemini 2.5 Flash Vision</span>
                 </div>
               </div>
 
@@ -1990,17 +2043,17 @@ ${temDescoberto ? `\n🚨 CRÍTICO: Turno(s) ${descobertos.join(', ')} sem nenhu
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={escaneandoIA}
-                    className="inline-flex items-center gap-2 px-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer disabled:opacity-50"
+                    className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer disabled:opacity-50"
                   >
                     {escaneandoIA ? (
                       <>
                         <RefreshCw className="w-4 h-4 animate-spin" />
-                        ChatGPT Analisando Imagem...
+                        Gemini Analisando Imagem...
                       </>
                     ) : (
                       <>
                         <Upload className="w-4 h-4" />
-                        Enviar Imagem p/ ChatGPT
+                        Enviar Imagem p/ Gemini
                       </>
                     )}
                   </button>
@@ -2022,7 +2075,7 @@ ${temDescoberto ? `\n🚨 CRÍTICO: Turno(s) ${descobertos.join(', ')} sem nenhu
                       className="inline-flex items-center gap-1.5 px-3 py-2 bg-purple-100 hover:bg-purple-200 text-purple-800 text-xs font-bold rounded-xl transition cursor-pointer"
                     >
                       <RefreshCw className="w-3.5 h-3.5" />
-                      Reprocessar com {motorIA === 'chatgpt' ? 'ChatGPT' : 'Gemini'}
+                      Reprocessar com Gemini
                     </button>
                   )}
                 </div>

@@ -7,10 +7,14 @@ import {
   TurnoCadastrado,
   RegistroImportadoReconhecido,
   ResultadoImportacaoEscala,
-  importarEscalaPorImagem,
+  processarLeituraBrutaParaValidacao,
   validateRecord,
-  StatusRegistroImportado,
+  StatusValidacao,
+  salvarSnapshotImportacao,
+  executarSuiteDeTestesValidador,
+  ResultadoTeste,
 } from './importadorEscalaImagemService';
+import { requisitarLeituraEscalaOCR } from '../../services/geminiOcrService';
 import {
   Camera,
   Upload,
@@ -20,21 +24,18 @@ import {
   AlertTriangle,
   AlertCircle,
   RefreshCw,
-  Sliders,
   RotateCw,
   Sun,
   Contrast,
-  Layers,
-  ArrowRight,
-  Filter,
   Search,
   Plus,
   Trash2,
-  Table,
-  LayoutGrid,
   FileImage,
   ShieldCheck,
   Check,
+  FlaskConical,
+  Undo2,
+  HelpCircle,
 } from 'lucide-react';
 
 const repoEscala = new PostoSubcollectionRepository<Escala>('escalas');
@@ -56,10 +57,10 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
   currentDate,
   onSuccess,
 }) => {
-  const { postoId, userProfile } = useAuth();
+  const { postoId } = useAuth();
 
-  // Etapas do Fluxo: 'UPLOAD' | 'PROCESSANDO' | 'REVISAO'
-  const [etapa, setEtapa] = useState<'UPLOAD' | 'PROCESSANDO' | 'REVISAO'>('UPLOAD');
+  // Etapas: 'UPLOAD' | 'PROCESSANDO' | 'REVISAO' | 'TESTES'
+  const [etapa, setEtapa] = useState<'UPLOAD' | 'PROCESSANDO' | 'REVISAO' | 'TESTES'>('UPLOAD');
 
   // Imagem e Pré-processamento
   const [imagemOriginalUrl, setImagemOriginalUrl] = useState<string | null>(null);
@@ -71,8 +72,8 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
   const [isDragOver, setIsDragOver] = useState(false);
 
   // Configuração da IA
-  const [motorIA, setMotorIA] = useState<'chatgpt' | 'gemini'>('chatgpt');
-  const [motorUtilizado, setMotorUtilizado] = useState<string>('');
+  const [motorIA, setMotorIA] = useState<'gemini'>('gemini');
+  const [motorUtilizado, setMotorUtilizado] = useState<string>('Google Gemini 3.8 Flash Vision');
   const [mensagemProgresso, setMensagemProgresso] = useState<string>('');
   const [erroProcessamento, setErroProcessamento] = useState<string>('');
 
@@ -80,16 +81,18 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
   const [registros, setRegistros] = useState<RegistroImportadoReconhecido[]>([]);
   const [filtroStatus, setFiltroStatus] = useState<'TODOS' | 'PENDENTES' | 'CONFIRMADOS'>('TODOS');
   const [buscaFuncionario, setBuscaFuncionario] = useState('');
-  const [modoVisaoRevisao, setModoVisaoRevisao] = useState<'TABELA' | 'GRADE'>('TABELA');
   const [salvandoNoPlanner, setSalvandoNoPlanner] = useState(false);
 
-  // Refs de arquivo
+  // Testes de Validação
+  const [resultadosTestes, setResultadosTestes] = useState<ResultadoTeste[]>([]);
+
+  // Refs
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Dados do Mês e Dias
+  // Mês e Dias
   const year = currentDate.getFullYear();
-  const month = currentDate.getMonth() + 1; // 1 a 12
+  const month = currentDate.getMonth() + 1;
   const totalDiasMes = useMemo(() => new Date(year, month, 0).getDate(), [year, month]);
   const listaDiasMes = useMemo(() => Array.from({ length: totalDiasMes }, (_, i) => i + 1), [totalDiasMes]);
 
@@ -97,12 +100,11 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
     return new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(currentDate);
   }, [currentDate]);
 
-  // Lista de funcionários ativos cadastrados
+  // Lista de funcionários ativos cadastrados no Posto ADM
   const funcionariosCadastrados = useMemo(() => {
     return funcionarios.filter((f) => f && f.status !== 'INATIVO');
   }, [funcionarios]);
 
-  // Reset ao fechar ou abrir modal
   useEffect(() => {
     if (!isOpen) {
       setEtapa('UPLOAD');
@@ -117,7 +119,7 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
   }, [isOpen]);
 
   // ============================================================================
-  // PRÉ-PROCESSAMENTO DE IMAGEM NO CANVAS (ORIENTAÇÃO, CONTRASTE, NITIDEZ, PB)
+  // PRÉ-PROCESSAMENTO NO CANVAS
   // ============================================================================
   const aplicarPreProcessamento = (
     dataUrl: string,
@@ -157,14 +159,12 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
             data[i + 1] = gray;
             data[i + 2] = gray;
           } else if (filtro === 'alto_contraste') {
-            // Curva de alto contraste com limiar inteligente
             const factor = (259 * (128 + 128)) / (255 * (259 - 128));
             const cR = Math.min(255, Math.max(0, factor * (gray - 128) + 128));
             data[i] = cR;
             data[i + 1] = cR;
             data[i + 2] = cR;
           } else if (filtro === 'nitidez') {
-            // Aumento de ganho e clareamento de fundo
             const boosted = gray > 140 ? Math.min(255, gray * 1.15) : Math.max(0, gray * 0.85);
             data[i] = boosted;
             data[i + 1] = boosted;
@@ -215,7 +215,7 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
   };
 
   // ============================================================================
-  // FLUXO DE LEITURA POR IA E VALIDAÇÃO INDEPENDENTE
+  // LEITURA BRUTA DA IMAGEM E VALIDAÇÃO 100% NO CÓDIGO DO POSTO ADM
   // ============================================================================
   const handleIniciarLeituraIA = async () => {
     const imgParaEnviar = imagemProcessadaUrl || imagemOriginalUrl;
@@ -232,41 +232,49 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
     setEtapa('PROCESSANDO');
     setErroProcessamento('');
     setMensagemProgresso(
-      motorIA === 'chatgpt'
-        ? 'ChatGPT (GPT-4o Vision) processando a escala... Mapeando funcionários e turnos cadastrados.'
-        : 'Gemini Vision processando a escala... Mapeando funcionários e turnos cadastrados.'
+      'Google Gemini 3.8 Flash Vision extraindo elementos visuais brutos da imagem...'
     );
 
     try {
-      const resultado: ResultadoImportacaoEscala = await importarEscalaPorImagem({
+      const mesAnoStr = `${year}-${String(month).padStart(2, '0')}`;
+
+      // Envia requisição pura de leitura óptica
+      const ocrRawResponse = await requisitarLeituraEscalaOCR({
         imageBase64: imgParaEnviar,
         mimeType: 'image/jpeg',
-        month,
-        year,
-        funcionarios: funcionariosCadastrados,
-        turnos: TURNOS_PADRAO_POSTO,
-        motor: motorIA,
+        mesAnoReferencia: mesAnoStr,
+        motor: 'gemini',
+        funcionariosCadastrados: [], // A IA NÃO recebe a lista para não alucinar vínculos
       });
 
-      setMotorUtilizado(resultado.motorUtilizado);
+      // VALIDAÇÃO 100% PELO MOTOR DO POSTO ADM
+      const resultadoValidador: ResultadoImportacaoEscala = processarLeituraBrutaParaValidacao(
+        ocrRawResponse,
+        funcionariosCadastrados,
+        TURNOS_PADRAO_POSTO,
+        month,
+        year
+      );
 
-      if (resultado.records.length === 0) {
-        setErroProcessamento('Nenhum registro legível de escala foi encontrado na imagem. Tente uma foto com melhor iluminação ou ajuste a rotação.');
+      setMotorUtilizado(ocrRawResponse.motorUtilizado || 'Google Gemini 3.8 Flash Vision');
+
+      if (resultadoValidador.records.length === 0) {
+        setErroProcessamento('Nenhuma célula ou texto legível foi extraído da imagem. Tente uma foto mais aproximada ou ajuste a rotação.');
         setEtapa('UPLOAD');
         return;
       }
 
-      setRegistros(resultado.records);
+      setRegistros(resultadoValidador.records);
       setEtapa('REVISAO');
     } catch (err: any) {
-      console.error('Erro na importação por IA:', err);
-      setErroProcessamento(err?.message || 'Falha na leitura visual da escala. Tente novamente.');
+      console.error('Erro na leitura óptica:', err);
+      setErroProcessamento(err?.message || 'Falha na leitura óptica da imagem. Tente novamente.');
       setEtapa('UPLOAD');
     }
   };
 
   // ============================================================================
-  // EDIÇÃO MANUAL E REVALIDAÇÃO EM TEMPO REAL NA TELA DE REVISÃO (REGRA 13)
+  // ATUALIZAÇÃO E REVALIDAÇÃO MANUAL (REGRA 13 & 14)
   // ============================================================================
   const handleAtualizarRegistro = (
     idRegistro: string,
@@ -276,7 +284,6 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
       prev.map((rec) => {
         if (rec.id !== idRegistro) return rec;
         const atualizado = { ...rec, ...alteracoes };
-        // Executa validação estrita independente
         return validateRecord(atualizado, funcionariosCadastrados, TURNOS_PADRAO_POSTO, totalDiasMes);
       })
     );
@@ -290,6 +297,10 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
     const primeiroFunc = funcionariosCadastrados[0];
     const novoRec: Partial<RegistroImportadoReconhecido> = {
       id: `manual-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      rowIndex: registros.length + 1,
+      columnIndex: 1,
+      rawEmployeeText: primeiroFunc?.nome || '',
+      rawShiftText: '06-14',
       employeeId: primeiroFunc ? primeiroFunc.id : null,
       employeeName: primeiroFunc ? primeiroFunc.nome : 'Selecione',
       day: 1,
@@ -297,23 +308,22 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
       shiftName: '1º Turno (Manhã)',
       shiftSigla: 'T1',
       confidence: 1.0,
-      status: primeiroFunc ? 'CONFIRMADO' : 'NAO_IDENTIFICADO',
-      observation: 'Adicionado manualmente na conferência.',
-      isFolga: false,
+      isCustomManual: true,
     };
     const validado = validateRecord(novoRec, funcionariosCadastrados, TURNOS_PADRAO_POSTO, totalDiasMes);
     setRegistros((prev) => [validado, ...prev]);
   };
 
   // ============================================================================
-  // CONFIRMAÇÃO E SALVAMENTO NO PLANNER (REGRA 14)
+  // ESTATÍSTICAS E CONFIRMAÇÃO COM DUPLICIDADE E SNAPSHOT (REGRAS 15, 16, 18, 19)
   // ============================================================================
   const estatisticas = useMemo(() => {
     const total = registros.length;
     const confirmados = registros.filter((r) => r.status === 'CONFIRMADO').length;
     const revisao = registros.filter((r) => r.status === 'REVISAO').length;
     const naoIdentificados = registros.filter((r) => r.status === 'NAO_IDENTIFICADO').length;
-    return { total, confirmados, revisao, naoIdentificados };
+    const prontosParaImportar = registros.filter((r) => r.employeeId && r.shiftId).length;
+    return { total, confirmados, revisao, naoIdentificados, prontosParaImportar };
   }, [registros]);
 
   const registrosFiltrados = useMemo(() => {
@@ -323,7 +333,7 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
       if (buscaFuncionario) {
         const query = buscaFuncionario.toLowerCase();
         const matchNome = r.employeeName.toLowerCase().includes(query);
-        const matchRaw = (r.rawName || '').toLowerCase().includes(query);
+        const matchRaw = (r.rawEmployeeText || '').toLowerCase().includes(query);
         if (!matchNome && !matchRaw) return false;
       }
       return true;
@@ -332,17 +342,17 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
 
   const handleConfirmarESalvarPlanner = async () => {
     if (!postoId) {
-      setErroProcessamento('Posto não identificado na sessão.');
+      setErroProcessamento('Posto de combustíveis não identificado na sessão.');
       return;
     }
 
-    // Filtrar somente registros que possuem funcionário válido cadastrado e turno/folga definidos
-    const registrosValidosParaGravar = registros.filter(
+    // REGRA 16: BLOQUEIO TOTAL DE REGISTROS COM employeeId = null OU shiftId = null
+    const registrosValidadosParaGravar = registros.filter(
       (r) => r.employeeId && (r.shiftId || r.isFolga)
     );
 
-    if (registrosValidosParaGravar.length === 0) {
-      setErroProcessamento('Nenhum registro validado com funcionário cadastrado para preencher o Planner.');
+    if (registrosValidadosParaGravar.length === 0) {
+      setErroProcessamento('Nenhum registro validado com funcionário e turno cadastrados para preencher o Planner.');
       return;
     }
 
@@ -351,7 +361,14 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
 
     try {
       const agora = new Date().toISOString();
-      const escalasParaGravar: Partial<Escala>[] = registrosValidosParaGravar.map((r) => {
+      const mesAnoStr = `${year}-${String(month).padStart(2, '0')}`;
+
+      // 1. Carregar registros atuais do mês para compor o Snapshot de Desfazer
+      const escalasAtuais = await repoEscala.getAll(postoId);
+      const escalasDoMesAtual = escalasAtuais.filter((e) => e.data && e.data.startsWith(mesAnoStr));
+
+      // 2. Montar lista de atualizações/inserções com chave única para evitar duplicidade (REGRA 18)
+      const escalasParaGravar: Escala[] = registrosValidadosParaGravar.map((r) => {
         const mStr = String(month).padStart(2, '0');
         const dStr = String(r.day).padStart(2, '0');
         const dataFormatada = `${year}-${mStr}-${dStr}`;
@@ -366,8 +383,11 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
         else if (r.shiftSigla === 'FA') statusFinal = 'AUSENTE';
         else if (r.shiftSigla === 'PLT') statusFinal = 'PLANTAO';
 
+        // Id único composto por funcionário e data para atualizar registro existente
+        const idComposto = `${r.employeeId}_${dataFormatada}`;
+
         return {
-          id: `${r.employeeId}_${dataFormatada}`,
+          id: idComposto,
           postoId,
           funcionarioId: r.employeeId!,
           funcionarioNome: r.employeeName,
@@ -379,64 +399,87 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
           horarioFim: isFolga ? '00:00' : r.horarioFim || '14:00',
           intervalo: '1h',
           status: statusFinal,
-          observacao: r.observation ? `[Importado via IA] ${r.observation}` : '[Importado via IA]',
+          observacao: r.observation ? `[Importado Validador ADM] ${r.observation}` : '[Importado Validador ADM]',
           criadoEm: agora,
           atualizadoEm: agora,
         };
       });
 
-      await repoEscala.saveBatch(postoId, escalasParaGravar as Escala[]);
+      // 3. Salvar Snapshot para permitir "Desfazer última importação" (REGRA 19)
+      const novosIds = escalasParaGravar.map((e) => e.id);
+      const registrosSubstituidos = escalasDoMesAtual.filter((e) => novosIds.includes(e.id));
+      salvarSnapshotImportacao(postoId, mesAnoStr, registrosSubstituidos, novosIds);
+
+      // 4. Gravar em lote reutilizando a persistência existente do Posto ADM
+      await repoEscala.saveBatch(postoId, escalasParaGravar);
+
       onSuccess();
       onClose();
     } catch (err: any) {
-      console.error('Erro ao salvar escala no Planner:', err);
-      setErroProcessamento(`Falha ao salvar no Planner: ${err?.message || 'Erro de comunicação'}`);
+      console.error('Erro ao salvar no Planner:', err);
+      setErroProcessamento(`Falha ao preencher Planner: ${err?.message || 'Erro de comunicação'}`);
     } finally {
       setSalvandoNoPlanner(false);
     }
   };
 
+  const handleRodarTestesSistema = () => {
+    const testes = executarSuiteDeTestesValidador();
+    setResultadosTestes(testes);
+    setEtapa('TESTES');
+  };
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
+    <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
       <div className="bg-white rounded-2xl max-w-6xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
         {/* ====================================================================== */}
-        {/* CABEÇALHO DO MODAL */}
+        {/* CABEÇALHO */}
         {/* ====================================================================== */}
         <div className="bg-slate-900 text-white px-5 sm:px-6 py-4 flex items-center justify-between border-b border-slate-800">
           <div className="flex items-center gap-3">
             <div className="p-2.5 bg-blue-600/20 text-blue-400 rounded-xl border border-blue-500/30">
-              <Sparkles className="w-5 h-5 text-blue-400" />
+              <ShieldCheck className="w-5 h-5 text-blue-400" />
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-base font-bold text-white">
-                  Importar Escala por Imagem
+                  Importar Escala por Imagem — Validação 100% Posto ADM
                 </h3>
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-500/20 text-blue-300 border border-blue-500/30">
                   {nomeMesFormatado}
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Validação estrita e conferência contra o cadastro de funcionários e turnos oficiais do Posto ADM.
+                A IA somente lê a imagem. O código do Posto ADM é a <strong>única fonte de verdade</strong> para validar funcionários e turnos.
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleRodarTestesSistema}
+              title="Executar Suíte de Testes de Validação (Anti-Alucinação)"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-lg border border-slate-700 transition"
+            >
+              <FlaskConical className="w-3.5 h-3.5 text-purple-400" />
+              <span>Ver Testes do Sistema</span>
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* ====================================================================== */}
-        {/* CORPO DO MODAL (FLUXO EM 3 ETAPAS) */}
+        {/* CORPO */}
         {/* ====================================================================== */}
         <div className="p-5 sm:p-6 overflow-y-auto space-y-5 flex-1 bg-slate-50/50">
-          {/* Mensagens de Alerta ou Erro */}
           {erroProcessamento && (
             <div className="p-3.5 bg-red-50 border border-red-200 rounded-xl text-xs text-red-800 flex items-start gap-2.5 font-semibold">
               <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
@@ -445,49 +488,30 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
           )}
 
           {/* ================================================================== */}
-          {/* ETAPA 1: UPLOAD, FOTO & PRÉ-PROCESSAMENTO */}
+          {/* ETAPA 1: SELEÇÃO DE IMAGEM & PRÉ-PROCESSAMENTO */}
           {/* ================================================================== */}
           {etapa === 'UPLOAD' && (
             <div className="space-y-5">
-              {/* Barra de Seleção de Motor de IA */}
-              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                <div>
-                  <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                    Motor de Visão Computacional
+              {/* Card de Regra de Ouro da Arquitetura */}
+              <div className="bg-blue-900 text-white p-4 rounded-xl border border-blue-700 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="space-y-1">
+                  <div className="text-xs font-bold flex items-center gap-2 text-blue-200 uppercase tracking-wider">
+                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                    Princípio Fundamental: AI OUTPUT ≠ DATABASE TRUTH
                   </div>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    A IA lê a imagem e os dados são <strong>obrigatoriamente checados</strong> contra os cadastros do Posto ADM.
+                  <p className="text-xs text-blue-100">
+                    A IA extrai apenas os textos visuais brutos. Funcionários, turnos ou horários inexistentes são <strong>rejeitados automaticamente</strong> pelo código.
                   </p>
                 </div>
-                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200">
-                  <button
-                    type="button"
-                    onClick={() => setMotorIA('chatgpt')}
-                    className={`px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
-                      motorIA === 'chatgpt'
-                        ? 'bg-emerald-600 text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>ChatGPT (GPT-4o Vision)</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setMotorIA('gemini')}
-                    className={`px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
-                      motorIA === 'gemini'
-                        ? 'bg-blue-600 text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <span>Gemini Vision</span>
-                  </button>
+                <div className="flex items-center gap-1 bg-blue-950/80 p-1 rounded-lg border border-blue-800 text-xs">
+                  <div className="px-3.5 py-1.5 rounded-md font-bold bg-blue-600 text-white flex items-center gap-1.5 shadow-xs">
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-300" />
+                    <span>Google Gemini 2.5 Flash Vision (Oficial)</span>
+                  </div>
                 </div>
               </div>
 
-              {/* Zona de Drop / Câmera / Arquivo */}
+              {/* Zona de Drop / Câmera */}
               <div
                 onDragOver={(e) => {
                   e.preventDefault();
@@ -527,10 +551,10 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
                     </div>
                     <div>
                       <h4 className="text-sm font-bold text-slate-800">
-                        Arraste a foto da escala aqui ou clique para selecionar
+                        Arraste a foto da escala aqui ou selecione um arquivo
                       </h4>
                       <p className="text-xs text-slate-500 mt-1">
-                        Formatos aceitos: <strong>JPG, JPEG, PNG, WEBP</strong>. A imagem pode conter a escala inteira.
+                        Formatos aceitos: <strong>JPG, JPEG, PNG, WEBP</strong>. Tire foto de quadro, folha impressa ou planilha.
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-3 mt-2">
@@ -548,7 +572,7 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
                         className="inline-flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-bold rounded-xl shadow-xs transition cursor-pointer"
                       >
                         <Camera className="w-4 h-4 text-blue-600" />
-                        Tirar Foto com o Celular
+                        Tirar Foto pelo Celular
                       </button>
                     </div>
                   </>
@@ -557,14 +581,13 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
                     <div className="flex flex-col md:flex-row items-center justify-between gap-3 border-b border-slate-200 pb-3">
                       <div className="text-xs font-bold text-slate-800 flex items-center gap-2">
                         <CheckCircle className="w-4 h-4 text-emerald-600" />
-                        Imagem carregada e pronta para leitura
+                        Imagem da escala carregada
                       </div>
-                      {/* Ferramentas de Pré-Processamento Visual */}
                       <div className="flex flex-wrap items-center gap-2">
                         <button
                           type="button"
                           onClick={handleRotacionar}
-                          title="Girar 90 graus"
+                          title="Girar 90°"
                           className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer"
                         >
                           <RotateCw className="w-3.5 h-3.5" />
@@ -615,11 +638,10 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
                       </div>
                     </div>
 
-                    {/* Pré-visualização da imagem tratada */}
                     <div className="bg-slate-900/10 border border-slate-200 rounded-xl p-2 flex items-center justify-center max-h-72 overflow-hidden">
                       <img
                         src={imagemProcessadaUrl || imagemOriginalUrl}
-                        alt="Pré-visualização da Escala"
+                        alt="Prévia da Escala"
                         className="max-h-64 object-contain rounded shadow-xs"
                       />
                     </div>
@@ -627,18 +649,19 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
                 )}
               </div>
 
-              {/* Informação sobre os cadastros oficiais enviados */}
-              <div className="bg-blue-50/70 border border-blue-200 p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-blue-900">
+              {/* Informações dos Cadastros Válidos */}
+              <div className="bg-slate-100 border border-slate-300 p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-slate-800">
                 <div className="space-y-1">
-                  <div className="font-bold flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-blue-700" />
-                    Base Oficial do Posto ADM Fornecida à IA:
+                  <div className="font-bold flex items-center gap-1.5 text-slate-900">
+                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                    Cadastros Oficiais Ativos do Posto ADM:
                   </div>
-                  <div className="text-[11px] text-blue-800">
-                    • <strong>{funcionariosCadastrados.length} Funcionários ativos</strong> cadastrados.<br />
-                    • <strong>5 Turnos Oficiais</strong> (T1 Manhã, T2 Tarde, T3 Noite, Horista, Plantão) + Folga (&quot;S&quot;).
+                  <div className="text-[11px] text-slate-600">
+                    • <strong>{funcionariosCadastrados.length} Funcionários cadastrados</strong>.<br />
+                    • <strong>5 Turnos Oficiais</strong> (T1, T2, T3, Horista, Plantão 12x36) + Folga (&quot;S&quot;).
                   </div>
                 </div>
+
                 {imagemOriginalUrl && (
                   <button
                     type="button"
@@ -654,7 +677,7 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
           )}
 
           {/* ================================================================== */}
-          {/* ETAPA 2: PROCESSANDO LEITURA MULTIMODAL */}
+          {/* ETAPA 2: PROCESSANDO */}
           {/* ================================================================== */}
           {etapa === 'PROCESSANDO' && (
             <div className="py-16 text-center space-y-4 bg-white rounded-2xl border border-slate-200">
@@ -663,7 +686,7 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
               </div>
               <div className="space-y-1">
                 <h4 className="text-base font-bold text-slate-900">
-                  Lendo Escala e Conciliando com os Cadastros...
+                  Lendo Elementos Visuais e Executando Validação do Posto ADM...
                 </h4>
                 <p className="text-xs text-slate-500 max-w-md mx-auto">
                   {mensagemProgresso}
@@ -673,23 +696,22 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
           )}
 
           {/* ================================================================== */}
-          {/* ETAPA 3: REVISÃO VISUAL DA ESCALA IMPORTADA (REGRA 11, 12, 13) */}
+          {/* ETAPA 3: REVISÃO DA ESCALA (REGRA 13 & 14) */}
           {/* ================================================================== */}
           {etapa === 'REVISAO' && (
             <div className="space-y-5">
-              {/* Barra Superior de Resumo e Estatísticas */}
+              {/* Barra de Resumo */}
               <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                 <div>
                   <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                    <ShieldCheck className="w-4 h-4 text-blue-600" />
-                    Revisar Escala Reconhecida ({registros.length} registros)
+                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                    Revisar Escala ({registros.length} registros analisados)
                   </h4>
                   <p className="text-[11px] text-slate-500 mt-0.5">
-                    Motor: <strong>{motorUtilizado}</strong>. Revise os dados antes de preencher o Planner.
+                    Motor: <strong>{motorUtilizado}</strong>. Somente registros com vínculo confirmado entrarão no Planner.
                   </p>
                 </div>
 
-                {/* Badges de Contagem */}
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
                     <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
@@ -710,7 +732,7 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
                 </div>
               </div>
 
-              {/* Filtros e Ações da Tabela de Revisão */}
+              {/* Filtros da Tabela */}
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="relative">
@@ -776,12 +798,12 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
                     className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition cursor-pointer"
                   >
                     <RefreshCw className="w-3.5 h-3.5" />
-                    Ler Outra Imagem
+                    Ler Outra Foto
                   </button>
                 </div>
               </div>
 
-              {/* Tabela de Revisão Estruturada */}
+              {/* Tabela de Revisão */}
               <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
                 <div className="overflow-x-auto max-h-[460px]">
                   <table className="w-full text-left border-collapse text-xs">
@@ -790,20 +812,20 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
                         <th className="p-3 min-w-[220px] border-r border-slate-200">
                           Funcionário Cadastrado
                         </th>
-                        <th className="p-3 min-w-[70px] text-center border-r border-slate-200">
+                        <th className="p-3 min-w-[75px] text-center border-r border-slate-200">
                           Dia
                         </th>
                         <th className="p-3 min-w-[190px] border-r border-slate-200">
                           Turno Cadastrado
                         </th>
-                        <th className="p-3 min-w-[90px] text-center border-r border-slate-200">
-                          Confiança
+                        <th className="p-3 min-w-[140px] border-r border-slate-200">
+                          Texto Lido na Imagem
                         </th>
-                        <th className="p-3 min-w-[130px] border-r border-slate-200">
+                        <th className="p-3 min-w-[125px] border-r border-slate-200">
                           Status
                         </th>
                         <th className="p-3 min-w-[200px] border-r border-slate-200">
-                          Observação / IA
+                          Validação Posto ADM
                         </th>
                         <th className="p-3 text-center min-w-[60px]">
                           Ação
@@ -814,7 +836,7 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
                       {registrosFiltrados.length === 0 ? (
                         <tr>
                           <td colSpan={7} className="py-12 text-center text-slate-400">
-                            Nenhum registro encontrado para o filtro selecionado.
+                            Nenhum registro para o filtro selecionado.
                           </td>
                         </tr>
                       ) : (
@@ -836,7 +858,7 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
                                 isRev ? 'bg-amber-50/20' : isNao ? 'bg-red-50/20' : ''
                               }`}
                             >
-                              {/* 1. Selecionar Funcionário (ESTRITAMENTE CADASTRADOS) */}
+                              {/* 1. SELECT ESTREITAMENTE CADASTRADOS */}
                               <td className="p-2.5 border-r border-slate-200">
                                 <select
                                   value={rec.employeeId || ''}
@@ -861,14 +883,9 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
                                     </option>
                                   ))}
                                 </select>
-                                {rec.rawName && rec.rawName !== rec.employeeName && (
-                                  <div className="text-[10px] text-slate-400 mt-0.5">
-                                    Lido na imagem: &quot;{rec.rawName}&quot;
-                                  </div>
-                                )}
                               </td>
 
-                              {/* 2. Selecionar Dia (1 a N) */}
+                              {/* 2. DIA */}
                               <td className="p-2.5 text-center border-r border-slate-200">
                                 <select
                                   value={rec.day}
@@ -887,7 +904,7 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
                                 </select>
                               </td>
 
-                              {/* 3. Selecionar Turno (ESTRITAMENTE CADASTRADOS + FOLGA) */}
+                              {/* 3. TURNO ESTREITAMENTE CADASTRADO */}
                               <td className="p-2.5 border-r border-slate-200">
                                 <select
                                   value={rec.isFolga ? 'FOLGA' : rec.shiftId || ''}
@@ -912,7 +929,7 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
                                 >
                                   <option value="">-- Selecione o Turno --</option>
                                   <option value="FOLGA" className="font-bold text-emerald-800">
-                                    Folga (S / 6x1)
+                                    Folga (S / DSR)
                                   </option>
                                   {TURNOS_PADRAO_POSTO.map((t) => (
                                     <option key={t.id} value={t.id}>
@@ -920,21 +937,15 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
                                     </option>
                                   ))}
                                 </select>
-                                {rec.rawShift && (
-                                  <div className="text-[10px] text-slate-400 mt-0.5">
-                                    Lido na imagem: &quot;{rec.rawShift}&quot;
-                                  </div>
-                                )}
                               </td>
 
-                              {/* 4. Confiança da Leitura */}
-                              <td className="p-2.5 text-center border-r border-slate-200">
-                                <span className="font-mono text-xs font-bold text-slate-700">
-                                  {Math.round(rec.confidence * 100)}%
-                                </span>
+                              {/* 4. TEXTO BRUTO (RAW) LIDO NA IMAGEM */}
+                              <td className="p-2.5 border-r border-slate-200 font-mono text-[11px] text-slate-600 bg-slate-50/70">
+                                <div>Nome: &quot;{rec.rawEmployeeText || '—'}&quot;</div>
+                                <div>Turno: &quot;{rec.rawShiftText || '—'}&quot;</div>
                               </td>
 
-                              {/* 5. Badge de Status */}
+                              {/* 5. STATUS */}
                               <td className="p-2.5 border-r border-slate-200">
                                 <span
                                   className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold border ${statusBadgeClass}`}
@@ -946,18 +957,18 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
                                 </span>
                               </td>
 
-                              {/* 6. Observação */}
+                              {/* 6. OBSERVAÇÃO */}
                               <td className="p-2.5 text-[11px] text-slate-500 border-r border-slate-200">
-                                {rec.observation || 'Validado com sucesso.'}
+                                {rec.observation}
                               </td>
 
-                              {/* 7. Ações */}
+                              {/* 7. REMOVER */}
                               <td className="p-2.5 text-center">
                                 <button
                                   type="button"
                                   onClick={() => handleRemoverRegistro(rec.id)}
                                   className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition"
-                                  title="Remover este registro"
+                                  title="Remover linha"
                                 >
                                   <Trash2 className="w-4 h-4" />
                                 </button>
@@ -972,24 +983,78 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
               </div>
             </div>
           )}
+
+          {/* ================================================================== */}
+          {/* ETAPA 4: SUÍTE DE TESTES OBRIGATÓRIOS (REGRA 27 & 28) */}
+          {/* ================================================================== */}
+          {etapa === 'TESTES' && (
+            <div className="space-y-4">
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <FlaskConical className="w-4 h-4 text-purple-600" />
+                    Suíte de Testes do Validador (Anti-Alucinação)
+                  </h4>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Testa os 12 cenários obrigatórios e o <strong>Teste Crítico da Regra 28</strong> (bloqueio de funcionários e turnos inventados).
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEtapa(registros.length > 0 ? 'REVISAO' : 'UPLOAD')}
+                  className="px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-bold hover:bg-slate-700 transition"
+                >
+                  Voltar para Importação
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                {resultadosTestes.map((teste) => (
+                  <div
+                    key={teste.id}
+                    className={`p-3.5 rounded-xl border flex items-start gap-3 text-xs ${
+                      teste.passou
+                        ? 'bg-emerald-50/80 border-emerald-200 text-emerald-950'
+                        : 'bg-red-50/80 border-red-200 text-red-950'
+                    }`}
+                  >
+                    {teste.passou ? (
+                      <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                    )}
+                    <div className="flex-1">
+                      <div className="font-bold flex items-center justify-between">
+                        <span>{teste.descricao}</span>
+                        <span className="font-black uppercase text-[10px] px-2 py-0.5 rounded bg-white/70 border border-current">
+                          {teste.passou ? 'PASSOU (100% SEGURO)' : 'FALHOU'}
+                        </span>
+                      </div>
+                      <div className="text-[11px] opacity-80 mt-0.5 font-mono">{teste.detalhe}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ====================================================================== */}
-        {/* RODAPÉ DO MODAL COM CONFIRMAÇÃO E SALVAMENTO NO PLANNER (REGRA 14) */}
+        {/* RODAPÉ */}
         {/* ====================================================================== */}
         <div className="bg-slate-900 px-5 sm:px-6 py-4 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-white">
           <div className="text-xs text-slate-400">
             {etapa === 'REVISAO' ? (
               <span>
-                <strong className="text-emerald-400">{estatisticas.confirmados}</strong> registros prontos para gravação no Planner.
+                <strong className="text-emerald-400">{estatisticas.prontosParaImportar}</strong> registros aptos para entrar no Planner.
                 {estatisticas.revisao + estatisticas.naoIdentificados > 0 && (
-                  <span className="text-amber-300 ml-2">
-                    (⚠ {estatisticas.revisao + estatisticas.naoIdentificados} registros precisam de ajuste)
+                  <span className="text-amber-300 ml-2 font-semibold">
+                    (⚠ {estatisticas.revisao + estatisticas.naoIdentificados} com pendência não entrarão)
                   </span>
                 )}
               </span>
             ) : (
-              <span>Selecione uma foto nítida da escala de trabalho do posto para iniciar.</span>
+              <span>Selecione uma imagem de escala de trabalho para iniciar.</span>
             )}
           </div>
 
@@ -1005,14 +1070,14 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
             {etapa === 'REVISAO' && (
               <button
                 type="button"
-                disabled={salvandoNoPlanner || estatisticas.confirmados === 0}
+                disabled={salvandoNoPlanner || estatisticas.prontosParaImportar === 0}
                 onClick={handleConfirmarESalvarPlanner}
                 className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md transition disabled:opacity-50 cursor-pointer"
               >
                 <CheckCircle className="w-4 h-4" />
                 {salvandoNoPlanner
                   ? 'Preenchendo Planner...'
-                  : `Confirmar e Preencher Planner (${estatisticas.confirmados})`}
+                  : `Confirmar e Preencher Planner (${estatisticas.prontosParaImportar})`}
               </button>
             )}
           </div>

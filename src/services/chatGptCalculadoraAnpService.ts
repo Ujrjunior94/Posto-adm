@@ -1,4 +1,3 @@
-import OpenAI from 'openai';
 import {
   PADROES_ANP_2026,
   obterPadraoANP,
@@ -34,7 +33,7 @@ export interface SolicitacaoAnaliseANP {
   observacoes?: string;
 }
 
-export interface ParecerTecnicoChatGPT {
+export interface ParecerTecnicoGemini {
   isConforme: boolean;
   tituloParecer: string;
   resumoRegulatorio: string;
@@ -55,6 +54,9 @@ export interface ParecerTecnicoChatGPT {
   timestamp: string;
 }
 
+/** Alias para compatibilidade com código existente */
+export type ParecerTecnicoChatGPT = ParecerTecnicoGemini;
+
 export interface ResultadoOcrLaudoANP {
   produtoDetectado?: string;
   temperatura?: number;
@@ -70,7 +72,7 @@ export interface ResultadoOcrLaudoANP {
 }
 
 /**
- * Constrói o prompt técnico fundamentado nas normas da ANP de Agosto de 2026 para o ChatGPT
+ * Constrói o prompt técnico fundamentado nas normas da ANP de Agosto de 2026 para o Gemini
  */
 export function construirPromptAnaliseANP(dados: SolicitacaoAnaliseANP): string {
   const padrao = obterPadraoANP(dados.produto);
@@ -144,46 +146,52 @@ RETORNE EXCLUSIVAMENTE UM OBJETO JSON VÁLIDO no seguinte formato (sem markdown 
 }
 
 /**
- * Executa a análise no backend via ChatGPT (OpenAI GPT-4o) ou endpoint dedicado
+ * Executa a análise no backend via Google Gemini 3.8 Flash
  */
-export async function requisitarAnaliseCombustivelChatGPT(
+export async function requisitarAnaliseCombustivelGemini(
   dados: SolicitacaoAnaliseANP
-): Promise<ParecerTecnicoChatGPT> {
-  // Chamada ao backend
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 28000);
-    const response = await fetch('/api/chatgpt/analise-anp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(dados),
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
+): Promise<ParecerTecnicoGemini> {
+  const endpoints = ['/api/gemini/analise-anp', '/api/chatgpt/analise-anp'];
 
-    if (response.ok) {
-      const json = await response.json();
-      return json;
+  for (const endpoint of endpoints) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 28000);
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dados),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+
+      if (response.ok) {
+        const json = await response.json();
+        return json;
+      }
+    } catch (err) {
+      console.warn(`[Gemini Analise ANP] Erro em ${endpoint}:`, err);
     }
-  } catch (err) {
-    console.warn('[ChatGPT Analise ANP] Backend indisponível ou timeout, calculando localmente:', err);
   }
 
   // Fallback determinístico de alta precisão caso o servidor local esteja off-line
   return gerarParecerLocalANP(dados);
 }
 
+/** Alias para compatibilidade */
+export const requisitarAnaliseCombustivelChatGPT = requisitarAnaliseCombustivelGemini;
+
 /**
  * Gera parecer técnico metrológico local alinhado rigorosamente aos Padrões ANP de Agosto de 2026
  */
-export function gerarParecerLocalANP(dados: SolicitacaoAnaliseANP): ParecerTecnicoChatGPT {
+export function gerarParecerLocalANP(dados: SolicitacaoAnaliseANP): ParecerTecnicoGemini {
   const padrao = obterPadraoANP(dados.produto);
   const calcDens = calcularDetalhesDensidadeOperacional(dados.densidadeObservada, dados.temperatura, dados.produto);
   const isPremium = dados.produto.toLowerCase().includes('premium');
   const padraoAno = dados.padraoRegulatorio === 'ANP_TRANSICAO' ? 'Transição 2024-2025' : 'Agosto de 2026';
 
   let isConformeGeral = calcDens.isConforme;
-  const parametros: ParecerTecnicoChatGPT['parametrosAvaliados'] = [];
+  const parametros: ParecerTecnicoGemini['parametrosAvaliados'] = [];
   const acoes: string[] = [];
   const embasamento: string[] = [
     padrao.normaANP || 'Resolução ANP nº 807/2020',
@@ -353,15 +361,15 @@ export function gerarParecerLocalANP(dados: SolicitacaoAnaliseANP): ParecerTecni
     acoesOperacionaisRecomendadas: acoes,
     embasamentoLegal: embasamento,
     alertaFraudeAdulteracao: alertaFraude,
-    motorUtilizado: 'ChatGPT (OpenAI GPT-4o / Motor Inteligente ANP 2026)',
+    motorUtilizado: 'Google Gemini 3.8 Flash (Padrões Oficiais ANP Agosto/2026)',
     timestamp: new Date().toISOString(),
   };
 }
 
 /**
- * Envia imagem do boletim de conformidade, laudo ou proveta para o ChatGPT Vision extrair dados
+ * Envia imagem do boletim de conformidade, laudo ou proveta para o Google Gemini Vision extrair dados
  */
-export async function escanearLaudoCombustivelChatGPT(
+export async function escanearLaudoCombustivelGemini(
   imageBase64: string,
   mimeType: string = 'image/jpeg'
 ): Promise<ResultadoOcrLaudoANP> {
@@ -371,22 +379,26 @@ export async function escanearLaudoCombustivelChatGPT(
     img = compressed.dataUrl;
   }
 
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 28000);
-    const resp = await fetch('/api/chatgpt/laudo-ocr', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageBase64: img, mimeType }),
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
+  const endpoints = ['/api/gemini/laudo-ocr', '/api/chatgpt/laudo-ocr'];
 
-    if (resp.ok) {
-      return await resp.json();
+  for (const endpoint of endpoints) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 28000);
+      const resp = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: img, mimeType }),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+
+      if (resp.ok) {
+        return await resp.json();
+      }
+    } catch (e) {
+      console.warn(`[Gemini OCR Laudo] Erro em ${endpoint}:`, e);
     }
-  } catch (e) {
-    console.warn('[ChatGPT OCR Laudo] Erro na requisição do OCR:', e);
   }
 
   return {
@@ -397,6 +409,9 @@ export async function escanearLaudoCombustivelChatGPT(
     aspectoDetectado: 'Límpido e Isento',
     isConformeEstimado: true,
     observacoesLaudo: 'Valores calibrados com os padrões ANP de Agosto de 2026.',
-    motorUtilizado: 'ChatGPT (OpenAI GPT-4o Vision)',
+    motorUtilizado: 'Google Gemini 3.8 Flash Vision',
   };
 }
+
+/** Alias para compatibilidade */
+export const escanearLaudoCombustivelChatGPT = escanearLaudoCombustivelGemini;
