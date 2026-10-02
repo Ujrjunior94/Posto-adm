@@ -9,6 +9,7 @@ import {
   Afericao,
   RegistroDensidade,
   Conformidade,
+  EscalaImportada,
 } from '../../types';
 import {
   Users,
@@ -61,6 +62,7 @@ interface DashboardProps {
   afericoes: Afericao[];
   densidades: RegistroDensidade[];
   conformidades: Conformidade[];
+  escalasImportadas?: EscalaImportada[];
   onNavigate: (aba: string) => void;
 }
 
@@ -74,6 +76,7 @@ export const DashboardView: React.FC<DashboardProps> = ({
   afericoes,
   densidades,
   conformidades,
+  escalasImportadas = [],
   onNavigate,
 }) => {
   const hoje = new Date().toISOString().slice(0, 10);
@@ -932,6 +935,193 @@ export const DashboardView: React.FC<DashboardProps> = ({
               <span>Ver Relatório Diário de Operação</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Painel de Resumo Inteligente de Escalas & Planner (Requisito 14) */}
+      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-slate-100 pb-3">
+          <div>
+            <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-purple-600" />
+              Painel de Resumo de Escalas, Turnos & Importações OCR
+            </h3>
+            <p className="text-xs text-slate-500">
+              Monitoramento de funcionários trabalhando hoje, folgas, próximos turnos, alterações recentes, conflitos e últimas escalas importadas
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onNavigate('ia-escala')}
+              className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold transition cursor-pointer"
+            >
+              Importar Nova Escala (OCR)
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigate('planner')}
+              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition cursor-pointer"
+            >
+              Abrir Planner
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
+          {/* 1. Funcionários trabalhando hoje */}
+          <div className="p-3.5 rounded-xl bg-blue-50/50 border border-blue-200 space-y-2">
+            <div className="flex items-center justify-between font-bold text-blue-950">
+              <span>Funcionários Trabalhando Hoje</span>
+              <span className="font-mono bg-blue-600 text-white px-2 py-0.5 rounded">{escaladosHoje.length}</span>
+            </div>
+            <div className="space-y-1 max-h-28 overflow-y-auto">
+              {escaladosHoje.length === 0 ? (
+                <p className="text-[11px] text-slate-500">Nenhum colaborador escalado para hoje ({hoje}).</p>
+              ) : (
+                escaladosHoje.slice(0, 6).map((e) => (
+                  <div key={e.id} className="flex items-center justify-between text-[11px] text-slate-700">
+                    <span className="font-semibold truncate">{e.funcionarioNome}</span>
+                    <span className="font-mono text-blue-800">
+                      {e.horarioInicio}-{e.horarioFim} ({e.setor || 'Pista'})
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* 2. Funcionários de folga hoje */}
+          <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+            <div className="flex items-center justify-between font-bold text-slate-900">
+              <span>Funcionários de Folga Hoje</span>
+              <span className="font-mono bg-slate-700 text-white px-2 py-0.5 rounded">{folgasHoje.length}</span>
+            </div>
+            <div className="space-y-1 max-h-28 overflow-y-auto">
+              {folgasHoje.length === 0 ? (
+                <p className="text-[11px] text-slate-500">Nenhuma folga registrada para hoje ({hoje}).</p>
+              ) : (
+                folgasHoje.slice(0, 6).map((e) => (
+                  <div key={e.id} className="flex items-center justify-between text-[11px] text-slate-700">
+                    <span className="font-semibold truncate">{e.funcionarioNome}</span>
+                    <span className="font-mono text-emerald-700 font-bold">FOLGA (DSR)</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* 3. Próximos turnos */}
+          <div className="p-3.5 rounded-xl bg-emerald-50/50 border border-emerald-200 space-y-2">
+            <div className="flex items-center justify-between font-bold text-emerald-950">
+              <span>Próximos Turnos Agendados</span>
+              <span className="font-mono bg-emerald-600 text-white px-2 py-0.5 rounded">
+                {escalas.filter((e) => e.data > hoje && e.status === 'TRABALHO').length}
+              </span>
+            </div>
+            <div className="space-y-1 max-h-28 overflow-y-auto">
+              {escalas
+                .filter((e) => e.data > hoje && e.status === 'TRABALHO')
+                .sort((a, b) => a.data.localeCompare(b.data))
+                .slice(0, 6)
+                .map((e) => (
+                  <div key={e.id} className="flex items-center justify-between text-[11px] text-slate-700">
+                    <span className="font-semibold truncate">{e.funcionarioNome}</span>
+                    <span className="font-mono text-emerald-800">
+                      {e.data.slice(5)} • {e.horarioInicio}-{e.horarioFim}
+                    </span>
+                  </div>
+                ))}
+              {escalas.filter((e) => e.data > hoje && e.status === 'TRABALHO').length === 0 && (
+                <p className="text-[11px] text-slate-500">Sem próximos turnos futuros lançados.</p>
+              )}
+            </div>
+          </div>
+
+          {/* 4. Alterações recentes na escala */}
+          <div className="p-3.5 rounded-xl bg-purple-50/50 border border-purple-200 space-y-2">
+            <div className="flex items-center justify-between font-bold text-purple-950">
+              <span>Alterações Recentes na Escala</span>
+              <span className="font-mono bg-purple-600 text-white px-2 py-0.5 rounded">
+                {escalas.filter((e) => (e.historicoAlteracoes?.length || 0) > 0).length}
+              </span>
+            </div>
+            <div className="space-y-1 max-h-28 overflow-y-auto">
+              {escalas
+                .filter((e) => (e.historicoAlteracoes?.length || 0) > 0)
+                .slice(0, 5)
+                .map((e) => {
+                  const ult = e.historicoAlteracoes?.[e.historicoAlteracoes.length - 1];
+                  return (
+                    <div key={e.id} className="text-[11px] text-slate-700">
+                      <span className="font-bold">{e.funcionarioNome}</span> ({e.data.slice(5)}):{' '}
+                      <span className="font-mono text-purple-800">{ult?.valorNovo || e.turno}</span>
+                    </div>
+                  );
+                })}
+              {escalas.filter((e) => (e.historicoAlteracoes?.length || 0) > 0).length === 0 && (
+                <p className="text-[11px] text-slate-500">Nenhuma alteração recente de horário registrada.</p>
+              )}
+            </div>
+          </div>
+
+          {/* 5. Conflitos encontrados */}
+          <div className="p-3.5 rounded-xl bg-amber-50/60 border border-amber-200 space-y-2">
+            <div className="flex items-center justify-between font-bold text-amber-950">
+              <span>Conflitos / Revisões de Escala</span>
+              <span className="font-mono bg-amber-600 text-white px-2 py-0.5 rounded">
+                {
+                  escalas.filter(
+                    (e) => e.statusConferencia === 'CONFLITO' || e.statusConferencia === 'REVISAO'
+                  ).length
+                }
+              </span>
+            </div>
+            <div className="space-y-1 max-h-28 overflow-y-auto">
+              {escalas.filter(
+                (e) => e.statusConferencia === 'CONFLITO' || e.statusConferencia === 'REVISAO'
+              ).length === 0 ? (
+                <p className="text-[11px] text-emerald-700 font-medium">
+                  🟢 Todos os registros atuais do Planner estão validados sem conflitos.
+                </p>
+              ) : (
+                escalas
+                  .filter((e) => e.statusConferencia === 'CONFLITO' || e.statusConferencia === 'REVISAO')
+                  .slice(0, 5)
+                  .map((e) => (
+                    <div key={e.id} className="text-[11px] text-amber-900">
+                      {e.funcionarioNome} ({e.data}) — {e.statusConferencia}
+                    </div>
+                  ))
+              )}
+            </div>
+          </div>
+
+          {/* 6. Últimas escalas importadas */}
+          <div className="p-3.5 rounded-xl bg-slate-900 text-white border border-slate-800 space-y-2">
+            <div className="flex items-center justify-between font-bold text-slate-100">
+              <span>Últimas Escalas Importadas</span>
+              <span className="font-mono bg-purple-600 text-white px-2 py-0.5 rounded">
+                {escalasImportadas.length}
+              </span>
+            </div>
+            <div className="space-y-1.5 max-h-28 overflow-y-auto">
+              {escalasImportadas.length === 0 ? (
+                <p className="text-[11px] text-slate-400">
+                  Nenhuma imagem de escala importada ainda.
+                </p>
+              ) : (
+                escalasImportadas.slice(0, 4).map((imp) => (
+                  <div key={imp.id} className="flex items-center justify-between text-[11px] text-slate-300">
+                    <span className="font-semibold truncate max-w-[150px]">
+                      v{imp.versao} • {imp.tituloEscala}
+                    </span>
+                    <span className="font-mono text-purple-300">{imp.totalRegistros} reg.</span>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
       </div>

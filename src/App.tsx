@@ -15,6 +15,7 @@ import {
   LMCRegistro,
   RateioTurno,
   UserRole,
+  EscalaImportada,
 } from './types';
 import { PostoSubcollectionRepository, testConnection, registrarAuditoria } from './repositories/firestoreRepository';
 import { DashboardView } from './features/dashboard/DashboardView';
@@ -74,6 +75,7 @@ const repoConformidades = new PostoSubcollectionRepository<Conformidade>('confor
 const repoAuditoria = new PostoSubcollectionRepository<AuditLog>('auditoria');
 const repoLMC = new PostoSubcollectionRepository<LMCRegistro>('lmc');
 const repoRateio = new PostoSubcollectionRepository<RateioTurno>('rateios');
+const repoEscalasImportadas = new PostoSubcollectionRepository<EscalaImportada>('escalasImportadas');
 
 interface MenuItemDef {
   id: string;
@@ -243,6 +245,7 @@ const MainApp: React.FC = () => {
   const [densidades, setDensidades] = useState<RegistroDensidade[]>([]);
   const [conformidades, setConformidades] = useState<Conformidade[]>([]);
   const [auditoria, setAuditoria] = useState<AuditLog[]>([]);
+  const [escalasImportadas, setEscalasImportadas] = useState<EscalaImportada[]>([]);
 
   // Turno operacional ao vivo baseado no relógio (Turno 1 = Manhã, Turno 2 = Tarde)
   const horaAtual = new Date().getHours();
@@ -257,7 +260,7 @@ const MainApp: React.FC = () => {
   const CurrentIcon = currentTabDef.icon;
 
   const carregarDadosNuvem = async () => {
-    const [f, t, b, e, fc, oc, af, dn, cf, au] = await Promise.all([
+    const [f, t, b, e, fc, oc, af, dn, cf, au, ei] = await Promise.all([
       repoFunc.getAll(postoId),
       repoTanques.getAll(postoId),
       repoBicos.getAll(postoId),
@@ -268,6 +271,7 @@ const MainApp: React.FC = () => {
       repoDensidades.getAll(postoId),
       repoConformidades.getAll(postoId),
       repoAuditoria.getAll(postoId),
+      repoEscalasImportadas.getAll(postoId),
     ]);
     setFuncionarios(f);
     setTanques(t);
@@ -279,6 +283,7 @@ const MainApp: React.FC = () => {
     setDensidades(dn);
     setConformidades(cf);
     setAuditoria(au);
+    setEscalasImportadas(ei);
   };
 
   const carregarDados = async () => {
@@ -356,13 +361,6 @@ const MainApp: React.FC = () => {
 
     testConnection();
 
-    // Limpeza automática única dos dados de demonstração legados na nuvem e cache local
-    const flagLimpezaNuvem = `meuposto_demo_purged_cloud_v3_${postoId}`;
-    if (typeof window !== 'undefined' && !localStorage.getItem(flagLimpezaNuvem)) {
-      localStorage.setItem(flagLimpezaNuvem, 'true');
-      handleRemoverDadosDemonstracao();
-    }
-
     // Conexão 24 horas em tempo real (onSnapshot) diretamente no Google Cloud Firestore
     const unFunc = repoFunc.subscribe(postoId, setFuncionarios);
     const unEsc = repoEscalas.subscribe(postoId, setEscalas);
@@ -374,6 +372,7 @@ const MainApp: React.FC = () => {
     const unDens = repoDensidades.subscribe(postoId, setDensidades);
     const unConf = repoConformidades.subscribe(postoId, setConformidades);
     const unAud = repoAuditoria.subscribe(postoId, setAuditoria);
+    const unEscImp = repoEscalasImportadas.subscribe(postoId, setEscalasImportadas);
 
     return () => {
       unFunc();
@@ -386,6 +385,7 @@ const MainApp: React.FC = () => {
       unDens();
       unConf();
       unAud();
+      unEscImp();
     };
   }, [postoId, userProfile]);
 
@@ -1067,6 +1067,7 @@ const MainApp: React.FC = () => {
               afericoes={afericoes}
               densidades={densidades}
               conformidades={conformidades}
+              escalasImportadas={escalasImportadas}
               onNavigate={(aba) => setActiveTab(aba)}
             />
           )}
@@ -1100,6 +1101,7 @@ const MainApp: React.FC = () => {
             <PlannerView
               escalas={escalas}
               funcionarios={funcionarios}
+              escalasImportadas={escalasImportadas}
               onReload={carregarDados}
               onNavigateToIAEscala={() => setActiveTab('ia-escala')}
             />
@@ -1154,6 +1156,8 @@ const MainApp: React.FC = () => {
           {activeTab === 'ia-escala' && (
             <IAEscalaView
               funcionarios={funcionarios}
+              escalas={escalas}
+              escalasImportadas={escalasImportadas}
               onReload={carregarDados}
               onNavigateToPlanner={() => setActiveTab('planner')}
             />
@@ -1207,15 +1211,29 @@ const MainApp: React.FC = () => {
           <button
             type="button"
             onClick={() => {
-              setActiveTab('analises');
+              setActiveTab('planner');
               setMobileMenuOpen(false);
             }}
             className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-lg text-[10px] font-semibold ${
-              activeTab === 'analises' ? 'text-teal-400' : 'text-slate-400'
+              activeTab === 'planner' ? 'text-blue-400' : 'text-slate-400'
             }`}
           >
-            <TestTubes className="w-4 h-4" />
-            <span>Qualidade</span>
+            <Calendar className="w-4 h-4" />
+            <span>Planner</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('ia-escala');
+              setMobileMenuOpen(false);
+            }}
+            className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-lg text-[10px] font-semibold ${
+              activeTab === 'ia-escala' ? 'text-purple-400' : 'text-slate-400'
+            }`}
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>OCR Escala</span>
           </button>
 
           <button

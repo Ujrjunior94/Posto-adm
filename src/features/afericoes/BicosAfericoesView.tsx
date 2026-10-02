@@ -27,13 +27,19 @@ import {
   TrendingDown,
   RotateCcw,
   Fuel,
+  Database,
+  Camera,
+  FileText,
+  Save,
 } from 'lucide-react';
 import { ModalEditarAfericao } from './ModalEditarAfericao';
 import { ModalConfigurarPrecoBico } from './ModalConfigurarPrecoBico';
 import { ModalAlternarPrecosLote } from './ModalAlternarPrecosLote';
 import { DesvioAfericaoGauge } from './DesvioAfericaoGauge';
 import { DiagramaBombaCombustivel } from './DiagramaBombaCombustivel';
+import { PainelCadastroERelatorioFoto } from './PainelCadastroERelatorioFoto';
 
+const repoTanques = new PostoSubcollectionRepository<Tanque>('tanques');
 const repoBicos = new PostoSubcollectionRepository<Bico>('bicos');
 const repoAfericoes = new PostoSubcollectionRepository<Afericao>('afericoes');
 
@@ -55,7 +61,9 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
   const { postoId, userProfile } = useAuth();
 
   // Controle de Abas (Inicia no Mapa Visual de Bombas & Diagnóstico 20L)
-  const [abaAtiva, setAbaAtiva] = useState<'PRECOS' | 'AFERICOES'>('AFERICOES');
+  const [abaAtiva, setAbaAtiva] = useState<
+    'AFERICOES' | 'CADASTRO_TANQUES_BICOS' | 'RELATORIO_FOTO' | 'PRECOS'
+  >('AFERICOES');
 
   // Modais de Preços e Descontos
   const [bicoParaPreco, setBicoParaPreco] = useState<Bico | null>(null);
@@ -90,6 +98,12 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
   const [funcionarioId, setFuncionarioId] = useState(funcionarios[0]?.id || '');
   const [equipamento, setEquipamento] = useState('Medidor Padrão 20L Inmetro');
   const [observacao, setObservacao] = useState('');
+  const [encerranteFinalAfericao, setEncerranteFinalAfericao] = useState<string>('');
+  const [lacreInmetroAfericao, setLacreInmetroAfericao] = useState<string>('');
+  const [fotoAfericaoBase64, setFotoAfericaoBase64] = useState<string>('');
+  const [resumoFotoAfericao, setResumoFotoAfericao] = useState<string>('');
+  const [lendoFotoModal, setLendoFotoModal] = useState<boolean>(false);
+  const modalFotoInputRef = useRef<HTMLInputElement | null>(null);
 
   // Form Novo Bico
   const [numBico, setNumBico] = useState(bicos.length > 0 ? Math.max(...bicos.map((b) => b.numero)) + 1 : 1);
@@ -98,6 +112,25 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
   const [produto, setProduto] = useState('Gasolina Comum');
   const [lado, setLado] = useState<'A' | 'B'>('A');
   const [novoBicoPrecoBase, setNovoBicoPrecoBase] = useState<number>(5.89);
+
+  // Sincroniza IDs selecionados quando dados da nuvem chegam via onSnapshot
+  useEffect(() => {
+    if (!bicoId && bicos.length > 0) {
+      setBicoId(bicos[0].id);
+    }
+  }, [bicos, bicoId]);
+
+  useEffect(() => {
+    if (!tanqueId && tanques.length > 0) {
+      setTanqueId(tanques[0].id);
+    }
+  }, [tanques, tanqueId]);
+
+  useEffect(() => {
+    if (!funcionarioId && funcionarios.length > 0) {
+      setFuncionarioId(funcionarios[0].id);
+    }
+  }, [funcionarios, funcionarioId]);
 
   const bicoAtivo = bicos.find((b) => b.id === bicoId) || bicos[0];
   const calculoAfericaoAtiva = calcularAfericao(volumeAferido, 20.0, toleranciaConfigurada);
@@ -305,11 +338,39 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
     setIsModalBico(true);
   };
 
-  // Salvar Novo Bico ou Alterar Bico Existente
+  // Salvar Novo Bico ou Alterar Bico Existente (garantindo que o Tanque vinculado também exista na nuvem)
   const handleSalvarBico = async (e: React.FormEvent) => {
     e.preventDefault();
-    const id = bicoEditandoCadastro?.id || `bico-${Date.now()}`;
+    const id = bicoEditandoCadastro?.id || `bico-${numBico}-${Date.now()}`;
     const precoPadrao = PRECOS_PADRAO_COMBUSTIVEL[produto] || novoBicoPrecoBase || 5.89;
+
+    // Garantir tanque vinculado salvo na nuvem
+    let tanqueVinc =
+      tanques.find((t) => t.id === tanqueId) ||
+      tanques.find((t) => t.produto.toLowerCase() === produto.toLowerCase());
+
+    if (!tanqueVinc) {
+      const codNovo = `TQ-0${tanques.length + 1}`;
+      tanqueVinc = {
+        id: `tq-${Date.now()}`,
+        postoId,
+        codigo: codNovo,
+        produto,
+        capacidadeNominal: 20000,
+        capacidadeOperacional: 19000,
+        unidade: 'Litros',
+        formato: 'CILINDRICO_HORIZONTAL',
+        ativo: true,
+        tabelaRegua: [
+          { altura: 0, volume: 0 },
+          { altura: 100, volume: 9600 },
+          { altura: 200, volume: 20000 },
+        ],
+        criadoEm: new Date().toISOString(),
+        atualizadoEm: new Date().toISOString(),
+      };
+      await repoTanques.save(postoId, tanqueVinc);
+    }
 
     const novoBico: Bico = {
       ...(bicoEditandoCadastro || {}),
@@ -317,7 +378,8 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
       postoId,
       numero: numBico,
       bomba,
-      tanqueId,
+      tanqueId: tanqueVinc.id,
+      tanqueCodigo: tanqueVinc.codigo,
       produto,
       lado,
       status: bicoEditandoCadastro?.status || 'ATIVO',
@@ -374,19 +436,101 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
     }
   };
 
+  // Ler foto dentro do modal de Nova Aferição 20L
+  const handleLerFotoModalAfericao = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLendoFotoModal(true);
+    try {
+      const reader = new FileReader();
+      const base64: string = await new Promise((resolve, reject) => {
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      // Comprimir imagem
+      const img = new Image();
+      const compressed: string = await new Promise((resolve) => {
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const maxW = 680;
+          let w = img.width;
+          let h = img.height;
+          if (w > maxW) {
+            h = Math.round((h * maxW) / w);
+            w = maxW;
+          }
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, w, h);
+            resolve(canvas.toDataURL('image/jpeg', 0.72));
+          } else {
+            resolve(base64);
+          }
+        };
+        img.onerror = () => resolve(base64);
+        img.src = base64;
+      });
+
+      setFotoAfericaoBase64(compressed);
+
+      const res = await fetch('/api/gemini/afericao-ocr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64: compressed,
+          mimeType: 'image/jpeg',
+          bicosCadastrados: bicos,
+          tanquesCadastrados: tanques,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data) {
+        const primeiro = Array.isArray(data.bicosEAfericoes) ? data.bicosEAfericoes[0] : null;
+        if (primeiro) {
+          if (primeiro.volumeAferido) setVolumeAferido(Number(primeiro.volumeAferido));
+          if (primeiro.encerranteFinal) setEncerranteFinalAfericao(String(primeiro.encerranteFinal));
+          if (primeiro.lacreInmetro) setLacreInmetroAfericao(String(primeiro.lacreInmetro));
+          const bMatch = bicos.find((b) => b.numero === Number(primeiro.numeroBico));
+          if (bMatch) setBicoId(bMatch.id);
+        }
+        if (data.equipamentoIdentificado) setEquipamento(data.equipamentoIdentificado);
+        const resumo = primeiro?.detalhesFotoBico || data.resumoGeralFoto || '';
+        setResumoFotoAfericao(resumo);
+        if (resumo) setObservacao(resumo);
+      }
+    } catch (err) {
+      console.error('Erro ao ler foto no modal:', err);
+    } finally {
+      setLendoFotoModal(false);
+    }
+  };
+
   // Handlers de Aferição
   const handleSalvarAfericao = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!bicoAtivo) return;
+
+    const tqObj = tanques.find((t) => t.id === bicoAtivo.tanqueId);
+    const funcObj = funcionarios.find((f) => f.id === funcionarioId);
+    const encNum = encerranteFinalAfericao ? parseFloat(encerranteFinalAfericao) : undefined;
 
     const id = `afericao-${Date.now()}`;
     const novaAfericao: Afericao = {
       id,
       postoId,
       bicoId: bicoAtivo.id,
+      bicoNumero: bicoAtivo.numero,
+      bombaNome: bicoAtivo.bomba,
+      ladoBomba: bicoAtivo.lado,
       tanqueId: bicoAtivo.tanqueId,
+      tanqueCodigo: bicoAtivo.tanqueCodigo || tqObj?.codigo || 'TQ-01',
       produto: bicoAtivo.produto,
-      funcionarioId,
+      funcionarioId: funcionarioId || 'operador',
+      responsavelNome: funcObj?.nome || userProfile?.nome || 'Operador',
       data: new Date().toISOString().slice(0, 10),
       hora: new Date().toLocaleTimeString('pt-BR').slice(0, 5),
       volumeNominal,
@@ -395,11 +539,27 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
       toleranciaConfigurada,
       resultado,
       equipamento,
-      observacao,
+      encerranteFinal: encNum,
+      lacreInmetro: lacreInmetroAfericao || bicoAtivo.lacreBomba || undefined,
+      fotoEvidenciaBase64: fotoAfericaoBase64 || undefined,
+      resumoFotoIA: resumoFotoAfericao || undefined,
+      origemRegistro: fotoAfericaoBase64 ? 'FOTO_IA' : 'MANUAL',
+      observacao: observacao || resumoFotoAfericao || undefined,
       criadoEm: new Date().toISOString(),
     };
 
     await repoAfericoes.save(postoId, novaAfericao);
+
+    // Se informou encerrante ou lacre, atualiza no cadastro do bico também
+    if (encNum !== undefined || lacreInmetroAfericao) {
+      await repoBicos.save(postoId, {
+        ...bicoAtivo,
+        ultimoEncerrante: encNum ?? bicoAtivo.ultimoEncerrante,
+        lacreBomba: lacreInmetroAfericao || bicoAtivo.lacreBomba,
+        atualizadoEm: new Date().toISOString(),
+      });
+    }
+
     await registrarAuditoria(
       postoId,
       userProfile?.uid || 'anon',
@@ -412,6 +572,11 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
       novaAfericao as unknown as Record<string, unknown>
     );
 
+    setFotoAfericaoBase64('');
+    setResumoFotoAfericao('');
+    setEncerranteFinalAfericao('');
+    setLacreInmetroAfericao('');
+    setObservacao('');
     setIsModalAfericao(false);
     onReload();
   };
@@ -496,10 +661,47 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
     }
   };
 
-  // Configurar estrutura limpa de 2 Bombas Sêxtuplas (3 Bicos Lado A e 3 Bicos Lado B = 12 bicos) sem aferições de demonstração
+  // Configurar e Salvar estrutura limpa de 5 Tanques + 2 Bombas Sêxtuplas (12 bicos) na nuvem 24h
   const handleGerarPistaPadrao = async () => {
     setProcessandoAcao(true);
     try {
+      const padraoTanques = [
+        { id: 'tq-01', cod: 'TQ-01', prod: 'Gasolina Comum', capNom: 30000, capOp: 28500 },
+        { id: 'tq-02', cod: 'TQ-02', prod: 'Gasolina Aditivada', capNom: 15000, capOp: 14250 },
+        { id: 'tq-03', cod: 'TQ-03', prod: 'Etanol Hidratado', capNom: 20000, capOp: 19000 },
+        { id: 'tq-04', cod: 'TQ-04', prod: 'Diesel S10', capNom: 30000, capOp: 28500 },
+        { id: 'tq-05', cod: 'TQ-05', prod: 'Diesel S500', capNom: 15000, capOp: 14250 },
+      ];
+
+      const tanquesSalvos: Tanque[] = [];
+      for (const tItem of padraoTanques) {
+        const existente = tanques.find((t) => t.codigo === tItem.cod || t.produto === tItem.prod);
+        const tObj: Tanque = {
+          id: existente?.id || tItem.id,
+          postoId,
+          codigo: tItem.cod,
+          produto: tItem.prod,
+          capacidadeNominal: tItem.capNom,
+          capacidadeOperacional: tItem.capOp,
+          unidade: 'Litros',
+          formato: 'CILINDRICO_HORIZONTAL',
+          ativo: true,
+          tabelaRegua: existente?.tabelaRegua?.length
+            ? existente.tabelaRegua
+            : [
+                { altura: 0, volume: 0 },
+                { altura: 50, volume: Math.round(tItem.capNom * 0.18) },
+                { altura: 100, volume: Math.round(tItem.capNom * 0.48) },
+                { altura: 150, volume: Math.round(tItem.capNom * 0.78) },
+                { altura: 200, volume: tItem.capNom },
+              ],
+          criadoEm: existente?.criadoEm || new Date().toISOString(),
+          atualizadoEm: new Date().toISOString(),
+        };
+        await repoTanques.save(postoId, tObj);
+        tanquesSalvos.push(tObj);
+      }
+
       const padraoBicos: Array<{
         num: number;
         bomba: string;
@@ -525,18 +727,23 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
 
       for (const item of padraoBicos) {
         const bId = `bico-${item.num}`;
+        const tqVinc =
+          tanquesSalvos.find((t) => t.produto.toLowerCase() === item.prod.toLowerCase()) ||
+          tanquesSalvos[0];
         const novoB: Bico = {
           id: bId,
           postoId,
           numero: item.num,
           bomba: item.bomba,
-          tanqueId: tanques[0]?.id || '',
+          tanqueId: tqVinc?.id || '',
+          tanqueCodigo: tqVinc?.codigo || 'TQ-01',
           produto: item.prod,
           lado: item.lado,
           status: 'ATIVO',
           precoBase: item.preco,
           precoLitro: item.preco,
           temDesconto: false,
+          lacreBomba: `INM-${202600 + item.num}`,
           criadoEm: new Date().toISOString(),
           atualizadoEm: new Date().toISOString(),
         };
@@ -545,7 +752,7 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
 
       onReload();
     } catch (err) {
-      console.error('Erro ao configurar bombas:', err);
+      console.error('Erro ao configurar bombas e tanques:', err);
     } finally {
       setProcessandoAcao(false);
     }
@@ -565,18 +772,24 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {abaAtiva === 'AFERICOES' && bicos.length === 0 && (
-            <button
-              type="button"
-              onClick={handleGerarPistaPadrao}
-              disabled={processandoAcao}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-lg text-xs transition"
-            >
-              <Sparkles className="w-4 h-4 text-amber-400" />
-              Gerar Bombas Exemplo
-            </button>
-          )}
+        <div className="flex flex-wrap items-center gap-2 print:hidden">
+          <button
+            type="button"
+            onClick={() => setAbaAtiva('CADASTRO_TANQUES_BICOS')}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition shadow-xs cursor-pointer"
+          >
+            <Save className="w-4 h-4" />
+            Salvar Cadastro Bicos e Tanques
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setAbaAtiva('RELATORIO_FOTO')}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-slate-900 hover:bg-slate-800 text-amber-300 font-bold rounded-lg text-xs transition shadow-xs cursor-pointer"
+          >
+            <Camera className="w-4 h-4 text-amber-400" />
+            Relatório de Aferição com Foto
+          </button>
 
           {abaAtiva === 'PRECOS' && (
             <button
@@ -591,6 +804,7 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
 
           <button
             onClick={() => {
+              setBicoEditandoCadastro(null);
               setNumBico(bicos.length > 0 ? Math.max(...bicos.map((b) => b.numero)) + 1 : 1);
               setIsModalBico(true);
             }}
@@ -610,18 +824,18 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
       </div>
 
       {/* Abas de Navegação */}
-      <div className="flex flex-wrap border-b border-slate-200 gap-2 sm:gap-6 bg-white px-6 pt-3 rounded-t-xl border-t border-x">
+      <div className="flex flex-wrap border-b border-slate-200 gap-2 sm:gap-5 bg-white px-6 pt-3 rounded-t-xl border-t border-x print:hidden">
         <button
           type="button"
           onClick={() => setAbaAtiva('AFERICOES')}
-          className={`pb-3 px-2 text-sm font-bold flex items-center gap-2 border-b-2 transition ${
+          className={`pb-3 px-2 text-sm font-bold flex items-center gap-2 border-b-2 transition cursor-pointer ${
             abaAtiva === 'AFERICOES'
               ? 'border-amber-600 text-amber-700'
               : 'border-transparent text-slate-500 hover:text-slate-800'
           }`}
         >
           <Fuel className="w-4 h-4" />
-          Diagrama da Bomba (Lado A / B) & Diagnóstico 20L
+          Diagrama da Bomba & Diagnóstico 20L
           <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-900">
             {bicos.length} bicos • {afericoes.length} aferições
           </span>
@@ -629,15 +843,44 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
 
         <button
           type="button"
+          onClick={() => setAbaAtiva('CADASTRO_TANQUES_BICOS')}
+          className={`pb-3 px-2 text-sm font-bold flex items-center gap-2 border-b-2 transition cursor-pointer ${
+            abaAtiva === 'CADASTRO_TANQUES_BICOS'
+              ? 'border-blue-600 text-blue-700'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Database className="w-4 h-4" />
+          Cadastro de Bicos & Tanques
+          <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-blue-100 text-blue-900">
+            {tanques.length} tanques • {bicos.length} bicos
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setAbaAtiva('RELATORIO_FOTO')}
+          className={`pb-3 px-2 text-sm font-bold flex items-center gap-2 border-b-2 transition cursor-pointer ${
+            abaAtiva === 'RELATORIO_FOTO'
+              ? 'border-amber-600 text-amber-800'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Camera className="w-4 h-4" />
+          Relatório de Aferição com Foto (IA)
+        </button>
+
+        <button
+          type="button"
           onClick={() => setAbaAtiva('PRECOS')}
-          className={`pb-3 px-2 text-sm font-bold flex items-center gap-2 border-b-2 transition ${
+          className={`pb-3 px-2 text-sm font-bold flex items-center gap-2 border-b-2 transition cursor-pointer ${
             abaAtiva === 'PRECOS'
               ? 'border-emerald-600 text-emerald-700'
               : 'border-transparent text-slate-500 hover:text-slate-800'
           }`}
         >
           <DollarSign className="w-4 h-4" />
-          Alternação de Preço & Descontos por Bico
+          Preços & Descontos por Bico
           {estatisticasPrecos.totalComDesconto > 0 && (
             <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800">
               {estatisticasPrecos.totalComDesconto} com desconto
@@ -645,6 +888,19 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
           )}
         </button>
       </div>
+
+      {/* CONTEÚDO DAS ABAS: CADASTRO DE BICOS/TANQUES OU RELATÓRIO DE AFERIÇÃO COM FOTO */}
+      {(abaAtiva === 'CADASTRO_TANQUES_BICOS' || abaAtiva === 'RELATORIO_FOTO') && (
+        <PainelCadastroERelatorioFoto
+          key={abaAtiva}
+          bicos={bicos}
+          tanques={tanques}
+          afericoes={afericoes}
+          funcionarios={funcionarios}
+          modoInicial={abaAtiva === 'CADASTRO_TANQUES_BICOS' ? 'CADASTRO' : 'RELATORIO_FOTO'}
+          onReload={onReload}
+        />
+      )}
 
       {/* CONTEÚDO DA ABA: PREÇOS & DESCONTOS POR BICO */}
       {abaAtiva === 'PRECOS' && (
@@ -1144,6 +1400,43 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
             </div>
 
             <form onSubmit={handleSalvarAfericao} className="space-y-4 mt-4">
+              {/* Leitura Inteligente por Foto dentro do Modal */}
+              <div className="p-3.5 bg-slate-900 text-white rounded-xl border border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-lg bg-amber-500 text-slate-950 flex items-center justify-center shrink-0">
+                    <Camera className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-white">
+                      Preencher Aferição com Foto (Visor / Balde 20L / Laudo)
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      {fotoAfericaoBase64
+                        ? 'Foto anexada e lida! Os dados serão incluídos no Relatório de Aferição.'
+                        : 'Anexe uma foto para extrair automaticamente os dados e salvar como evidência.'}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={modalFotoInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleLerFotoModalAfericao}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => modalFotoInputRef.current?.click()}
+                    disabled={lendoFotoModal}
+                    className="px-3 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs rounded-lg transition cursor-pointer disabled:opacity-50"
+                  >
+                    {lendoFotoModal ? 'Lendo Foto...' : fotoAfericaoBase64 ? 'Trocar Foto' : 'Enviar Foto'}
+                  </button>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
@@ -1264,6 +1557,35 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
 
               {/* Componente Gráfico e Metrológico do Desvio entre ± 100 ml */}
               <DesvioAfericaoGauge calculo={calculoAfericaoAtiva} />
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
+                    Encerrante da Bomba (Opcional / Foto)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={encerranteFinalAfericao}
+                    onChange={(e) => setEncerranteFinalAfericao(e.target.value)}
+                    placeholder="Ex: 145820.50"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
+                    Nº Lacre / Selo Inmetro (Opcional / Foto)
+                  </label>
+                  <input
+                    type="text"
+                    value={lacreInmetroAfericao}
+                    onChange={(e) => setLacreInmetroAfericao(e.target.value)}
+                    placeholder="Ex: INM-202601"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono bg-white"
+                  />
+                </div>
+              </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>

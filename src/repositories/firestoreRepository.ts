@@ -94,13 +94,15 @@ function sanitizarParaFirestore<T>(obj: T): T {
  */
 export async function testConnection(): Promise<boolean> {
   try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
+    await getDoc(doc(db, 'test', 'connection'));
     return true;
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error('Please check your Firebase configuration.');
+  } catch {
+    try {
+      await getDocFromServer(doc(db, 'test', 'connection'));
+      return true;
+    } catch {
+      return false;
     }
-    return false;
   }
 }
 
@@ -187,6 +189,44 @@ export class PostoSubcollectionRepository<T extends { id: string }> {
       await setDoc(dRef, payload, { merge: true });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, path);
+    }
+  }
+
+  async saveBatch(postoId: string, items: T[]): Promise<void> {
+    if (!items || items.length === 0) return;
+    const path = `postos/${postoId}/${this.subcollectionName}`;
+    try {
+      for (let i = 0; i < items.length; i += 400) {
+        const batch = writeBatch(db);
+        items.slice(i, i + 400).forEach((item) => {
+          const dRef = doc(db, 'postos', postoId, this.subcollectionName, item.id);
+          const payload = sanitizarParaFirestore({
+            ...item,
+            postoId,
+          });
+          batch.set(dRef, payload as Record<string, unknown>, { merge: true });
+        });
+        await batch.commit();
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, path);
+    }
+  }
+
+  async deleteBatch(postoId: string, ids: string[]): Promise<void> {
+    if (!ids || ids.length === 0) return;
+    const path = `postos/${postoId}/${this.subcollectionName}`;
+    try {
+      for (let i = 0; i < ids.length; i += 400) {
+        const batch = writeBatch(db);
+        ids.slice(i, i + 400).forEach((id) => {
+          const dRef = doc(db, 'postos', postoId, this.subcollectionName, id);
+          batch.delete(dRef);
+        });
+        await batch.commit();
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, path);
     }
   }
 

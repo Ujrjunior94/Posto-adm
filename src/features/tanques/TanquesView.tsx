@@ -38,9 +38,16 @@ export const TanquesView: React.FC<TanquesProps> = ({ tanques, onReload }) => {
   const [capacidadeNominal, setCapacidadeNominal] = useState(15000);
   const [capacidadeOperacional, setCapacidadeOperacional] = useState(14250);
   const [observacoes, setObservacoes] = useState('');
+  const [salvando, setSalvando] = useState(false);
+  const [msgSucesso, setMsgSucesso] = useState('');
   const [pontosTexto, setPontosTexto] = useState(
     '0:0\n50:2500\n100:6800\n150:11200\n200:15000'
   );
+
+  const exibirToast = (msg: string) => {
+    setMsgSucesso(msg);
+    setTimeout(() => setMsgSucesso(''), 4000);
+  };
 
   const tanqueAtivo = useMemo(() => {
     return tanques.find((t) => t.id === selectedTanqueId) || tanques[0] || null;
@@ -90,47 +97,105 @@ export const TanquesView: React.FC<TanquesProps> = ({ tanques, onReload }) => {
 
   const handleSalvarTanque = async (e: React.FormEvent) => {
     e.preventDefault();
-    const tabela: PontoCalibracao[] = pontosTexto
-      .split('\n')
-      .map((line) => {
-        const [a, v] = line.split(':').map((s) => parseFloat(s.trim()));
-        return { altura: a, volume: v };
-      })
-      .filter((p) => !isNaN(p.altura) && !isNaN(p.volume));
+    setSalvando(true);
+    try {
+      const tabela: PontoCalibracao[] = pontosTexto
+        .split('\n')
+        .map((line) => {
+          const [a, v] = line.split(':').map((s) => parseFloat(s.trim()));
+          return { altura: a, volume: v };
+        })
+        .filter((p) => !isNaN(p.altura) && !isNaN(p.volume));
 
-    const id = tanqueEditando?.id || `tq-${Date.now()}`;
-    const novoTanque: Tanque = {
-      id,
-      postoId,
-      codigo: codigo.trim(),
-      produto,
-      capacidadeNominal: Number(capacidadeNominal),
-      capacidadeOperacional: Number(capacidadeOperacional),
-      unidade: 'Litros',
-      formato: 'CILINDRICO_HORIZONTAL',
-      ativo: true,
-      tabelaRegua: tabela,
-      observacoes: observacoes.trim() || undefined,
-      criadoEm: tanqueEditando?.criadoEm || new Date().toISOString(),
-      atualizadoEm: new Date().toISOString(),
-    };
+      const id = tanqueEditando?.id || `tq-${Date.now()}`;
+      const novoTanque: Tanque = {
+        id,
+        postoId,
+        codigo: codigo.trim(),
+        produto,
+        capacidadeNominal: Number(capacidadeNominal),
+        capacidadeOperacional: Number(capacidadeOperacional),
+        unidade: 'Litros',
+        formato: 'CILINDRICO_HORIZONTAL',
+        ativo: true,
+        tabelaRegua: tabela,
+        observacoes: observacoes.trim() || undefined,
+        criadoEm: tanqueEditando?.criadoEm || new Date().toISOString(),
+        atualizadoEm: new Date().toISOString(),
+      };
 
-    await repoTanque.save(postoId, novoTanque);
-    await registrarAuditoria(
-      postoId,
-      userProfile?.uid || 'anon',
-      userProfile?.nome || 'Operador',
-      'TANQUES',
-      'Tanque',
-      id,
-      tanqueEditando ? 'UPDATE' : 'CREATE',
-      tanqueEditando as unknown as Record<string, unknown>,
-      novoTanque as unknown as Record<string, unknown>
-    );
+      await repoTanque.save(postoId, novoTanque);
+      await registrarAuditoria(
+        postoId,
+        userProfile?.uid || 'anon',
+        userProfile?.nome || 'Operador',
+        'TANQUES',
+        'Tanque',
+        id,
+        tanqueEditando ? 'UPDATE' : 'CREATE',
+        tanqueEditando as unknown as Record<string, unknown>,
+        novoTanque as unknown as Record<string, unknown>
+      );
 
-    setIsModalOpen(false);
-    setTanqueEditando(null);
-    onReload();
+      setIsModalOpen(false);
+      setTanqueEditando(null);
+      setSelectedTanqueId(id);
+      exibirToast(`Tanque ${novoTanque.codigo} (${novoTanque.produto}) salvo na Nuvem 24h!`);
+      onReload();
+    } catch (err) {
+      console.error('Erro ao salvar tanque:', err);
+      alert('Erro ao salvar tanque na nuvem.');
+    } finally {
+      setSalvando(false);
+    }
+  };
+
+  const handleSalvarTanquesPadrao = async () => {
+    setSalvando(true);
+    try {
+      const padraoTanques: Array<{ cod: string; prod: string; capNom: number; capOp: number }> = [
+        { cod: 'TQ-01', prod: 'Gasolina Comum', capNom: 30000, capOp: 28500 },
+        { cod: 'TQ-02', prod: 'Gasolina Aditivada', capNom: 15000, capOp: 14250 },
+        { cod: 'TQ-03', prod: 'Etanol Hidratado', capNom: 20000, capOp: 19000 },
+        { cod: 'TQ-04', prod: 'Diesel S10', capNom: 30000, capOp: 28500 },
+        { cod: 'TQ-05', prod: 'Diesel S500', capNom: 15000, capOp: 14250 },
+      ];
+
+      for (const item of padraoTanques) {
+        const existente = tanques.find((t) => t.codigo === item.cod || t.produto === item.prod);
+        const id = existente?.id || `tq-${item.cod.toLowerCase()}`;
+        const tabelaPadrao: PontoCalibracao[] = [
+          { altura: 0, volume: 0 },
+          { altura: 50, volume: Math.round(item.capNom * 0.18) },
+          { altura: 100, volume: Math.round(item.capNom * 0.48) },
+          { altura: 150, volume: Math.round(item.capNom * 0.78) },
+          { altura: 200, volume: item.capNom },
+        ];
+        const tqObj: Tanque = {
+          id,
+          postoId,
+          codigo: item.cod,
+          produto: item.prod,
+          capacidadeNominal: item.capNom,
+          capacidadeOperacional: item.capOp,
+          unidade: 'Litros',
+          formato: 'CILINDRICO_HORIZONTAL',
+          ativo: true,
+          tabelaRegua: existente?.tabelaRegua?.length ? existente.tabelaRegua : tabelaPadrao,
+          criadoEm: existente?.criadoEm || new Date().toISOString(),
+          atualizadoEm: new Date().toISOString(),
+        };
+        await repoTanque.save(postoId, tqObj);
+      }
+
+      exibirToast('Cadastro dos 5 Tanques salvo com sucesso na Nuvem 24h!');
+      onReload();
+    } catch (err) {
+      console.error('Erro ao salvar tanques padrão:', err);
+      alert('Erro ao salvar tanques padrão.');
+    } finally {
+      setSalvando(false);
+    }
   };
 
   const handleExcluirTanque = async (tq: Tanque) => {
@@ -149,11 +214,21 @@ export const TanquesView: React.FC<TanquesProps> = ({ tanques, onReload }) => {
       tq as unknown as Record<string, unknown>,
       null
     );
+    exibirToast(`Tanque ${tq.codigo} removido.`);
     onReload();
   };
 
   return (
     <div className="space-y-6">
+      {msgSucesso && (
+        <div className="bg-emerald-950 text-emerald-200 border border-emerald-700 px-4 py-3 rounded-xl text-xs font-bold flex items-center justify-between shadow-md">
+          <span>✓ {msgSucesso}</span>
+          <button type="button" onClick={() => setMsgSucesso('')} className="text-emerald-400 hover:text-white">
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Cabeçalho */}
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -165,19 +240,30 @@ export const TanquesView: React.FC<TanquesProps> = ({ tanques, onReload }) => {
               Tanques e Calculadora de Régua Volumétrica
             </h2>
             <p className="text-xs text-slate-500">
-              Conversão direta de altura (cm) em litros e gestão completa de tanques cadastrados.
+              Conversão direta de altura (cm) em litros e gestão completa de tanques cadastrados na nuvem 24h.
             </p>
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={abrirModalNovo}
-          className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition shadow-xs cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          Cadastrar Tanque
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={handleSalvarTanquesPadrao}
+            disabled={salvando}
+            className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl transition shadow-xs cursor-pointer disabled:opacity-50"
+          >
+            <Database className="w-4 h-4 text-amber-400" />
+            {salvando ? 'Salvando...' : 'Salvar 5 Tanques Padrão'}
+          </button>
+          <button
+            type="button"
+            onClick={abrirModalNovo}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition shadow-xs cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            Cadastrar Tanque
+          </button>
+        </div>
       </div>
 
       {/* Calculadora de Régua Direta (Versão Simples + Botão para Detalhar Informações) */}

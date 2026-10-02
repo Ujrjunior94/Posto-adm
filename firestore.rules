@@ -66,6 +66,13 @@ service cloud.firestore {
         allow delete: if isValidId(postoId) && isValidId(escalaId);
       }
 
+      // Escalas Importadas (Imagem Original + OCR + Conferência + Histórico)
+      match /escalasImportadas/{importacaoId} {
+        allow get, list: if isValidId(postoId);
+        allow create, update: if isValidId(postoId) && isValidId(importacaoId) && isValidPostoDoc(postoId);
+        allow delete: if isValidId(postoId) && isValidId(importacaoId);
+      }
+
       match /turnos/{turnoId} {
         allow get, list: if isValidId(postoId);
         allow create, update: if isValidId(postoId) && isValidId(turnoId) && isValidPostoDoc(postoId);

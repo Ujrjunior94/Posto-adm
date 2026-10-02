@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { Funcionario, Escala, EscalaStatus, FuncionarioStatus } from '../../types';
+import { Funcionario, Escala, EscalaStatus, FuncionarioStatus, EscalaImportada } from '../../types';
 import { PostoSubcollectionRepository, registrarAuditoria } from '../../repositories/firestoreRepository';
 import { useAuth } from '../../contexts/AuthContext';
+import { PainelVisualizacoesPlanner, ModoVisaoPlanner } from './PainelVisualizacoesPlanner';
 import {
   Calendar as CalendarIcon,
   ChevronLeft,
@@ -59,6 +60,7 @@ const TURNOS_OFICIAIS = [
 interface PlannerProps {
   funcionarios: Funcionario[];
   escalas: Escala[];
+  escalasImportadas?: EscalaImportada[];
   onReload: () => void;
   onNavigateToIAEscala?: () => void;
 }
@@ -81,12 +83,16 @@ interface LinhaEscaneada {
 export const PlannerView: React.FC<PlannerProps> = ({
   funcionarios,
   escalas,
+  escalasImportadas = [],
   onReload,
   onNavigateToIAEscala,
 }) => {
   const { postoId, userProfile } = useAuth();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedTurnoFiltro, setSelectedTurnoFiltro] = useState<string>('TODOS');
+  const [modoVisao, setModoVisao] = useState<ModoVisaoPlanner>('MENSAL');
+  const [buscaTexto, setBuscaTexto] = useState<string>('');
+  const [filtroSetor, setFiltroSetor] = useState<string>('TODOS');
   const [salvandoAuto, setSalvandoAuto] = useState(false);
 
   // Modo Edição Rápida vs Abrir Modal de Edição/Exclusão ao clicar na célula
@@ -106,6 +112,9 @@ export const PlannerView: React.FC<PlannerProps> = ({
   const [modalTurno, setModalTurno] = useState<string>('Turno 1 - Manhã (06h - 14h)');
   const [modalInicio, setModalInicio] = useState<string>('06:00');
   const [modalFim, setModalFim] = useState<string>('14:00');
+  const [modalIntervalo, setModalIntervalo] = useState<string>('1h (Intrajornada)');
+  const [modalSetor, setModalSetor] = useState<string>('Pista');
+  const [modalFuncao, setModalFuncao] = useState<string>('Frentista');
   const [modalObs, setModalObs] = useState<string>('');
 
   // Modal de Alterar / Excluir Funcionário direto pelo Planner
@@ -174,9 +183,40 @@ export const PlannerView: React.FC<PlannerProps> = ({
       if (selectedTurnoFiltro !== 'TODOS' && f.turnoPreferencial !== selectedTurnoFiltro) {
         return false;
       }
+      if (filtroSetor !== 'TODOS' && (f.setor || 'Pista') !== filtroSetor) {
+        return false;
+      }
+      if (buscaTexto.trim()) {
+        const q = buscaTexto.toLowerCase().trim();
+        if (
+          !f.nome.toLowerCase().includes(q) &&
+          !(f.cargo || '').toLowerCase().includes(q) &&
+          !(f.setor || '').toLowerCase().includes(q)
+        ) {
+          return false;
+        }
+      }
       return true;
     });
-  }, [funcionarios, selectedTurnoFiltro]);
+  }, [funcionarios, selectedTurnoFiltro, filtroSetor, buscaTexto]);
+
+  const escalasMesFiltradas = useMemo(() => {
+    return escalas.filter((e) => {
+      if (!e.data.startsWith(mesAnoStr)) return false;
+      if (filtroSetor !== 'TODOS' && (e.setor || 'Pista') !== filtroSetor) return false;
+      if (buscaTexto.trim()) {
+        const q = buscaTexto.toLowerCase().trim();
+        if (
+          !e.funcionarioNome.toLowerCase().includes(q) &&
+          !(e.setor || '').toLowerCase().includes(q) &&
+          !e.turno.toLowerCase().includes(q)
+        ) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [escalas, mesAnoStr, filtroSetor, buscaTexto]);
 
   const obterSiglaTurno = (turno?: string) => {
     if (!turno) return 'T1';
@@ -216,6 +256,9 @@ export const PlannerView: React.FC<PlannerProps> = ({
         );
         setModalInicio(current.horarioInicio || '06:00');
         setModalFim(current.horarioFim || '14:00');
+        setModalIntervalo(current.intervalo || '1h (Intrajornada)');
+        setModalSetor(current.setor || func.setor || 'Pista');
+        setModalFuncao(current.funcao || func.funcao || func.cargo || 'Frentista');
         setModalObs(current.observacao || '');
       } else {
         const turnoPadrao = func.turnoPreferencial || 'Turno 1 - Manhã (06h - 14h)';
@@ -224,6 +267,9 @@ export const PlannerView: React.FC<PlannerProps> = ({
         setModalTurno(turnoPadrao);
         setModalInicio(h.inicio);
         setModalFim(h.fim);
+        setModalIntervalo('1h (Intrajornada)');
+        setModalSetor(func.setor || 'Pista');
+        setModalFuncao(func.funcao || func.cargo || 'Frentista');
         setModalObs('');
       }
       return;
@@ -277,6 +323,23 @@ export const PlannerView: React.FC<PlannerProps> = ({
     const id = escalaExistente?.id || `escala-${func.id}-${dateStr}`;
     const ehFolga = modalStatus === 'FOLGA';
 
+    const agoraIso = new Date().toISOString();
+    const historicoAnterior = escalaExistente?.historicoAlteracoes || [];
+    const novoHistorico = escalaExistente
+      ? [
+          ...historicoAnterior,
+          {
+            dataHora: agoraIso,
+            usuario: userProfile?.nome || 'Operador',
+            acao: 'Edição manual no Planner',
+            valorAnterior: `${escalaExistente.turno} (${escalaExistente.horarioInicio}-${escalaExistente.horarioFim})`,
+            valorNovo: `${ehFolga ? 'Folga' : modalTurno} (${ehFolga ? '00:00' : modalInicio}-${
+              ehFolga ? '00:00' : modalFim
+            })`,
+          },
+        ]
+      : historicoAnterior;
+
     const novaEscala: Escala = {
       id,
       postoId,
@@ -286,10 +349,14 @@ export const PlannerView: React.FC<PlannerProps> = ({
       turno: ehFolga ? 'Folga' : modalTurno,
       horarioInicio: ehFolga ? '00:00' : modalInicio,
       horarioFim: ehFolga ? '00:00' : modalFim,
+      intervalo: ehFolga ? '—' : modalIntervalo,
+      setor: modalSetor || 'Pista',
+      funcao: modalFuncao || func.cargo || 'Frentista',
       status: modalStatus,
       observacao: modalObs.trim(),
-      criadoEm: escalaExistente?.criadoEm || new Date().toISOString(),
-      atualizadoEm: new Date().toISOString(),
+      historicoAlteracoes: novoHistorico,
+      criadoEm: escalaExistente?.criadoEm || agoraIso,
+      atualizadoEm: agoraIso,
     };
 
     await repoEscala.save(postoId, novaEscala);
@@ -770,6 +837,65 @@ export const PlannerView: React.FC<PlannerProps> = ({
         </div>
       </div>
 
+      {/* Painel de 7 Visualizações do Planner (Diária, Semanal, Mensal, Funcionário, Setor, Turno, Histórico) + Legenda */}
+      <PainelVisualizacoesPlanner
+        modoVisao={modoVisao}
+        onChangeModoVisao={setModoVisao}
+        escalasMes={escalasMesFiltradas}
+        todasEscalas={escalas}
+        funcionarios={funcionariosAtivos}
+        escalasImportadas={escalasImportadas}
+        anoMesAtual={mesAnoStr}
+        buscaTexto={buscaTexto}
+        onChangeBuscaTexto={setBuscaTexto}
+        filtroSetor={filtroSetor}
+        onChangeFiltroSetor={setFiltroSetor}
+        onNovoRegistroManual={() => {
+          const funcPadrao = funcionariosAtivos[0] || funcionarios[0];
+          if (funcPadrao) {
+            handleCellClick(funcPadrao, new Date().getDate());
+          }
+        }}
+        onEditarRegistroEscala={(esc) => {
+          const func =
+            funcionarios.find((f) => f.id === esc.funcionarioId) || {
+              id: esc.funcionarioId,
+              postoId,
+              nome: esc.funcionarioNome,
+              cpf: '',
+              matricula: '',
+              telefone: '',
+              cargo: esc.funcao || 'Frentista',
+              funcao: esc.funcao || 'Frentista',
+              setor: esc.setor || 'Pista',
+              turnoPreferencial: esc.turno,
+              dataAdmissao: '',
+              status: 'ATIVO',
+              criadoEm: '',
+              atualizadoEm: '',
+            };
+          const diaNum = parseInt(esc.data.split('-')[2] || '1', 10);
+          setCelulaEditando({
+            func,
+            day: diaNum,
+            dateStr: esc.data,
+            escalaExistente: esc,
+          });
+          setModalStatus(esc.status);
+          setModalTurno(esc.turno);
+          setModalInicio(esc.horarioInicio);
+          setModalFim(esc.horarioFim);
+          setModalIntervalo(esc.intervalo || '1h');
+          setModalSetor(esc.setor || 'Pista');
+          setModalFuncao(esc.funcao || 'Frentista');
+          setModalObs(esc.observacao || '');
+        }}
+        onExcluirRegistroEscala={async (esc) => {
+          await repoEscala.delete(postoId, esc.id);
+          onReload();
+        }}
+      />
+
       {/* Barra de Filtro e Modo de Clique */}
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
         <div className="flex flex-wrap items-center gap-3">
@@ -1119,6 +1245,39 @@ export const PlannerView: React.FC<PlannerProps> = ({
                   </div>
                 </div>
               )}
+
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">Setor</label>
+                  <input
+                    type="text"
+                    value={modalSetor}
+                    onChange={(e) => setModalSetor(e.target.value)}
+                    placeholder="Pista, Caixa..."
+                    className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">Função</label>
+                  <input
+                    type="text"
+                    value={modalFuncao}
+                    onChange={(e) => setModalFuncao(e.target.value)}
+                    placeholder="Frentista..."
+                    className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">Intervalo</label>
+                  <input
+                    type="text"
+                    value={modalIntervalo}
+                    onChange={(e) => setModalIntervalo(e.target.value)}
+                    placeholder="12:00 - 13:00"
+                    className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs"
+                  />
+                </div>
+              </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Observação (Opcional)</label>

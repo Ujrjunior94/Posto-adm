@@ -1,7 +1,15 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Escala, Funcionario, EscalaStatus } from '../../types';
+import {
+  Escala,
+  Funcionario,
+  EscalaStatus,
+  EscalaImportada,
+  ConflitoEscalaDetectado,
+  StatusConferenciaEscala,
+} from '../../types';
 import { PostoSubcollectionRepository, registrarAuditoria } from '../../repositories/firestoreRepository';
 import { useAuth } from '../../contexts/AuthContext';
+import { PainelConferenciaEscalaOCR, ItemConferenciaOCR } from './PainelConferenciaEscalaOCR';
 import {
   Sparkles,
   Camera,
@@ -38,8 +46,9 @@ import {
 
 const repoEscalas = new PostoSubcollectionRepository<Escala>('escalas');
 const repoFuncionarios = new PostoSubcollectionRepository<Funcionario>('funcionarios');
+const repoEscalasImportadas = new PostoSubcollectionRepository<EscalaImportada>('escalasImportadas');
 
-export type FiltroImagemOCR = 'original' | 'nitidez' | 'pb' | 'alto_contraste' | 'brilho';
+export type FiltroImagemOCR = 'original' | 'nitidez' | 'pb' | 'alto_contraste' | 'brilho' | 'reducao_ruido';
 
 export interface ColaboradorReconhecido {
   nomeOriginal: string;
@@ -51,35 +60,30 @@ export interface ColaboradorReconhecido {
     nome: string;
     cargo: string;
     funcao?: string;
+    setor?: string;
     turnoPreferencial?: string;
     cpf?: string;
   };
   cadastradoAgora?: boolean;
 }
 
-export interface ItemEscalaExtraido {
-  tempId: string;
-  funcionarioNome: string;
-  funcionarioId: string;
-  data: string;
-  diaSemana?: string;
-  turno: string;
-  horarioInicio: string;
-  horarioFim: string;
-  status: EscalaStatus;
-  confianca?: 'ALTA' | 'MEDIA' | 'BAIXA';
-  observacao?: string;
-}
+export type ItemEscalaExtraido = ItemConferenciaOCR;
 
 export interface DiagnosticoOCR {
   tipoDocumentoIdentificado?: string;
   qualidadeImagem?: string;
   observacoesGerais?: string;
   mesReferencia?: string;
+  copiaFielReconhecida?: string;
+  simbolosEAbreviacoes?: string[];
+  trocasDeEscalaIdentificadas?: string[];
+  conflitosDetectados?: ConflitoEscalaDetectado[];
 }
 
 interface IAEscalaViewProps {
   funcionarios: Funcionario[];
+  escalas?: Escala[];
+  escalasImportadas?: EscalaImportada[];
   onReload: () => void;
   onNavigateToPlanner?: () => void;
 }
@@ -118,7 +122,7 @@ const normalizarDataParaIso = (rawDate: string, mesAnoPadrao?: string): string =
   return trimmed;
 };
 
-// Normalizador de turnos para a tabela padrão do posto com suporte a folgas e turnos operacionais
+// Normalizador de turnos preservando 100% dos horários reais extraídos da imagem
 export const normalizarTurno = (
   rawTurno: string,
   rawInicio?: string,
@@ -129,8 +133,10 @@ export const normalizarTurno = (
   horarioFim: string;
 } => {
   const t = (rawTurno || '').trim().toLowerCase();
+  const inicioLimpo = (rawInicio || '').trim();
+  const fimLimpo = (rawFim || '').trim();
 
-  // Folgas, Descansos Semanais Remunerados (DSR) e Ausências Programadas
+  // Folgas e DSR
   if (
     t === 'f' ||
     t === 'fol' ||
@@ -138,6 +144,7 @@ export const normalizarTurno = (
     t === 'dsr' ||
     t === 'off' ||
     t === 'desc' ||
+    t === 's' ||
     t === '-' ||
     t.includes('folga') ||
     t.includes('descanso')
@@ -150,7 +157,7 @@ export const normalizarTurno = (
   }
 
   // Férias
-  if (t.includes('feria') || t === 'fer' || t === 'fe') {
+  if (t.includes('feria') || t.includes('féria') || t === 'fer' || t === 'fe') {
     return {
       turno: 'Férias',
       horarioInicio: '00:00',
@@ -158,8 +165,8 @@ export const normalizarTurno = (
     };
   }
 
-  // Afastado ou Atestado Médico
-  if (t.includes('afast') || t.includes('atest') || t.includes('lic') || t === 'at') {
+  // Afastado / Atestado
+  if (t.includes('afast') || t.includes('atest') || t.includes('lic') || t === 'at' || t === 'med') {
     return {
       turno: 'Afastado',
       horarioInicio: '00:00',
@@ -167,7 +174,38 @@ export const normalizarTurno = (
     };
   }
 
-  // Turno Horista: Flexível / Por Hora
+  // Plantão / 12x36
+  if (t === 'p' || t === 'plt' || t.includes('plantão') || t.includes('plantao') || t.includes('12x36')) {
+    return {
+      turno: rawTurno && !['p', 'plt'].includes(t) ? rawTurno.trim() : 'Plantão',
+      horarioInicio: inicioLimpo || '06:00',
+      horarioFim: fimLimpo || '18:00',
+    };
+  }
+
+  // Turno 3: Noite
+  if (
+    t === '3' ||
+    t === 't3' ||
+    t === 'n' ||
+    t.includes('turno 3') ||
+    t.includes('noite') ||
+    t.includes('noturno') ||
+    t.includes('22-06') ||
+    t.includes('22h') ||
+    inicioLimpo.startsWith('22:') ||
+    inicioLimpo.startsWith('23:')
+  ) {
+    const hIni = inicioLimpo || '22:00';
+    const hFim = fimLimpo || '06:00';
+    return {
+      turno: hIni === '22:00' && hFim === '06:00' ? 'Turno 3 - Noite (22h - 06h)' : `Noite (${hIni} - ${hFim})`,
+      horarioInicio: hIni,
+      horarioFim: hFim,
+    };
+  }
+
+  // Turno Horista / Intermediário
   if (
     t === 'h' ||
     t === 'hor' ||
@@ -178,65 +216,53 @@ export const normalizarTurno = (
   ) {
     return {
       turno: 'Turno Horista',
-      horarioInicio: rawInicio || '08:00',
-      horarioFim: rawFim || '14:00',
+      horarioInicio: inicioLimpo || '08:00',
+      horarioFim: fimLimpo || '14:00',
     };
   }
 
-  // Turno 2: Tarde (14h às 22h)
+  // Turno 2: Tarde
   if (
     t === '2' ||
     t === 't2' ||
     t === 't02' ||
     t.includes('turno 2') ||
     t.includes('turno2') ||
-    t.includes('turno dois') ||
     t.includes('14-22') ||
     t.includes('14h') ||
     t.includes('14:00') ||
     t.includes('tarde') ||
     t === 't' ||
-    t === 'tar'
+    t === 'tar' ||
+    inicioLimpo.startsWith('13:') ||
+    inicioLimpo.startsWith('14:') ||
+    inicioLimpo.startsWith('15:')
   ) {
+    const hIni = inicioLimpo || '14:00';
+    const hFim = fimLimpo || '22:00';
     return {
-      turno: 'Turno 2 - Tarde (14h - 22h)',
-      horarioInicio: '14:00',
-      horarioFim: '22:00',
+      turno: hIni === '14:00' && hFim === '22:00' ? 'Turno 2 - Tarde (14h - 22h)' : `Tarde (${hIni} - ${hFim})`,
+      horarioInicio: hIni,
+      horarioFim: hFim,
     };
   }
 
-  // Turno 1: Manhã (06h às 14h)
-  if (
-    t === '1' ||
-    t === 't1' ||
-    t === 't01' ||
-    t.includes('turno 1') ||
-    t.includes('turno1') ||
-    t.includes('turno um') ||
-    t.includes('06-14') ||
-    t.includes('06h') ||
-    t.includes('06:00') ||
-    t.includes('manha') ||
-    t.includes('manhã') ||
-    t === 'm' ||
-    t === 'man' ||
-    t === 'm1'
-  ) {
-    return {
-      turno: 'Turno 1 - Manhã (06h - 14h)',
-      horarioInicio: '06:00',
-      horarioFim: '14:00',
-    };
-  }
-
+  // Turno 1: Manhã ou horário customizado
+  const hIni = inicioLimpo || '06:00';
+  const hFim = fimLimpo || '14:00';
   return {
-    turno: 'Turno 1 - Manhã (06h - 14h)',
-    horarioInicio: rawInicio || '06:00',
-    horarioFim: rawFim || '14:00',
+    turno:
+      hIni === '06:00' && hFim === '14:00'
+        ? 'Turno 1 - Manhã (06h - 14h)'
+        : rawTurno && !['1', 't1', 'm', 'manhã', 'manha'].includes(t)
+        ? rawTurno.trim()
+        : `Manhã (${hIni} - ${hFim})`,
+    horarioInicio: hIni,
+    horarioFim: hFim,
   };
 };
 
-// Processador de imagem via Canvas para melhorar fotos antes do envio ao Gemini
+// Processador de imagem via Canvas em alta definição (até 2048px) para OCR preciso
 const processarImagemCanvas = (
   dataUrl: string,
   rotacaoGraus: number,
@@ -246,12 +272,12 @@ const processarImagemCanvas = (
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
-      const is90or270 = rotacaoGraus === 90 || rotacaoGraus === 270;
-      let rawW = is90or270 ? img.height : img.width;
-      let rawH = is90or270 ? img.width : img.height;
+      const normRot = ((rotacaoGraus % 360) + 360) % 360;
+      const is90or270 = Math.abs(normRot - 90) < 15 || Math.abs(normRot - 270) < 15;
+      const rawW = is90or270 ? img.height : img.width;
+      const rawH = is90or270 ? img.width : img.height;
 
-      // Otimização de dimensão máxima para OCR estável e sem sobrecarga de payload
-      const MAX_DIM = 1600;
+      const MAX_DIM = 2048;
       let finalW = rawW;
       let finalH = rawH;
       if (Math.max(rawW, rawH) > MAX_DIM) {
@@ -273,6 +299,9 @@ const processarImagemCanvas = (
         return;
       }
 
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
       ctx.save();
       ctx.translate(canvas.width / 2, canvas.height / 2);
       ctx.rotate((rotacaoGraus * Math.PI) / 180);
@@ -286,8 +315,7 @@ const processarImagemCanvas = (
         const d = imgData.data;
 
         if (filtro === 'nitidez') {
-          // Realce de contraste e nitidez para realçar caneta e grade
-          const contrast = 1.35;
+          const contrast = 1.25;
           const factor = (259 * (contrast * 255 + 255)) / (255 * (259 - contrast * 255));
           for (let i = 0; i < d.length; i += 4) {
             d[i] = Math.min(255, Math.max(0, factor * (d[i] - 128) + 128));
@@ -295,35 +323,42 @@ const processarImagemCanvas = (
             d[i + 2] = Math.min(255, Math.max(0, factor * (d[i + 2] - 128) + 128));
           }
         } else if (filtro === 'pb') {
-          // Monocromático de alto contraste (ideal para quadro branco ou folhas amareladas)
           for (let i = 0; i < d.length; i += 4) {
             const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-            const bin = gray > 135 ? Math.min(255, gray * 1.25) : Math.max(0, gray * 0.65);
+            const bin = gray > 138 ? Math.min(255, gray * 1.2) : Math.max(0, gray * 0.68);
             d[i] = bin;
             d[i + 1] = bin;
             d[i + 2] = bin;
           }
         } else if (filtro === 'alto_contraste') {
-          // Binarização estrita de texto
           for (let i = 0; i < d.length; i += 4) {
             const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-            const val = gray > 130 ? 255 : 0;
+            const val = gray > 132 ? 255 : 0;
             d[i] = val;
             d[i + 1] = val;
             d[i + 2] = val;
           }
         } else if (filtro === 'brilho') {
-          // Ilumina fotos escuras
           for (let i = 0; i < d.length; i += 4) {
-            d[i] = Math.min(255, d[i] * 1.25 + 20);
-            d[i + 1] = Math.min(255, d[i + 1] * 1.25 + 20);
-            d[i + 2] = Math.min(255, d[i + 2] * 1.25 + 20);
+            d[i] = Math.min(255, d[i] * 1.22 + 18);
+            d[i + 1] = Math.min(255, d[i + 1] * 1.22 + 18);
+            d[i + 2] = Math.min(255, d[i + 2] * 1.22 + 18);
+          }
+        } else if (filtro === 'reducao_ruido') {
+          const contrast = 1.2;
+          const factor = (259 * (contrast * 255 + 255)) / (255 * (259 - contrast * 255));
+          for (let i = 0; i < d.length; i += 4) {
+            const avg = (d[i] + d[i + 1] + d[i + 2]) / 3;
+            const clean = avg > 210 ? 255 : avg < 50 ? 15 : avg;
+            d[i] = Math.min(255, Math.max(0, factor * (clean - 128) + 128));
+            d[i + 1] = Math.min(255, Math.max(0, factor * (clean - 128) + 128));
+            d[i + 2] = Math.min(255, Math.max(0, factor * (clean - 128) + 128));
           }
         }
         ctx.putImageData(imgData, 0, 0);
       }
 
-      resolve(canvas.toDataURL('image/jpeg', 0.92));
+      resolve(canvas.toDataURL('image/jpeg', 0.94));
     };
     img.src = dataUrl;
   });
@@ -331,6 +366,8 @@ const processarImagemCanvas = (
 
 export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
   funcionarios,
+  escalas = [],
+  escalasImportadas = [],
   onReload,
   onNavigateToPlanner,
 }) => {
@@ -345,9 +382,11 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
   const [nomeArquivo, setNomeArquivo] = useState<string>('');
   const [tamanhoArquivo, setTamanhoArquivo] = useState<string>('');
   const [rotacao, setRotacao] = useState<number>(0);
-  const [filtroAtivo, setFiltroAtivo] = useState<FiltroImagemOCR>('nitidez');
+  const [inclinacaoFina, setInclinacaoFina] = useState<number>(0);
+  const [filtroAtivo, setFiltroAtivo] = useState<FiltroImagemOCR>('original');
   const [zoomNivel, setZoomNivel] = useState<number>(1);
   const [modoComparacao, setModoComparacao] = useState<boolean>(true);
+  const [modoImportacao, setModoImportacao] = useState<'SUBSTITUIR' | 'ATUALIZAR' | 'MESCLAR' | 'NOVA_VERSAO'>('ATUALIZAR');
 
   // Mês e Ano de Referência
   const hoje = new Date();
@@ -379,7 +418,7 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
     }
 
     let cancelado = false;
-    processarImagemCanvas(imagemOriginal, rotacao, filtroAtivo).then((urlProcessada) => {
+    processarImagemCanvas(imagemOriginal, rotacao + inclinacaoFina, filtroAtivo).then((urlProcessada) => {
       if (!cancelado) {
         setImagemPreview(urlProcessada);
       }
@@ -388,7 +427,7 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
     return () => {
       cancelado = true;
     };
-  }, [imagemOriginal, rotacao, filtroAtivo]);
+  }, [imagemOriginal, rotacao, inclinacaoFina, filtroAtivo]);
 
   const carregarArquivoImagem = (file: File) => {
     if (!file.type.startsWith('image/')) {
@@ -615,80 +654,108 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
     setSucessoSalvo(false);
   };
 
-  // Processamento com a IA Gemini Multimodal através do backend
+  // Processamento com a IA Gemini Multimodal através do backend (1. Carregar e enviar imagem -> 2. Processar e validar JSON -> 3. Formatar campos para integração)
   const handleProcessarComIA = async () => {
-    const imagemParaEnviar = imagemPreview || imagemOriginal;
-    if (!imagemParaEnviar) return;
+    const baseImg = imagemPreview || imagemOriginal;
+    if (!baseImg) return;
 
     setProcessando(true);
-    setMensagemStatus('Analisando documento com Gemini 3.8 Flash (visão computacional de tabela, orientação e turnos)...');
+    setMensagemStatus('1/3 Carregando, otimizando nitidez/alinhamento e enviando imagem da escala para leitura OCR...');
     setErroProcessamento('');
     setSucessoSalvo(false);
 
     try {
+      const imagemParaEnviar =
+        imagemPreview || (await processarImagemCanvas(baseImg, rotacao + inclinacaoFina, filtroAtivo));
+
       const response = await fetch('/api/gemini/escala-ocr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           imageBase64: imagemParaEnviar,
-          mimeType: imagemMimeType,
+          mimeType: imagemMimeType || 'image/jpeg',
           mesAnoReferencia,
           funcionariosCadastrados: funcionarios.map((f) => ({
             id: f.id,
             nome: f.nome,
             matricula: f.matricula,
             cargo: f.cargo,
+            funcao: f.funcao,
+            setor: f.setor,
           })),
         }),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Erro HTTP ${response.status}`);
+      const rawResponseText = await response.text();
+      let data: any = {};
+      try {
+        data = rawResponseText ? JSON.parse(rawResponseText) : {};
+      } catch {
+        const cleaned = rawResponseText
+          .trim()
+          .replace(/^```(?:json)?\s*/i, '')
+          .replace(/\s*```$/i, '')
+          .trim();
+        data = JSON.parse(cleaned || '{}');
       }
 
-      const data = await response.json();
-      setTituloDocumento(data.tituloEscala || 'Escala Operacional de Posto');
+      if (!response.ok) {
+        throw new Error(data.error || `Erro HTTP ${response.status}`);
+      }
+
+      setMensagemStatus('2/3 Processando resposta estruturada e validando campos do JSON...');
+      setTituloDocumento(String(data.tituloEscala || 'Escala Operacional de Trabalho').trim());
 
       setDiagnostico({
-        tipoDocumentoIdentificado: data.tipoDocumentoIdentificado || 'Planilha Impressa / Quadro Operacional',
+        tipoDocumentoIdentificado: data.tipoDocumentoIdentificado || 'Quadro / Planilha de Escala Operacional',
         qualidadeImagem: data.qualidadeImagem || 'BOA',
-        observacoesGerais: data.observacoesGerais || 'Leitura de tabela e correspondência concluída com sucesso.',
+        observacoesGerais: data.observacoesGerais || 'Leitura e reconhecimento fiel concluídos com sucesso.',
         mesReferencia: data.mesReferencia || mesAnoReferencia,
+        copiaFielReconhecida: data.copiaFielReconhecida || '',
+        simbolosEAbreviacoes: data.simbolosEAbreviacoes || [],
+        trocasDeEscalaIdentificadas: data.trocasDeEscalaIdentificadas || [],
+        conflitosDetectados: data.conflitosDetectados || [],
       });
 
-      // Processar colaboradores identificados
+      // Processar colaboradores identificados preservando exatamente os nomes e funções lidos na imagem
       const detectados: ColaboradorReconhecido[] = (data.colaboradoresIdentificados || []).map(
         (colab: any) => {
-          const match = funcionarios.find(
-            (f) =>
-              f.id === colab.funcionarioId ||
-              f.nome.toLowerCase().trim() === colab.nomeOriginal.toLowerCase().trim() ||
-              f.nome.toLowerCase().includes(colab.nomeOriginal.toLowerCase()) ||
-              colab.nomeOriginal.toLowerCase().includes(f.nome.toLowerCase())
-          );
+          const nomeOrig = String(colab.nomeOriginal || '').trim() || 'não identificado';
+          const nomeOrigLower = nomeOrig.toLowerCase();
+
+          const match = funcionarios.find((f) => {
+            if (!f || !f.nome) return false;
+            const fNomeLower = f.nome.toLowerCase().trim();
+            if (colab.funcionarioId && f.id === colab.funcionarioId) return true;
+            if (fNomeLower === nomeOrigLower) return true;
+            if (nomeOrigLower !== 'não identificado' && nomeOrigLower.length >= 3) {
+              if (fNomeLower.includes(nomeOrigLower) || nomeOrigLower.includes(fNomeLower)) return true;
+            }
+            return false;
+          });
 
           if (match) {
             return {
-              nomeOriginal: colab.nomeOriginal,
+              nomeOriginal: nomeOrig,
               jaCadastrado: true,
               funcionarioId: match.id,
               confianca: colab.confianca || 'ALTA',
-              motivoCorrespondencia: colab.motivoCorrespondencia || 'Correspondência com colaborador cadastrado',
+              motivoCorrespondencia: colab.motivoCorrespondencia || `Vinculado ao cadastro: ${match.nome}`,
             };
           } else {
-            const turnoNorm = normalizarTurno(colab.sugestaoCadastroPrevio?.turnoPreferencial || '');
             return {
-              nomeOriginal: colab.nomeOriginal,
+              nomeOriginal: nomeOrig,
               jaCadastrado: false,
               funcionarioId: undefined,
               confianca: colab.confianca || 'MEDIA',
-              motivoCorrespondencia: colab.motivoCorrespondencia || 'Novo colaborador identificado na imagem',
+              motivoCorrespondencia: colab.motivoCorrespondencia || 'Extraído fielmente da imagem da escala',
               sugestaoCadastroPrevio: {
-                nome: colab.sugestaoCadastroPrevio?.nome || colab.nomeOriginal,
-                cargo: colab.sugestaoCadastroPrevio?.cargo || 'Frentista',
-                funcao: colab.sugestaoCadastroPrevio?.funcao || 'Operacional de Pista',
-                turnoPreferencial: turnoNorm.turno,
+                nome: colab.sugestaoCadastroPrevio?.nome || nomeOrig,
+                cargo: colab.sugestaoCadastroPrevio?.cargo || colab.cargo || 'Frentista',
+                funcao: colab.sugestaoCadastroPrevio?.funcao || colab.funcao || 'Frentista',
+                setor: colab.sugestaoCadastroPrevio?.setor || colab.setor || 'Pista',
+                turnoPreferencial:
+                  colab.sugestaoCadastroPrevio?.turnoPreferencial || 'Turno 1 - Manhã (06h - 14h)',
                 cpf: `000.${Math.floor(100 + Math.random() * 900)}.${Math.floor(100 + Math.random() * 900)}-00`,
               },
             };
@@ -698,81 +765,127 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
 
       setColaboradoresDetectados(detectados);
 
-      // Processar linhas da escala
+      // Processar todos os registros diários preservando 100% da fidelidade de horários, turnos, setores, funções e status
       const itens: ItemEscalaExtraido[] = (data.itensEscala || []).map((item: any, idx: number) => {
-        const colab = detectados.find((c) => c.nomeOriginal === item.funcionarioNome);
-        const funcMatch = funcionarios.find((f) => f.id === item.funcionarioId || f.nome === item.funcionarioNome);
+        const nomeFunc = String(item.funcionarioNome || 'não identificado').trim();
+        const colab = detectados.find(
+          (c) => c.nomeOriginal.toLowerCase().trim() === nomeFunc.toLowerCase()
+        );
+        const funcMatch = funcionarios.find(
+          (f) => f.id === item.funcionarioId || f.nome.toLowerCase().trim() === nomeFunc.toLowerCase()
+        );
+
+        const stUpper = String(item.status || '').toUpperCase().trim();
+        const turnoRaw = String(item.turno || '').trim();
+        const turnoLower = turnoRaw.toLowerCase();
 
         let statusVal: EscalaStatus = 'TRABALHO';
-        const stUpper = String(item.status || '').toUpperCase();
-        const turnoLower = String(item.turno || '').toLowerCase();
-
         if (
-          stUpper.includes('FOLGA') ||
-          stUpper === 'S' ||
-          stUpper === 'F' ||
-          stUpper === 'OFF' ||
+          stUpper === 'FOLGA' ||
           stUpper === 'DSR' ||
+          stUpper === 'OFF' ||
           turnoLower === 'folga' ||
-          turnoLower === 's' ||
+          turnoLower === 'dsr' ||
           turnoLower === 'f' ||
           turnoLower === 'fol' ||
-          turnoLower === 'dsr' ||
-          turnoLower === 'off' ||
-          turnoLower === '-'
+          turnoLower === 'off'
         ) {
           statusVal = 'FOLGA';
-        } else if (stUpper.includes('ATEST') || stUpper.includes('AFAST') || stUpper.includes('MED')) {
-          statusVal = 'AFASTADO';
-        } else if (stUpper.includes('FERIA')) {
+        } else if (stUpper === 'PLANTAO' || stUpper === 'PLANTÃO' || turnoLower.includes('plantão') || turnoLower.includes('plantao') || turnoLower.includes('12x36')) {
+          statusVal = 'PLANTAO';
+        } else if (stUpper === 'FERIAS' || stUpper === 'FÉRIAS' || turnoLower.includes('férias') || turnoLower.includes('ferias')) {
           statusVal = 'FERIAS';
+        } else if (stUpper === 'AFASTADO' || stUpper.includes('ATEST') || turnoLower.includes('afast') || turnoLower.includes('atest')) {
+          statusVal = 'AFASTADO';
         }
 
+        const dataIso = normalizarDataParaIso(item.data, mesAnoReferencia);
+        const dtObj = new Date(`${dataIso}T12:00:00`);
+        const diaSemanaCalc =
+          item.diaSemana ||
+          (!isNaN(dtObj.getTime())
+            ? ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SAB'][dtObj.getDay()]
+            : '');
+
+        const ehAusenciaOuFolga =
+          statusVal === 'FOLGA' || statusVal === 'FERIAS' || statusVal === 'AFASTADO';
+
+        // Preserva o horário exato vindo do OCR se presente; só usa normalizarTurno como complemento se faltar
         const turnoNorm = normalizarTurno(
-          statusVal === 'FOLGA' ? 'Folga' : item.turno,
+          ehAusenciaOuFolga ? statusVal : turnoRaw,
           item.horarioInicio,
           item.horarioFim
         );
-        const dataIso = normalizarDataParaIso(item.data, mesAnoReferencia);
+
+        const horarioInicioFinal = ehAusenciaOuFolga
+          ? '00:00'
+          : String(item.horarioInicio || '').trim() || turnoNorm.horarioInicio;
+        const horarioFimFinal = ehAusenciaOuFolga
+          ? '00:00'
+          : String(item.horarioFim || '').trim() || turnoNorm.horarioFim;
+
+        const turnoFinal =
+          statusVal === 'FOLGA'
+            ? 'Folga'
+            : statusVal === 'FERIAS'
+            ? 'Férias'
+            : statusVal === 'AFASTADO'
+            ? 'Afastado'
+            : turnoRaw || turnoNorm.turno;
 
         return {
-          tempId: `item-${Date.now()}-${idx}`,
-          funcionarioNome: item.funcionarioNome,
+          tempId: item.tempId || `item-${Date.now()}-${idx}`,
+          funcionarioNome: nomeFunc,
           funcionarioId: funcMatch?.id || colab?.funcionarioId || '',
           data: dataIso,
-          diaSemana: item.diaSemana || '',
-          turno: statusVal === 'FOLGA' ? 'Folga' : turnoNorm.turno,
-          horarioInicio: statusVal === 'FOLGA' ? '00:00' : turnoNorm.horarioInicio,
-          horarioFim: statusVal === 'FOLGA' ? '00:00' : turnoNorm.horarioFim,
+          diaSemana: diaSemanaCalc,
+          turno: turnoFinal,
+          horarioInicio: horarioInicioFinal,
+          horarioFim: horarioFimFinal,
+          intervalo:
+            String(item.intervalo || '').trim() ||
+            (statusVal === 'TRABALHO' || statusVal === 'PLANTAO' ? '1h (Intrajornada)' : '—'),
+          setor:
+            String(item.setor || '').trim() ||
+            funcMatch?.setor ||
+            colab?.sugestaoCadastroPrevio?.setor ||
+            'Pista',
+          funcao:
+            String(item.funcao || '').trim() ||
+            funcMatch?.funcao ||
+            funcMatch?.cargo ||
+            colab?.sugestaoCadastroPrevio?.cargo ||
+            'Frentista',
           status: statusVal,
           confianca: item.confianca || 'ALTA',
-          observacao: item.observacao || 'Identificado por OCR Multimodal',
+          statusConferencia:
+            item.statusConferencia || (item.confianca === 'BAIXA' ? 'REVISAO' : 'CONFIRMADO'),
+          motivoConferencia: item.motivoConferencia || 'Extraído fielmente da imagem',
+          codigoOriginal: item.codigoOriginal || turnoFinal,
+          interpretacoesPossiveis: item.interpretacoesPossiveis || [],
+          observacao: item.observacao || 'Extraído fielmente da imagem',
+          regiaoImagem: item.regiaoImagem,
         };
       });
 
       setItensEscala(itens);
       setMensagemStatus(
-        `Reconhecimento concluído com sucesso! ${detectados.length} colaboradores identificados e ${itens.length} alocações de turnos/folgas extraídas no mês ${mesAnoReferencia}.`
+        `3/3 Leitura e validação JSON concluídas! ${detectados.length} funcionário(s) e ${itens.length} registro(s) extraídos com fidelidade da imagem.`
       );
     } catch (err: any) {
-      console.warn('Falha no reconhecimento da IA, ativando contingência:', err.message);
-      const isHighDemand =
-        String(err.message || '').includes('alta demanda') ||
-        String(err.message || '').includes('503') ||
-        String(err.message || '').includes('UNAVAILABLE');
-
+      console.error('Erro no reconhecimento da imagem da escala:', err);
       setErroProcessamento(
-        isHighDemand
-          ? 'Servidores de IA com alta demanda temporária. Ativamos a contingência operacional com a grade estimada. Você pode revisar ou clicar em "Tentar Novamente com IA".'
-          : `Aviso na conexão com a IA: ${err.message}. Ativamos a contingência operacional com colaboradores.`
+        `Não foi possível concluir a leitura da imagem: ${
+          err?.message || 'Erro de comunicação'
+        }. Verifique a nitidez/rotação da foto e clique em "Tentar Novamente com IA".`
       );
-      realizarFallbackInteligente();
+      setMensagemStatus('');
     } finally {
       setProcessando(false);
     }
   };
 
-  // Expande e projeta o padrão da escala para o mês completo (ex: de 5/7 dias para 30/31 dias)
+  // Expande e projeta o padrão real extraído da imagem para o restante dos dias do mês (preservando horários, setores, funções e folgas reais de cada funcionário)
   const handleExpandirParaMesCompleto = () => {
     const [anoStr, mesStr] = mesAnoReferencia.split('-');
     const ano = parseInt(anoStr, 10);
@@ -781,7 +894,6 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
 
     if (colaboradoresDetectados.length === 0 && itensEscala.length === 0) return;
 
-    // Se não houver colaboradoresDetectados, extrai a partir dos itens existentes
     let colabs = [...colaboradoresDetectados];
     if (colabs.length === 0) {
       const nomes = Array.from(new Set<string>(itensEscala.map((i) => i.funcionarioNome)));
@@ -800,20 +912,35 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
     const novosItens: ItemEscalaExtraido[] = [];
 
     colabs.forEach((c, cIdx) => {
-      const itensColab = itensEscala.filter(
-        (i) => i.funcionarioNome.toLowerCase().trim() === c.nomeOriginal.toLowerCase().trim()
+      const itensColab = itensEscala
+        .filter((i) => i.funcionarioNome.toLowerCase().trim() === c.nomeOriginal.toLowerCase().trim())
+        .sort((a, b) => a.data.localeCompare(b.data));
+
+      // Identifica o item de trabalho real extraído da imagem para preservar horário, turno, intervalo, setor e função exatos
+      const itemTrabalhoBase = itensColab.find(
+        (i) => i.status === 'TRABALHO' || i.status === 'PLANTAO'
       );
+      const turnoBase =
+        itemTrabalhoBase?.turno ||
+        c.sugestaoCadastroPrevio?.turnoPreferencial ||
+        'Turno 1 - Manhã (06h - 14h)';
+      const turnoNorm = normalizarTurno(
+        turnoBase,
+        itemTrabalhoBase?.horarioInicio,
+        itemTrabalhoBase?.horarioFim
+      );
+      const horarioInicioBase = itemTrabalhoBase?.horarioInicio || turnoNorm.horarioInicio;
+      const horarioFimBase = itemTrabalhoBase?.horarioFim || turnoNorm.horarioFim;
+      const intervaloBase = itemTrabalhoBase?.intervalo || '1h (Intrajornada)';
+      const setorBase = itemTrabalhoBase?.setor || c.sugestaoCadastroPrevio?.setor || 'Pista';
+      const funcaoBase = itemTrabalhoBase?.funcao || c.sugestaoCadastroPrevio?.cargo || 'Frentista';
+      const statusTrabalhoBase: EscalaStatus =
+        itemTrabalhoBase?.status === 'PLANTAO' ? 'PLANTAO' : 'TRABALHO';
 
-      // Descobrir turno predominante
-      const turnoTrabalho = itensColab.find((i) => i.status === 'TRABALHO')?.turno;
-      let turnoPadrao = turnoTrabalho || c.sugestaoCadastroPrevio?.turnoPreferencial;
-      if (!turnoPadrao) {
-        if (cIdx % 3 === 0) turnoPadrao = 'Turno 1 - Manhã (06h - 14h)';
-        else if (cIdx % 3 === 1) turnoPadrao = 'Turno 2 - Tarde (14h - 22h)';
-        else turnoPadrao = 'Turno Horista';
-      }
-
-      const turnoNorm = normalizarTurno(turnoPadrao);
+      // Verifica se o funcionário tem folga em dias específicos da semana na imagem extraída
+      const diasSemanaComFolga = new Set<string>(
+        itensColab.filter((i) => i.status === 'FOLGA' && i.diaSemana).map((i) => i.diaSemana)
+      );
 
       for (let dia = 1; dia <= diasNoMes; dia++) {
         const diaStr = String(dia).padStart(2, '0');
@@ -821,15 +948,34 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
         const dt = new Date(`${dataIso}T12:00:00`);
         const diaSemana = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SAB'][dt.getDay()];
 
-        // Se já foi extraído da imagem para este dia, preserva exatamente o da imagem!
+        // 1. Se este dia já foi extraído diretamente da imagem, preserva 100% intacto!
         const existente = itensColab.find((i) => i.data === dataIso);
         if (existente) {
           novosItens.push(existente);
           continue;
         }
 
-        // Caso contrário, gera revezamento 6x1 contínuo para o restante do mês
-        const ehFolga = (dia + cIdx * 2) % 7 === 0;
+        // 2. Se houver um item extraído para o mesmo dia da semana (padrão semanal) ou ciclo de dias lidos, replica fielmente
+        const modeloPorDiaSemana = itensColab.find((i) => i.diaSemana === diaSemana);
+        const modeloCiclo =
+          itensColab.length >= 2 ? itensColab[(dia - 1) % itensColab.length] : undefined;
+        const modeloRef = modeloPorDiaSemana || modeloCiclo;
+
+        if (modeloRef) {
+          novosItens.push({
+            ...modeloRef,
+            tempId: `proj-${cIdx}-${dia}-${Date.now()}`,
+            data: dataIso,
+            diaSemana,
+            observacao: `Replicado a partir do padrão extraído da imagem (${modeloRef.data})`,
+          });
+          continue;
+        }
+
+        const ehFolga =
+          diasSemanaComFolga.size > 0
+            ? diasSemanaComFolga.has(diaSemana)
+            : diaSemana === 'DOM';
 
         novosItens.push({
           tempId: `proj-${cIdx}-${dia}-${Date.now()}`,
@@ -837,104 +983,24 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
           funcionarioId: c.funcionarioId || '',
           data: dataIso,
           diaSemana,
-          turno: ehFolga ? 'Folga' : turnoNorm.turno,
-          horarioInicio: ehFolga ? '00:00' : turnoNorm.horarioInicio,
-          horarioFim: ehFolga ? '00:00' : turnoNorm.horarioFim,
-          status: ehFolga ? 'FOLGA' : 'TRABALHO',
+          turno: ehFolga ? 'Folga' : turnoBase,
+          horarioInicio: ehFolga ? '00:00' : horarioInicioBase,
+          horarioFim: ehFolga ? '00:00' : horarioFimBase,
+          intervalo: ehFolga ? '—' : intervaloBase,
+          setor: setorBase,
+          funcao: funcaoBase,
+          status: ehFolga ? 'FOLGA' : statusTrabalhoBase,
           confianca: 'ALTA',
-          observacao: 'Projeção mensal de revezamento 6x1',
+          statusConferencia: 'CONFIRMADO',
+          observacao: 'Projeção mensal baseada no horário extraído da imagem',
         });
       }
     });
 
     setItensEscala(novosItens);
     setMensagemStatus(
-      `Escala expandida com sucesso para todos os ${diasNoMes} dias do mês de ${mesAnoReferencia} (${colabs.length} colaboradores). Pronta para sincronizar com o Planner!`
+      `Escala projetada para todos os ${diasNoMes} dias de ${mesAnoReferencia} preservando os horários e folgas reais de cada funcionário!`
     );
-  };
-
-  // Fallback heurístico inteligente caso haja indisponibilidade transitória
-  const realizarFallbackInteligente = () => {
-    const [ano, mes] = mesAnoReferencia.split('-');
-    const anoNum = parseInt(ano, 10);
-    const mesNum = parseInt(mes, 10);
-    const diasNoMes = new Date(anoNum, mesNum, 0).getDate();
-
-    const cadastrados = funcionarios.slice(0, 4).map((f) => ({
-      nomeOriginal: f.nome,
-      jaCadastrado: true,
-      funcionarioId: f.id,
-      confianca: 'ALTA' as const,
-      motivoCorrespondencia: 'Colaborador ativo do posto',
-    }));
-
-    const novosNomes = ['Lucas Andrade (Frentista Horista)', 'Marcos Vinicius (Caixa Manhã)'];
-    const naoCadastrados = novosNomes.map((n) => ({
-      nomeOriginal: n,
-      jaCadastrado: false,
-      confianca: 'MEDIA' as const,
-      motivoCorrespondencia: 'Identificado no cabeçalho da imagem',
-      sugestaoCadastroPrevio: {
-        nome: n.split(' (')[0],
-        cargo: n.includes('Caixa') ? 'Operador de Caixa' : 'Frentista',
-        funcao: 'Atendimento de Pista',
-        turnoPreferencial: n.includes('Horista') ? 'Turno Horista' : 'Turno 1 - Manhã (06h - 14h)',
-        cpf: `123.${Math.floor(100 + Math.random() * 900)}.${Math.floor(100 + Math.random() * 900)}-10`,
-      },
-    }));
-
-    const todosColabs = [...cadastrados, ...naoCadastrados];
-    setColaboradoresDetectados(todosColabs);
-
-    const itens: ItemEscalaExtraido[] = [];
-    todosColabs.forEach((c, cIdx) => {
-      for (let dia = 1; dia <= diasNoMes; dia++) {
-        const diaStr = String(dia).padStart(2, '0');
-        const dataStr = `${ano}-${mes}-${diaStr}`;
-        const ehFolga = (dia + cIdx * 2) % 7 === 0;
-
-        let turnoSelecionado = 'Turno 1 - Manhã (06h - 14h)';
-        let hInicio = '06:00';
-        let hFim = '14:00';
-
-        if (cIdx % 3 === 1) {
-          turnoSelecionado = 'Turno 2 - Tarde (14h - 22h)';
-          hInicio = '14:00';
-          hFim = '22:00';
-        } else if (cIdx % 3 === 2) {
-          turnoSelecionado = 'Turno Horista';
-          hInicio = '08:00';
-          hFim = '14:00';
-        }
-
-        const dt = new Date(`${dataStr}T12:00:00`);
-        const diaSemana = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SAB'][dt.getDay()];
-
-        itens.push({
-          tempId: `heuristica-${cIdx}-${dia}`,
-          funcionarioNome: c.nomeOriginal,
-          funcionarioId: c.funcionarioId || '',
-          data: dataStr,
-          diaSemana,
-          turno: ehFolga ? 'Folga' : turnoSelecionado,
-          horarioInicio: ehFolga ? '00:00' : hInicio,
-          horarioFim: ehFolga ? '00:00' : hFim,
-          status: ehFolga ? 'FOLGA' : 'TRABALHO',
-          confianca: 'MEDIA',
-          observacao: 'Extraído da foto da escala',
-        });
-      }
-    });
-
-    setItensEscala(itens);
-    setTituloDocumento(`Escala Operacional Posto — ${mes}/${ano}`);
-    setDiagnostico({
-      tipoDocumentoIdentificado: 'Quadro Mensal Operacional',
-      qualidadeImagem: 'BOA',
-      observacoesGerais: 'Grade gerada com sucesso via contingência de padrões operacionais cobrindo todo o mês.',
-      mesReferencia: mesAnoReferencia,
-    });
-    setMensagemStatus(`Grade estruturada para todos os ${diasNoMes} dias do mês! Confira os colaboradores e sincronize com o Planner.`);
   };
 
   // Cadastro prévio individual
@@ -1230,7 +1296,19 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
 
       setColaboradoresDetectados(novosColabsState);
 
-      // Grava no Firestore
+      const importacaoId = `imp-escala-${Date.now()}`;
+      const novaVersaoNum = (escalasImportadas?.length || 0) + 1;
+      const agoraIso = new Date().toISOString();
+
+      // Se modoImportacao === 'SUBSTITUIR', limpar escalas do mesmo mês antes de gravar
+      if (modoImportacao === 'SUBSTITUIR') {
+        const escalasMes = escalas.filter((e) => e.data.startsWith(mesAnoReferencia));
+        for (const ant of escalasMes) {
+          await repoEscalas.delete(postoId, ant.id);
+        }
+      }
+
+      // Grava no Firestore respeitando o modo de importação selecionado
       for (const item of itensEscala) {
         const nomeTrim = item.funcionarioNome.toLowerCase().trim();
         let finalFuncId = item.funcionarioId || mapaFuncIdPorNome.get(nomeTrim);
@@ -1266,6 +1344,32 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
         const dataIso = normalizarDataParaIso(item.data, mesAnoReferencia);
         const id = `escala-${finalFuncId}-${dataIso}`;
         const funcVinculado = funcionarios.find((f) => f.id === finalFuncId);
+        const escalaExistente = escalas.find((e) => e.id === id);
+
+        // No modo MESCLAR, se já existir um turno de trabalho e o novo estiver em branco, preserva o anterior
+        if (modoImportacao === 'MESCLAR' && escalaExistente && escalaExistente.status === 'TRABALHO' && !item.horarioInicio) {
+          continue;
+        }
+
+        const historicoAntigo = escalaExistente?.historicoAlteracoes || [];
+        const mudouHorario =
+          escalaExistente &&
+          (escalaExistente.horarioInicio !== item.horarioInicio ||
+            escalaExistente.horarioFim !== item.horarioFim ||
+            escalaExistente.status !== item.status);
+
+        const novoHistorico = mudouHorario
+          ? [
+              ...historicoAntigo,
+              {
+                dataHora: agoraIso,
+                usuario: userProfile?.nome || 'Operador',
+                acao: `Importação OCR (${modoImportacao}) v${novaVersaoNum}`,
+                valorAnterior: `${escalaExistente.turno} (${escalaExistente.horarioInicio}-${escalaExistente.horarioFim})`,
+                valorNovo: `${item.turno} (${item.horarioInicio}-${item.horarioFim})`,
+              },
+            ]
+          : historicoAntigo;
 
         const escalaObj: Escala = {
           id,
@@ -1273,17 +1377,88 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
           funcionarioId: finalFuncId,
           funcionarioNome: funcVinculado?.nome || item.funcionarioNome,
           data: dataIso,
+          diaSemana: item.diaSemana,
           turno: item.turno,
           horarioInicio: item.horarioInicio,
           horarioFim: item.horarioFim,
+          intervalo: item.intervalo || '1h (Intrajornada)',
+          setor: item.setor || funcVinculado?.setor || 'Pista',
+          funcao: item.funcao || funcVinculado?.funcao || funcVinculado?.cargo || 'Frentista',
           status: item.status,
+          codigoOriginal: item.codigoOriginal,
+          statusConferencia: 'CONFIRMADO',
+          escalaImportadaId: importacaoId,
+          versaoImportacao: novaVersaoNum,
           observacao: item.observacao || 'Importado via Escanear Escala',
-          criadoEm: new Date().toISOString(),
-          atualizadoEm: new Date().toISOString(),
+          historicoAlteracoes: novoHistorico,
+          criadoEm: escalaExistente?.criadoEm || agoraIso,
+          atualizadoEm: agoraIso,
         };
 
         await repoEscalas.save(postoId, escalaObj);
       }
+
+      // Arquivar a escala original importada (Requisito 10 e 19: Não perder a escala original)
+      const registroImportacao: EscalaImportada = {
+        id: importacaoId,
+        postoId,
+        versao: novaVersaoNum,
+        tituloEscala: tituloDocumento || `Escala Importada ${mesAnoReferencia}`,
+        mesReferencia: mesAnoReferencia,
+        tipoDocumentoIdentificado: diagnostico?.tipoDocumentoIdentificado || 'Escala Digitalizada',
+        qualidadeImagem: diagnostico?.qualidadeImagem || 'BOA',
+        imagemOriginalBase64: imagemOriginal || imagemPreview || undefined,
+        copiaFielReconhecida: diagnostico?.copiaFielReconhecida || '',
+        simbolosIdentificados: diagnostico?.simbolosEAbreviacoes || [],
+        dadosExtraidosOriginais: itensEscala.map((i) => ({
+          funcionarioNome: i.funcionarioNome,
+          data: i.data,
+          diaSemana: i.diaSemana,
+          horarioInicio: i.horarioInicio,
+          horarioFim: i.horarioFim,
+          intervalo: i.intervalo,
+          turno: i.turno,
+          setor: i.setor,
+          funcao: i.funcao,
+          status: i.status,
+          observacao: i.observacao,
+          codigoOriginal: i.codigoOriginal,
+        })),
+        dadosCorrigidos: itensEscala.map((i) => ({
+          funcionarioNome: i.funcionarioNome,
+          funcionarioId: i.funcionarioId,
+          data: i.data,
+          diaSemana: i.diaSemana,
+          horarioInicio: i.horarioInicio,
+          horarioFim: i.horarioFim,
+          intervalo: i.intervalo,
+          turno: i.turno,
+          setor: i.setor,
+          funcao: i.funcao,
+          status: i.status,
+          observacao: i.observacao,
+          statusConferencia: 'CONFIRMADO',
+        })),
+        conflitosDetectados: diagnostico?.conflitosDetectados || [],
+        modoImportacao,
+        statusImportacao: 'CONFIRMADA',
+        totalRegistros: itensEscala.length,
+        usuarioResponsavelId: userProfile?.uid || 'anon',
+        usuarioResponsavelNome: userProfile?.nome || 'Operador',
+        dataImportacao: agoraIso,
+        criadoEm: agoraIso,
+        atualizadoEm: agoraIso,
+        historicoAlteracoes: [
+          {
+            dataHora: agoraIso,
+            usuarioNome: userProfile?.nome || 'Operador',
+            acao: `Importação e validação concluída (${modoImportacao})`,
+            detalhes: `${itensEscala.length} registros vinculados ao Planner (Versão v${novaVersaoNum}).`,
+          },
+        ],
+      };
+
+      await repoEscalasImportadas.save(postoId, registroImportacao);
 
       await registrarAuditoria(
         postoId,
@@ -1584,11 +1759,35 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
 
                   {/* Seletor de Filtros OCR */}
                   <div className="bg-white p-2 rounded-lg border border-slate-200 space-y-1.5 text-left">
-                    <div className="text-[10px] font-bold uppercase text-slate-500 flex items-center gap-1">
-                      <Sliders className="w-3 h-3 text-purple-600" />
-                      Filtros de Visão Computacional para OCR:
+                    <div className="text-[10px] font-bold uppercase text-slate-500 flex items-center justify-between gap-1">
+                      <span className="flex items-center gap-1">
+                        <Sliders className="w-3 h-3 text-purple-600" />
+                        Filtros de Correção Visual & Alinhamento OCR:
+                      </span>
+                      <span className="font-mono text-purple-700">Alinhar: {inclinacaoFina}°</span>
                     </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-[11px]">
+                    <div className="flex items-center gap-2 pb-1">
+                      <span className="text-[10px] text-slate-500 whitespace-nowrap">Desinclinar:</span>
+                      <input
+                        type="range"
+                        min={-15}
+                        max={15}
+                        step={1}
+                        value={inclinacaoFina}
+                        onChange={(e) => setInclinacaoFina(Number(e.target.value))}
+                        className="w-full accent-purple-600 cursor-pointer h-1.5"
+                      />
+                      {inclinacaoFina !== 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setInclinacaoFina(0)}
+                          className="text-[10px] text-purple-700 underline font-semibold"
+                        >
+                          0°
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 text-[11px]">
                       <button
                         type="button"
                         onClick={() => setFiltroAtivo('nitidez')}
@@ -1598,7 +1797,18 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
                             : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                         }`}
                       >
-                        ✨ Nitidez & Contraste
+                        ✨ Nitidez
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFiltroAtivo('reducao_ruido')}
+                        className={`px-2 py-1 rounded font-semibold text-center transition border ${
+                          filtroAtivo === 'reducao_ruido'
+                            ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
+                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        🧹 Sem Ruído
                       </button>
                       <button
                         type="button"
@@ -1609,7 +1819,7 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
                             : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                         }`}
                       >
-                        📄 P&B Binarizado
+                        📄 P&B
                       </button>
                       <button
                         type="button"
@@ -1620,7 +1830,7 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
                             : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                         }`}
                       >
-                        ☀️ Clarear Foto
+                        ☀️ Iluminar
                       </button>
                       <button
                         type="button"
@@ -2102,6 +2312,79 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
                   </div>
                 )}
 
+                {/* Painel Completo de Conferência, Comparação com a Imagem, Cópia Fiel e Histórico de Versões */}
+                <PainelConferenciaEscalaOCR
+                  imagemOriginal={imagemPreview || imagemOriginal}
+                  copiaFielReconhecida={diagnostico?.copiaFielReconhecida}
+                  simbolosEAbreviacoes={diagnostico?.simbolosEAbreviacoes}
+                  trocasDeEscalaIdentificadas={diagnostico?.trocasDeEscalaIdentificadas}
+                  conflitosDetectados={diagnostico?.conflitosDetectados}
+                  itens={itensEscala}
+                  escalasAtuaisNoPlanner={escalas}
+                  escalasImportadasAnteriores={escalasImportadas}
+                  modoImportacao={modoImportacao}
+                  onChangeModoImportacao={setModoImportacao}
+                  onUpdateItem={(tempId, changes) => {
+                    setItensEscala((prev) =>
+                      prev.map((it) => (it.tempId === tempId ? { ...it, ...changes } : it))
+                    );
+                  }}
+                  onAddItemManual={() => {
+                    const dataPadrao = `${mesAnoReferencia}-01`;
+                    setItensEscala((prev) => [
+                      {
+                        tempId: `manual-${Date.now()}`,
+                        funcionarioNome: funcionarios[0]?.nome || 'Novo Colaborador',
+                        funcionarioId: funcionarios[0]?.id || '',
+                        data: dataPadrao,
+                        diaSemana: 'SEG',
+                        turno: 'Turno 1 - Manhã (06h - 14h)',
+                        horarioInicio: '06:00',
+                        horarioFim: '14:00',
+                        intervalo: '1h',
+                        setor: 'Pista',
+                        funcao: 'Frentista',
+                        status: 'TRABALHO',
+                        confianca: 'ALTA',
+                        statusConferencia: 'CONFIRMADO',
+                        observacao: 'Incluído manualmente na tela de conferência',
+                      },
+                      ...prev,
+                    ]);
+                  }}
+                  onRemoveItem={handleRemoverItem}
+                  onConfirmarTodosRevisao={() => {
+                    setItensEscala((prev) =>
+                      prev.map((it) => ({ ...it, statusConferencia: 'CONFIRMADO' }))
+                    );
+                  }}
+                  onRestaurarVersaoImportada={(imp) => {
+                    if (imp.imagemOriginalBase64) {
+                      setImagemOriginal(imp.imagemOriginalBase64);
+                    }
+                    setTituloDocumento(imp.tituloEscala);
+                    setMesAnoReferencia(imp.mesReferencia || mesAnoReferencia);
+                    setItensEscala(
+                      (imp.dadosCorrigidos || []).map((d, idx) => ({
+                        tempId: `restaurado-${idx}-${Date.now()}`,
+                        funcionarioNome: d.funcionarioNome,
+                        funcionarioId: d.funcionarioId || '',
+                        data: d.data,
+                        diaSemana: d.diaSemana,
+                        turno: d.turno,
+                        horarioInicio: d.horarioInicio,
+                        horarioFim: d.horarioFim,
+                        intervalo: d.intervalo,
+                        setor: d.setor,
+                        funcao: d.funcao,
+                        status: d.status,
+                        statusConferencia: d.statusConferencia || 'CONFIRMADO',
+                        observacao: d.observacao,
+                      }))
+                    );
+                  }}
+                />
+
                 {/* Alternador de Modo de Visualização: Matriz da Grade vs Lista Detalhada */}
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
                   <div className="flex items-center gap-1.5">
@@ -2256,9 +2539,42 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
                                 }
 
                                 const isFolga = item.status === 'FOLGA' || item.turno === 'Folga';
+                                const isFerias = item.status === 'FERIAS';
+                                const isAfastado = item.status === 'AFASTADO';
+                                const isPlantao = item.status === 'PLANTAO';
                                 const isHorista = item.status === 'TRABALHO' && item.turno.includes('Horista');
-                                const isT2 = item.status === 'TRABALHO' && (item.turno.includes('Turno 2') || item.turno.includes('Tarde') || item.turno.includes('14h'));
-                                const isT1 = item.status === 'TRABALHO' && !isHorista && !isT2;
+                                const isT3 =
+                                  item.status === 'TRABALHO' &&
+                                  (item.turno.includes('Noite') ||
+                                    item.turno.includes('Turno 3') ||
+                                    item.horarioInicio.startsWith('22:'));
+                                const isT2 =
+                                  item.status === 'TRABALHO' &&
+                                  (item.turno.includes('Turno 2') ||
+                                    item.turno.includes('Tarde') ||
+                                    item.horarioInicio.startsWith('14:'));
+                                const isT1 =
+                                  item.status === 'TRABALHO' && !isHorista && !isT2 && !isT3;
+
+                                const labelCurto = isFolga
+                                  ? 'FOLGA'
+                                  : isFerias
+                                  ? 'FÉR'
+                                  : isAfastado
+                                  ? 'AFA'
+                                  : isPlantao
+                                  ? 'PLT'
+                                  : isHorista
+                                  ? 'HOR'
+                                  : isT3
+                                  ? 'T3'
+                                  : isT2
+                                  ? 'T2'
+                                  : isT1 && item.horarioInicio === '06:00' && item.horarioFim === '14:00'
+                                  ? 'T1'
+                                  : `${item.horarioInicio}`;
+
+                                const horarioTooltip = `${item.turno} (${item.horarioInicio} às ${item.horarioFim}) • Setor: ${item.setor || 'Pista'} • Clique para alternar`;
 
                                 return (
                                   <td key={diaIso} className="p-1 text-center border-r border-slate-100">
@@ -2271,41 +2587,73 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
                                       >
                                         FOLGA
                                       </button>
+                                    ) : isFerias ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleAlternarTurnoCelulaMatriz(colab.nome, diaIso)}
+                                        title={horarioTooltip}
+                                        className="w-full h-8 px-1 bg-purple-100 hover:bg-purple-200 border border-purple-300 text-purple-900 font-bold text-[10px] rounded transition flex items-center justify-center shadow-2xs cursor-pointer"
+                                      >
+                                        FÉR
+                                      </button>
+                                    ) : isAfastado ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleAlternarTurnoCelulaMatriz(colab.nome, diaIso)}
+                                        title={horarioTooltip}
+                                        className="w-full h-8 px-1 bg-rose-100 hover:bg-rose-200 border border-rose-300 text-rose-900 font-bold text-[10px] rounded transition flex items-center justify-center shadow-2xs cursor-pointer"
+                                      >
+                                        AFA
+                                      </button>
+                                    ) : isPlantao ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleAlternarTurnoCelulaMatriz(colab.nome, diaIso)}
+                                        title={horarioTooltip}
+                                        className="w-full h-8 px-1 bg-indigo-100 hover:bg-indigo-200 border border-indigo-300 text-indigo-900 font-extrabold text-[10px] rounded transition flex flex-col items-center justify-center leading-none shadow-2xs cursor-pointer"
+                                      >
+                                        <span>PLT</span>
+                                        <span className="text-[8px] font-mono opacity-80">{item.horarioInicio}</span>
+                                      </button>
                                     ) : isHorista ? (
                                       <button
                                         type="button"
                                         onClick={() => handleAlternarTurnoCelulaMatriz(colab.nome, diaIso)}
-                                        title="Turno Horista — Clique para alternar"
-                                        className="w-full h-8 px-1 bg-teal-100 hover:bg-teal-200 border border-teal-300 text-teal-900 font-extrabold text-[10px] rounded transition flex items-center justify-center shadow-2xs cursor-pointer"
+                                        title={horarioTooltip}
+                                        className="w-full h-8 px-1 bg-teal-100 hover:bg-teal-200 border border-teal-300 text-teal-900 font-extrabold text-[10px] rounded transition flex flex-col items-center justify-center leading-none shadow-2xs cursor-pointer"
                                       >
-                                        HOR
+                                        <span>HOR</span>
+                                        <span className="text-[8px] font-mono opacity-80">{item.horarioInicio}</span>
+                                      </button>
+                                    ) : isT3 ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleAlternarTurnoCelulaMatriz(colab.nome, diaIso)}
+                                        title={horarioTooltip}
+                                        className="w-full h-8 px-1 bg-violet-100 hover:bg-violet-200 border border-violet-300 text-violet-900 font-extrabold text-[10px] rounded transition flex flex-col items-center justify-center leading-none shadow-2xs cursor-pointer"
+                                      >
+                                        <span>T3</span>
+                                        <span className="text-[8px] font-mono opacity-80">{item.horarioInicio}</span>
                                       </button>
                                     ) : isT2 ? (
                                       <button
                                         type="button"
                                         onClick={() => handleAlternarTurnoCelulaMatriz(colab.nome, diaIso)}
-                                        title="Turno 2 - Tarde (14h - 22h) — Clique para alternar"
-                                        className="w-full h-8 px-1 bg-blue-100 hover:bg-blue-200 border border-blue-300 text-blue-900 font-extrabold text-[11px] rounded transition flex items-center justify-center shadow-2xs cursor-pointer"
+                                        title={horarioTooltip}
+                                        className="w-full h-8 px-1 bg-blue-100 hover:bg-blue-200 border border-blue-300 text-blue-900 font-extrabold text-[10px] rounded transition flex flex-col items-center justify-center leading-none shadow-2xs cursor-pointer"
                                       >
-                                        T2
-                                      </button>
-                                    ) : isT1 ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleAlternarTurnoCelulaMatriz(colab.nome, diaIso)}
-                                        title="Turno 1 - Manhã (06h - 14h) — Clique para alternar"
-                                        className="w-full h-8 px-1 bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-900 font-extrabold text-[11px] rounded transition flex items-center justify-center shadow-2xs cursor-pointer"
-                                      >
-                                        T1
+                                        <span>T2</span>
+                                        <span className="text-[8px] font-mono opacity-80">{item.horarioInicio}</span>
                                       </button>
                                     ) : (
                                       <button
                                         type="button"
                                         onClick={() => handleAlternarTurnoCelulaMatriz(colab.nome, diaIso)}
-                                        title={`${item.turno} — Clique para alternar`}
-                                        className="w-full h-8 px-1 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 text-emerald-900 font-bold text-[10px] rounded transition flex items-center justify-center shadow-2xs truncate cursor-pointer"
+                                        title={horarioTooltip}
+                                        className="w-full h-8 px-1 bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-900 font-extrabold text-[10px] rounded transition flex flex-col items-center justify-center leading-none shadow-2xs cursor-pointer"
                                       >
-                                        TRAB
+                                        <span>{labelCurto}</span>
+                                        <span className="text-[8px] font-mono opacity-80">{item.horarioFim}</span>
                                       </button>
                                     )}
                                   </td>
@@ -2382,13 +2730,53 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
                                   onChange={(e) => handleAlterarTurnoItem(item.tempId, e.target.value)}
                                   className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-[11px] font-medium text-slate-800 focus:ring-1 focus:ring-purple-500 focus:outline-none"
                                 >
+                                  {![
+                                    'Turno 1 - Manhã (06h - 14h)',
+                                    'Turno 2 - Tarde (14h - 22h)',
+                                    'Turno 3 - Noite (22h - 06h)',
+                                    'Turno Horista',
+                                    'Plantão',
+                                    'Folga',
+                                    'Férias',
+                                    'Afastado',
+                                  ].includes(item.turno) && (
+                                    <option value={item.turno}>{item.turno}</option>
+                                  )}
                                   <option value="Turno 1 - Manhã (06h - 14h)">Turno 1 — Manhã (06h - 14h)</option>
                                   <option value="Turno 2 - Tarde (14h - 22h)">Turno 2 — Tarde (14h - 22h)</option>
+                                  <option value="Turno 3 - Noite (22h - 06h)">Turno 3 — Noite (22h - 06h)</option>
                                   <option value="Turno Horista">Turno Horista (Flexível / Por Hora)</option>
+                                  <option value="Plantão">Plantão / 12x36</option>
                                   <option value="Folga">Folga</option>
+                                  <option value="Férias">Férias</option>
+                                  <option value="Afastado">Afastado / Atestado</option>
                                 </select>
-                                <div className="text-[10px] text-slate-400 font-mono mt-0.5">
-                                  {item.horarioInicio} às {item.horarioFim}
+                                <div className="flex items-center gap-1 text-[10px] text-slate-500 font-mono mt-1">
+                                  <input
+                                    type="time"
+                                    value={item.horarioInicio === 'não identificado' ? '06:00' : item.horarioInicio}
+                                    onChange={(e) =>
+                                      setItensEscala((prev) =>
+                                        prev.map((it) =>
+                                          it.tempId === item.tempId ? { ...it, horarioInicio: e.target.value } : it
+                                        )
+                                      )
+                                    }
+                                    className="px-1 py-0.5 border border-slate-200 rounded bg-slate-50 text-[10px]"
+                                  />
+                                  <span>às</span>
+                                  <input
+                                    type="time"
+                                    value={item.horarioFim === 'não identificado' ? '14:00' : item.horarioFim}
+                                    onChange={(e) =>
+                                      setItensEscala((prev) =>
+                                        prev.map((it) =>
+                                          it.tempId === item.tempId ? { ...it, horarioFim: e.target.value } : it
+                                        )
+                                      )
+                                    }
+                                    className="px-1 py-0.5 border border-slate-200 rounded bg-slate-50 text-[10px]"
+                                  />
                                 </div>
                               </td>
                               <td className="py-2 px-3">
@@ -2400,12 +2788,15 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
                                   className={`px-2 py-1 rounded text-[11px] font-bold border-0 cursor-pointer ${
                                     item.status === 'TRABALHO'
                                       ? 'bg-emerald-100 text-emerald-800'
+                                      : item.status === 'PLANTAO'
+                                      ? 'bg-indigo-100 text-indigo-800'
                                       : item.status === 'FOLGA'
                                       ? 'bg-slate-100 text-slate-700'
                                       : 'bg-amber-100 text-amber-800'
                                   }`}
                                 >
                                   <option value="TRABALHO">TRABALHO</option>
+                                  <option value="PLANTAO">PLANTÃO</option>
                                   <option value="FOLGA">FOLGA</option>
                                   <option value="AFASTADO">AFASTADO / ATESTADO</option>
                                   <option value="FERIAS">FÉRIAS</option>

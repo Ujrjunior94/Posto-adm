@@ -52,10 +52,13 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
   auditoria,
   onLimparDemonstracao,
 }) => {
-  const [tipo, setTipo] = useState<TipoRelatorio>('FECHAMENTOS');
+  const [tipo, setTipo] = useState<TipoRelatorio>('ESCALAS');
+  const [subModoEscala, setSubModoEscala] = useState<'DIARIO' | 'SEMANAL' | 'MENSAL' | 'FUNCIONARIO' | 'SETOR'>('MENSAL');
+  const [filtroFuncRelatorio, setFiltroFuncRelatorio] = useState<string>('TODOS');
+  const [filtroSetorRelatorio, setFiltroSetorRelatorio] = useState<string>('TODOS');
   const [busca, setBusca] = useState('');
   const [dataInicio, setDataInicio] = useState(new Date().toISOString().slice(0, 7) + '-01');
-  const [dataFim, setDataFim] = useState(new Date().toISOString().slice(0, 10));
+  const [dataFim, setDataFim] = useState(new Date().toISOString().slice(0, 7) + '-31');
 
   const handleImprimir = () => {
     window.print();
@@ -102,18 +105,62 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
           String(f.recolhimento?.outros ?? ''),
         ]);
       });
+    } else if (tipo === 'ESCALAS') {
+      linhas.push([
+        'Funcionario',
+        'Data',
+        'Dia_Semana',
+        'Entrada',
+        'Saida',
+        'Intervalo',
+        'Turno',
+        'Setor',
+        'Funcao',
+        'Status',
+        'Observacoes',
+      ]);
+      escalas.forEach((e) => {
+        linhas.push([
+          e.funcionarioNome,
+          e.data,
+          e.diaSemana || '',
+          e.horarioInicio,
+          e.horarioFim,
+          e.intervalo || '1h',
+          e.turno,
+          e.setor || 'Pista',
+          e.funcao || 'Frentista',
+          e.status,
+          e.observacao || '',
+        ]);
+      });
     } else if (tipo === 'AFERICOES') {
-      linhas.push(['Data', 'Hora', 'Bico', 'Produto', 'Nominal', 'Aferido', 'Diferenca_ml', 'Resultado']);
+      linhas.push([
+        'Data',
+        'Hora',
+        'Bico',
+        'Produto',
+        'Nominal',
+        'Aferido',
+        'Diferenca_ml',
+        'Resultado',
+        'Encerrante_Foto',
+        'Lacre_Inmetro',
+        'Responsavel',
+      ]);
       afericoes.forEach((a) => {
         linhas.push([
           a.data,
           a.hora,
-          a.bicoId,
+          String(a.bicoNumero || a.bicoId),
           a.produto,
           String(a.volumeNominal),
           String(a.volumeAferido),
           String(Math.round(a.diferenca * 1000)),
           a.resultado,
+          String(a.encerranteFinal ?? a.encerranteLeitura ?? ''),
+          a.lacreInmetro || '',
+          a.responsavelNome || '',
         ]);
       });
     } else if (tipo === 'AUDITORIA') {
@@ -186,9 +233,11 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
             onChange={(e) => setTipo(e.target.value as TipoRelatorio)}
             className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
           >
+            <option value="ESCALAS">Escalas & Planner (Diário, Semanal, Mensal, Funcionário, Setor)</option>
+            <option value="AFERICOES">Aferições de Bicos (Com Informações da Foto)</option>
+            <option value="TANQUES">Cadastro de Bicos & Tanques</option>
             <option value="FECHAMENTOS">Fechamentos de Caixa</option>
             <option value="FALTAS">Faltas e Ocorrências</option>
-            <option value="AFERICOES">Aferições de Bicos</option>
             <option value="DENSIDADES">Análises de Densidade</option>
             <option value="CONFORMIDADE">Conformidade e Checklists</option>
             <option value="FUNCIONARIOS">Quadro de Funcionários</option>
@@ -244,6 +293,178 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
           </div>
           <div className="text-right text-xs text-slate-400">Ambiente de Produção</div>
         </div>
+
+        {/* Relatório Completo de Escalas e Planner (Requisito 18) */}
+        {tipo === 'ESCALAS' && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 p-3 rounded-lg border border-slate-200 print:hidden">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {(
+                  [
+                    { id: 'DIARIO', label: 'Relatório Diário' },
+                    { id: 'SEMANAL', label: 'Relatório Semanal' },
+                    { id: 'MENSAL', label: 'Relatório Mensal' },
+                    { id: 'FUNCIONARIO', label: 'Por Funcionário' },
+                    { id: 'SETOR', label: 'Por Setor' },
+                  ] as const
+                ).map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setSubModoEscala(m.id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      subModoEscala === m.id
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <select
+                  value={filtroFuncRelatorio}
+                  onChange={(e) => setFiltroFuncRelatorio(e.target.value)}
+                  className="px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-semibold"
+                >
+                  <option value="TODOS">Todos os Funcionários</option>
+                  {funcionarios.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.nome}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  value={filtroSetorRelatorio}
+                  onChange={(e) => setFiltroSetorRelatorio(e.target.value)}
+                  className="px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-semibold"
+                >
+                  <option value="TODOS">Todos os Setores</option>
+                  <option value="Pista">Pista</option>
+                  <option value="Caixa">Caixa</option>
+                  <option value="Conveniência">Conveniência</option>
+                  <option value="Lubrificação">Lubrificação</option>
+                  <option value="Gerência">Gerência</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="text-xs font-bold text-slate-600 uppercase">
+              Modalidade Selecionada: {subModoEscala}
+            </div>
+
+            <table className="w-full text-xs text-left border-collapse">
+              <thead className="bg-slate-100 border-b border-slate-200 font-bold text-slate-700 uppercase">
+                <tr>
+                  <th className="py-2.5 px-3">Funcionário</th>
+                  <th className="py-2.5 px-3">Data / Dia</th>
+                  <th className="py-2.5 px-3">Entrada</th>
+                  <th className="py-2.5 px-3">Saída</th>
+                  <th className="py-2.5 px-3">Intervalo</th>
+                  <th className="py-2.5 px-3">Turno</th>
+                  <th className="py-2.5 px-3">Setor / Função</th>
+                  <th className="py-2.5 px-3">Status</th>
+                  <th className="py-2.5 px-3">Observações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {escalas
+                  .filter((e) => {
+                    if (dataInicio && e.data < dataInicio) return false;
+                    if (dataFim && e.data > dataFim) return false;
+                    if (subModoEscala === 'DIARIO' && dataInicio && e.data !== dataInicio) return false;
+                    if (filtroFuncRelatorio !== 'TODOS' && e.funcionarioId !== filtroFuncRelatorio) return false;
+                    if (filtroSetorRelatorio !== 'TODOS' && (e.setor || 'Pista') !== filtroSetorRelatorio) return false;
+                    if (busca.trim()) {
+                      const q = busca.toLowerCase();
+                      if (
+                        !e.funcionarioNome.toLowerCase().includes(q) &&
+                        !(e.setor || '').toLowerCase().includes(q) &&
+                        !e.turno.toLowerCase().includes(q)
+                      ) {
+                        return false;
+                      }
+                    }
+                    return true;
+                  })
+                  .sort((a, b) => a.data.localeCompare(b.data) || a.funcionarioNome.localeCompare(b.funcionarioNome))
+                  .map((e) => (
+                    <tr key={e.id} className="hover:bg-slate-50">
+                      <td className="py-2 px-3 font-bold text-slate-900">{e.funcionarioNome}</td>
+                      <td className="py-2 px-3 font-mono">
+                        {e.data} {e.diaSemana ? `(${e.diaSemana})` : ''}
+                      </td>
+                      <td className="py-2 px-3 font-mono font-semibold">{e.horarioInicio}</td>
+                      <td className="py-2 px-3 font-mono font-semibold">{e.horarioFim}</td>
+                      <td className="py-2 px-3">{e.intervalo || '1h'}</td>
+                      <td className="py-2 px-3">{e.turno}</td>
+                      <td className="py-2 px-3">
+                        {e.setor || 'Pista'} • {e.funcao || 'Frentista'}
+                      </td>
+                      <td className="py-2 px-3 font-bold">{e.status}</td>
+                      <td className="py-2 px-3 text-slate-500">{e.observacao || '—'}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Relatório de Cadastro de Bicos e Tanques */}
+        {tipo === 'TANQUES' && (
+          <div className="space-y-4">
+            <h4 className="text-xs font-bold uppercase text-slate-700">Tanques Cadastrados ({tanques.length})</h4>
+            <table className="w-full text-xs text-left border-collapse">
+              <thead className="bg-slate-50 border-b font-semibold text-slate-700 uppercase">
+                <tr>
+                  <th className="py-2 px-3">Código</th>
+                  <th className="py-2 px-3">Combustível</th>
+                  <th className="py-2 px-3">Capacidade</th>
+                  <th className="py-2 px-3">Estoque Atual</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {tanques.map((t) => (
+                  <tr key={t.id}>
+                    <td className="py-2 px-3 font-bold">{t.codigo}</td>
+                    <td className="py-2 px-3">{t.produto}</td>
+                    <td className="py-2 px-3 font-mono">{t.capacidadeNominal.toLocaleString('pt-BR')} L</td>
+                    <td className="py-2 px-3 font-mono font-bold">{t.volumeAtual.toLocaleString('pt-BR')} L</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <h4 className="text-xs font-bold uppercase text-slate-700 pt-2">Bicos Cadastrados ({bicos.length})</h4>
+            <table className="w-full text-xs text-left border-collapse">
+              <thead className="bg-slate-50 border-b font-semibold text-slate-700 uppercase">
+                <tr>
+                  <th className="py-2 px-3">Bico / Bomba</th>
+                  <th className="py-2 px-3">Combustível</th>
+                  <th className="py-2 px-3">Tanque Vinculado</th>
+                  <th className="py-2 px-3">Encerrante Atual</th>
+                  <th className="py-2 px-3">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {bicos.map((b) => (
+                  <tr key={b.id}>
+                    <td className="py-2 px-3 font-bold">
+                      Bico {String(b.numero).padStart(2, '0')} ({b.bomba} • Lado {b.lado})
+                    </td>
+                    <td className="py-2 px-3">{b.produto}</td>
+                    <td className="py-2 px-3 font-mono">{b.tanqueCodigo || b.tanqueId}</td>
+                    <td className="py-2 px-3 font-mono">{(b.encerranteAtual || 0).toLocaleString('pt-BR')} L</td>
+                    <td className="py-2 px-3 font-bold">{b.status}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {/* Tabela de Fechamentos */}
         {tipo === 'FECHAMENTOS' && (

@@ -22,6 +22,7 @@ export interface Funcionario {
   telefone: string;
   cargo: string;
   funcao: string;
+  setor?: string;
   status: FuncionarioStatus;
   dataAdmissao: string;
   turnoPreferencial: string;
@@ -31,7 +32,42 @@ export interface Funcionario {
   atualizadoEm: string;
 }
 
-export type EscalaStatus = 'TRABALHO' | 'FOLGA' | 'FERIAS' | 'AFASTADO' | 'AUSENTE' | 'SUBSTITUIDO';
+export type EscalaStatus =
+  | 'TRABALHO'
+  | 'FOLGA'
+  | 'PLANTAO'
+  | 'FERIAS'
+  | 'AFASTADO'
+  | 'AUSENTE'
+  | 'SUBSTITUIDO';
+
+export type StatusConferenciaEscala =
+  | 'CONFIRMADO'
+  | 'REVISAO'
+  | 'CONFLITO'
+  | 'NECESSITA_REVISAO'
+  | 'POSSIVEL_CONFLITO';
+
+export interface HistoricoAlteracaoEscala {
+  id?: string;
+  dataHora: string;
+  usuario?: string;
+  usuarioNome?: string;
+  acao: string;
+  campo?: string;
+  valorAnterior?: string;
+  valorNovo?: string;
+  detalhe?: string;
+  detalhes?: string;
+}
+
+export interface RegiaoImagemEscala {
+  xPercent: number;
+  yPercent: number;
+  larguraPercent: number;
+  alturaPercent: number;
+  rotulo?: string;
+}
 
 export interface Escala {
   id: string;
@@ -39,13 +75,117 @@ export interface Escala {
   funcionarioId: string;
   funcionarioNome?: string;
   data: string; // YYYY-MM-DD
-  turno: string; // 'Turno 1 - Manhã (06h - 14h)', 'Turno 2 - Tarde (14h - 22h)', 'Turno Horista'
-  horarioInicio: string;
-  horarioFim: string;
+  dataFormatada?: string; // DD/MM/AAAA
+  diaSemana?: string;
+  turno: string; // Manhã, Tarde, Noite, Horista, Plantão, Folga, Outro
+  horarioInicio: string; // Entrada HH:MM
+  horarioFim: string; // Saída HH:MM
+  intervalo?: string | null; // HH:MM — HH:MM ou null
+  setor?: string; // Caixa, Pista, Conveniência, Troca de Óleo, Gerência, etc.
+  funcao?: string; // Frentista, Operador de Caixa, etc.
   status: EscalaStatus;
+  statusConferencia?: StatusConferenciaEscala;
+  motivoConferencia?: string;
+  origem?: 'IMAGEM' | 'MANUAL';
+  escalaImportadaId?: string;
+  versaoImportacao?: number;
+  codigoOriginal?: string; // Símbolo, código ou abreviação lida na imagem
+  interpretacoesPossiveis?: string[];
+  possibilidadesDuvida?: string[]; // Alternativas caso haja dúvida no OCR
+  motivoAlerta?: string; // Motivo de revisão ou conflito
+  posicaoLinhaPercentual?: number; // 0..100 para zoom na região da imagem original
+  posicaoColunaPercentual?: number; // 0..100 para zoom na região da imagem original
+  regiaoImagem?: RegiaoImagemEscala;
+  trocaEscala?: string;
   observacao?: string;
+  historicoAlteracoes?: HistoricoAlteracaoEscala[];
   criadoEm: string;
   atualizadoEm: string;
+}
+
+export interface ConflitoEscalaDetectado {
+  id: string;
+  tipo:
+    | 'NOME_DUPLICADO'
+    | 'HORARIO_IMPOSSIVEL'
+    | 'DATA_INVALIDA'
+    | 'FUNCIONARIO_SEM_HORARIO'
+    | 'HORARIO_SEM_FUNCIONARIO'
+    | 'REGISTRO_DUPLICADO'
+    | 'CONFLITO_HORARIO'
+    | 'TEXTO_ILEGIVEL'
+    | 'INFORMACAO_CONFLITANTE'
+    | 'TEXTO_PARCIALMENTE_ILEGIVEL';
+  severidade: 'CONFLITO' | 'REVISAO';
+  funcionarioNome?: string;
+  data?: string;
+  descricao: string;
+  sugestaoOpcoes?: string[];
+  regiaoImagem?: RegiaoImagemEscala;
+  resolvido?: boolean;
+}
+
+export interface AlteracaoEscalaDetectada {
+  id: string;
+  escalaExistenteId?: string;
+  funcionarioId?: string;
+  funcionarioNome: string;
+  data: string;
+  antesHorario?: string;
+  depoisHorario?: string;
+  antesTurno?: string;
+  depoisTurno?: string;
+  antesSetor?: string;
+  depoisSetor?: string;
+  tipoMudanca?: 'NOVO_FUNCIONARIO' | 'FUNCIONARIO_REMOVIDO' | 'ALTERACAO_HORARIO' | 'TROCA_TURNO' | 'MUDANCA_SETOR';
+  horarioAnterior?: string;
+  turnoAnterior?: string;
+  setorAnterior?: string;
+  statusAnterior?: EscalaStatus;
+  novoHorario?: string;
+  novoTurno?: string;
+  novoSetor?: string;
+  novoStatus?: EscalaStatus;
+  confirmadaSubstituicao?: boolean;
+}
+
+export interface EscalaImportada {
+  id: string;
+  postoId: string;
+  dataImportacao: string;
+  tituloEscala?: string;
+  tituloDocumento?: string;
+  mesReferencia: string;
+  tipoDocumentoIdentificado?: string;
+  qualidadeImagem?: string;
+  imagemOriginalBase64?: string;
+  imagemMelhoradaBase64?: string;
+  imagemProcessadaBase64?: string;
+  filtroAplicado?: string;
+  rotacaoAplicada?: number;
+  copiaFielTexto?: string;
+  copiaFielReconhecida?: string[] | string;
+  simbolosIdentificados?: string[];
+  simbolosEAbreviacoes?: string[];
+  trocasIdentificadas?: string[];
+  trocasDeEscalaIdentificadas?: string[];
+  observacoesGerais?: string;
+  dadosExtraidos?: Array<Record<string, any>>;
+  dadosCorrigidos?: Array<Record<string, any>>;
+  dadosExtraidosOriginais?: Array<Record<string, unknown>>;
+  dadosCorrigidosConfirmados?: Array<Record<string, unknown>>;
+  conflitosDetectados?: ConflitoEscalaDetectado[];
+  alteracoesDetectadas?: AlteracaoEscalaDetectada[];
+  alteracoesIdentificadas?: AlteracaoEscalaDetectada[];
+  totalRegistros?: number;
+  usuarioResponsavelId: string;
+  usuarioResponsavelNome: string;
+  versao?: number;
+  modoImportacao?: 'SUBSTITUIR' | 'ATUALIZAR' | 'MESCLAR' | 'NOVA_VERSAO';
+  statusImportacao?: 'EM_CONFERENCIA' | 'CONFIRMADA' | 'SUBSTITUIDA' | 'CONFIRMADA_NO_PLANNER';
+  historicoAlteracoes: HistoricoAlteracaoEscala[];
+  criadoEm?: string;
+  atualizadoEm?: string;
 }
 
 export interface EscalaPattern {
@@ -168,6 +308,7 @@ export interface Bico {
   numero: number;
   bomba: string;
   tanqueId: string;
+  tanqueCodigo?: string;
   produto: string;
   lado: 'A' | 'B';
   status: 'ATIVO' | 'MANUTENCAO' | 'INATIVO';
@@ -180,6 +321,8 @@ export interface Bico {
   dataInicioDesconto?: string;
   dataFimDesconto?: string;
   ultimoEncerrante?: number;
+  lacreBomba?: string;
+  serieMedidor?: string;
   observacoes?: string;
   criadoEm: string;
   atualizadoEm: string;
@@ -191,17 +334,30 @@ export interface Afericao {
   id: string;
   postoId: string;
   bicoId: string;
+  bicoNumero?: number;
+  bombaNome?: string;
+  ladoBomba?: 'A' | 'B';
   tanqueId: string;
+  tanqueCodigo?: string;
   produto: string;
   funcionarioId: string;
+  responsavelNome?: string;
   data: string;
   hora: string;
   volumeNominal: number; // padrão 20.000L
   volumeAferido: number;
-  diferenca: number; // volumeAferido - volumeNominal (ml ou L)
-  toleranciaConfigurada: number; // ex: +-60ml ou +-0.060L
+  diferenca: number; // volumeAferido - volumeNominal (L)
+  toleranciaConfigurada: number; // ex: +-100ml (0.100L)
   resultado: AfericaoResultado;
   equipamento: string;
+  encerranteInicial?: number;
+  encerranteFinal?: number;
+  lacreInmetro?: string;
+  certificadoMedidor?: string;
+  temperaturaC?: number;
+  fotoEvidenciaBase64?: string;
+  resumoFotoIA?: string;
+  origemRegistro?: 'MANUAL' | 'FOTO_IA';
   observacao?: string;
   criadoEm: string;
 }

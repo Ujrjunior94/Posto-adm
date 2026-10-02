@@ -59,9 +59,25 @@
         "turno": { "type": "string", "maxLength": 50 },
         "horarioInicio": { "type": "string", "maxLength": 10 },
         "horarioFim": { "type": "string", "maxLength": 10 },
-        "status": { "type": "string", "enum": ["TRABALHO", "FOLGA", "FERIAS", "AFASTADO", "AUSENTE", "SUBSTITUIDO"] }
+        "status": { "type": "string", "enum": ["TRABALHO", "FOLGA", "FERIAS", "AFASTADO", "PLANTAO", "AUSENTE", "SUBSTITUIDO"] }
       },
       "required": ["id", "postoId", "funcionarioId", "data", "status"]
+    },
+    "escalaImportada": {
+      "title": "EscalaImportada",
+      "description": "Registro de escala importada via OCR com imagem original, dados extraídos e histórico de conferência",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "postoId": { "type": "string", "maxLength": 64 },
+        "dataImportacao": { "type": "string", "maxLength": 50 },
+        "tituloEscala": { "type": "string", "maxLength": 200 },
+        "mesReferencia": { "type": "string", "maxLength": 30 },
+        "usuarioResponsavelId": { "type": "string", "maxLength": 64 },
+        "usuarioResponsavelNome": { "type": "string", "maxLength": 150 },
+        "statusImportacao": { "type": "string", "enum": ["EM_CONFERENCIA", "CONFIRMADA", "SUBSTITUIDA"] }
+      },
+      "required": ["id", "postoId", "dataImportacao", "statusImportacao"]
     },
     "fechamento": {
       "title": "FechamentoCaixa",
@@ -257,6 +273,10 @@
     "/postos/{postoId}/escalas/{escalaId}": {
       "schema": { "$ref": "#/entities/escala" },
       "description": "Escalas e turnos diários dos funcionários"
+    },
+    "/postos/{postoId}/escalasImportadas/{importacaoId}": {
+      "schema": { "$ref": "#/entities/escalaImportada" },
+      "description": "Histórico de escalas importadas via OCR com imagem original e dados conferidos"
     },
     "/postos/{postoId}/fechamentos/{fechamentoId}": {
       "schema": { "$ref": "#/entities/fechamento" },
