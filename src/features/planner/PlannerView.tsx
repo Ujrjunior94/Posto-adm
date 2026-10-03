@@ -764,9 +764,9 @@ export const PlannerView: React.FC<PlannerProps> = ({
   const processarImagemEscala = async (dataUrl: string, mimeType: string = 'image/jpeg') => {
     setImagemEscalaBase64(dataUrl);
     setEscaneandoIA(true);
-    setAvisoScanner('Google Gemini 2.5 Flash Vision analisando a escala: reconhecendo nomes, turnos e folgas...');
+    setAvisoScanner('OpenRouter API analisando a escala: reconhecendo dados visuais da imagem...');
     setErroScanner('');
-    setMotorUtilizadoScanner('Google Gemini 2.5 Flash');
+    setMotorUtilizadoScanner('OpenRouter Multimodal');
 
     try {
       const data = await requisitarLeituraEscalaOCR({
@@ -1397,11 +1397,16 @@ export const PlannerView: React.FC<PlannerProps> = ({
 
       {/* Grade Mensal do Planner */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+        {/* Dica para dispositivos móveis */}
+        <div className="md:hidden bg-blue-50 border-b border-blue-200 px-3.5 py-2 text-[11px] text-blue-800 flex items-center justify-between">
+          <span>💡 No celular, deslize horizontalmente ou use as visualizações <strong>Semanal</strong> ou <strong>Diária</strong> acima.</span>
+        </div>
+
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-900 text-white border-b border-slate-700 text-[11px] font-semibold uppercase">
-                <th className="py-3 px-4 sticky left-0 bg-slate-900 z-20 min-w-[250px] border-r border-slate-700">
+                <th className="py-3 px-2 sm:px-4 sticky left-0 bg-slate-900 z-20 min-w-[130px] sm:min-w-[190px] md:min-w-[240px] border-r border-slate-700">
                   Funcionário / Turno / Ações
                 </th>
                 {daysArray.map((day) => {
@@ -1436,10 +1441,10 @@ export const PlannerView: React.FC<PlannerProps> = ({
 
                   return (
                     <tr key={func.id} className="hover:bg-slate-50/80 transition group">
-                      <td className="py-2.5 px-3 sticky left-0 bg-white group-hover:bg-slate-50 z-10 border-r border-slate-200">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="truncate">
-                            <div className="font-bold text-slate-900 truncate">{func.nome}</div>
+                      <td className="py-2 px-2 sm:px-3 sticky left-0 bg-white group-hover:bg-slate-50 z-10 min-w-[130px] sm:min-w-[190px] md:min-w-[240px] border-r border-slate-200">
+                        <div className="flex items-center justify-between gap-1 sm:gap-2">
+                          <div className="truncate min-w-0">
+                            <div className="font-bold text-slate-900 truncate max-w-[85px] sm:max-w-[130px] md:max-w-none">{func.nome}</div>
                             <div className="flex items-center gap-1.5 mt-0.5">
                               <span className="text-[10px] text-slate-500">{func.cargo}</span>
                               <span

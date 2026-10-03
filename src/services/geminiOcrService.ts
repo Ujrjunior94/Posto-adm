@@ -1226,11 +1226,7 @@ export function estruturarRespostaEscalaOcr(
 }
 
 /**
- * Cliente resiliente multi-ambiente para OCR de Escalas via Google Gemini:
- * 1. Otimiza/comprime a imagem no cliente para envio rápido
- * 2. Envia para o endpoint do Google Gemini (/api/gemini/escala-ocr)
- * 3. Caso a chave Gemini esteja disponível no cliente, executa diretamente via SDK `@google/genai`
- * 4. Tenta os endpoints Cloud Run de fallback
+ * Cliente resiliente multi-ambiente para OCR de Escalas via OpenRouter API
  */
 export async function requisitarLeituraEscalaOCR(payload: EscalaOcrRequestPayload): Promise<any> {
   let optimizedPayload = { ...payload };
@@ -1245,17 +1241,21 @@ export async function requisitarLeituraEscalaOCR(payload: EscalaOcrRequestPayloa
 
   let ultimoErro = '';
 
-  const endpoints = ['/api/gemini/escala-ocr'];
+  const endpoints = ['/api/analyze-schedule-image', '/api/gemini/escala-ocr'];
 
-  // 1. Tenta endpoint do servidor local (Google Gemini)
   for (const endpoint of endpoints) {
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 32000);
+      const timer = setTimeout(() => controller.abort(), 35000);
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(optimizedPayload),
+        body: JSON.stringify({
+          image: optimizedPayload.imageBase64,
+          imageBase64: optimizedPayload.imageBase64,
+          mimeType: optimizedPayload.mimeType || 'image/jpeg',
+          mesAnoReferencia: optimizedPayload.mesAnoReferencia,
+        }),
         signal: controller.signal,
       });
       clearTimeout(timer);
@@ -1263,8 +1263,8 @@ export async function requisitarLeituraEscalaOCR(payload: EscalaOcrRequestPayloa
       if (response.ok) {
         const rawText = await response.text();
         const data = parseAndRepairJson(rawText);
-        if (data && (Array.isArray(data.itensEscala) || Array.isArray(data.colaboradoresIdentificados))) {
-          return data;
+        if (data && (data.success !== false)) {
+          return data.data || data;
         }
       } else {
         const errText = await response.text().catch(() => '');
@@ -1273,41 +1273,6 @@ export async function requisitarLeituraEscalaOCR(payload: EscalaOcrRequestPayloa
       }
     } catch (err: any) {
       ultimoErro = err?.message || `Falha na chamada ao endpoint ${endpoint}`;
-    }
-  }
-
-  // 2. Execução direta via SDK @google/genai caso a chave tenha sido injetada no build
-  const injetadaKey =
-    process.env.GEMINI_API_KEY ||
-    process.env.VITE_GEMINI_API_KEY ||
-    (import.meta as any)?.env?.VITE_GEMINI_API_KEY ||
-    '';
-
-  if (injetadaKey) {
-    try {
-      return await processarEscalaOcrComGemini(optimizedPayload, injetadaKey);
-    } catch (sdkErr: any) {
-      ultimoErro = sdkErr?.message || ultimoErro;
-    }
-  }
-
-  // 3. Fallback para Cloud Run URLs se hospedado externamente
-  for (const base of CLOUD_BACKEND_URLS) {
-    try {
-      const response = await fetch(`${base}/api/gemini/escala-ocr`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(optimizedPayload),
-      });
-      if (response.ok) {
-        const rawText = await response.text();
-        const data = parseAndRepairJson(rawText);
-        if (data && (Array.isArray(data.itensEscala) || Array.isArray(data.colaboradoresIdentificados))) {
-          return data;
-        }
-      }
-    } catch {
-      // Prossegue
     }
   }
 

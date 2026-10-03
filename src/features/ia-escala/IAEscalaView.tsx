@@ -664,7 +664,7 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
 
     setProcessando(true);
     setMensagemStatus(
-      '1/3 Otimizando nitidez e enviando imagem da escala para leitura visual com Google Gemini 3.8 Flash...'
+      '1/3 Otimizando nitidez e enviando imagem da escala para leitura visual com OpenRouter API...'
     );
     setErroProcessamento('');
     setSucessoSalvo(false);

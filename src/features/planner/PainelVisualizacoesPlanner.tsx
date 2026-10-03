@@ -169,8 +169,8 @@ export const PainelVisualizacoesPlanner: React.FC<PainelVisualizacoesPlannerProp
       {/* Barra de Modos de Visualização do Planner + Pesquisa + Filtros (Requisito 5) */}
       <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs space-y-3">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-          {/* Abas das 7 Visualizações */}
-          <div className="flex flex-wrap items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+          {/* Abas das 7 Visualizações com rolagem suave no mobile */}
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 overflow-x-auto no-scrollbar max-w-full">
             {(
               [
                 { id: 'MENSAL', label: 'Mensal' },
@@ -186,7 +186,7 @@ export const PainelVisualizacoesPlanner: React.FC<PainelVisualizacoesPlannerProp
                 key={aba.id}
                 type="button"
                 onClick={() => onChangeModoVisao(aba.id)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer whitespace-nowrap shrink-0 ${
                   modoVisao === aba.id
                     ? 'bg-slate-900 text-white shadow-xs'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'

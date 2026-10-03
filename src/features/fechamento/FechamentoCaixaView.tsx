@@ -419,7 +419,141 @@ export const FechamentoCaixaView: React.FC<FechamentoProps> = ({
           </span>
         </div>
 
-        <div className="overflow-x-auto">
+        {/* Visão Mobile Adaptada em Cards Touch */}
+        <div className="md:hidden divide-y divide-slate-200">
+          {fechamentosFiltrados.length === 0 ? (
+            <div className="p-8 text-center text-slate-400 text-xs">
+              <Fuel className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+              Nenhum fechamento de caixa encontrado com os filtros aplicados.
+            </div>
+          ) : (
+            fechamentosFiltrados.map((f) => {
+              const rec = f.recolhimento;
+              return (
+                <div key={`mob-${f.id}`} className="p-4 space-y-3 bg-white">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="font-bold text-sm text-slate-900">{f.funcionarioNome}</div>
+                      <div className="text-xs text-slate-500 flex items-center gap-1.5 mt-0.5">
+                        <span>{f.data}</span>
+                        <span>•</span>
+                        <span>{f.turno}</span>
+                        <span>•</span>
+                        <span className="font-mono text-slate-600">{f.caixaId}</span>
+                      </div>
+                    </div>
+                    <span
+                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold shrink-0 ${
+                        f.tipoDiferenca === 'FALTA'
+                          ? 'bg-red-100 text-red-800'
+                          : f.tipoDiferenca === 'SOBRA'
+                          ? 'bg-amber-100 text-amber-800'
+                          : 'bg-emerald-100 text-emerald-800'
+                      }`}
+                    >
+                      {f.tipoDiferenca === 'SEM_DIFERENCA' ? 'BATIDO' : f.tipoDiferenca}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 p-2.5 bg-slate-50 rounded-xl text-center border border-slate-100">
+                    <div>
+                      <div className="text-[10px] text-slate-500 uppercase font-semibold">Vendas</div>
+                      <div className="font-bold font-mono text-xs text-slate-900 mt-0.5">
+                        {formatarMoeda(f.totalConferido)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-slate-500 uppercase font-semibold">Recolhido</div>
+                      <div className="font-bold font-mono text-xs text-blue-700 mt-0.5">
+                        {formatarMoeda(f.totalInformado)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-slate-500 uppercase font-semibold">Diferença</div>
+                      <div
+                        className={`font-bold font-mono text-xs mt-0.5 ${
+                          f.diferenca < -0.01
+                            ? 'text-red-600'
+                            : f.diferenca > 0.01
+                            ? 'text-amber-600'
+                            : 'text-emerald-600'
+                        }`}
+                      >
+                        {formatarMoeda(f.diferenca)}
+                      </div>
+                    </div>
+                  </div>
+
+                  {rec && (
+                    <div className="text-[11px] text-slate-500 flex flex-wrap gap-x-2 gap-y-0.5">
+                      <span>Pix: {formatarMoeda(rec.pix + rec.pixCnpj)}</span>
+                      <span>•</span>
+                      <span>Cartão: {formatarMoeda(rec.cartao)}</span>
+                      <span>•</span>
+                      <span>Dinheiro: {formatarMoeda(rec.dinheiro)}</span>
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => exportarFechamentoCaixaPDF(f)}
+                      className="min-h-[36px] inline-flex items-center gap-1 px-3 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 rounded-lg text-xs font-semibold"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      PDF
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleImprimirComprovante(f)}
+                      className="min-h-[36px] inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-semibold"
+                    >
+                      <Printer className="w-3.5 h-3.5 text-emerald-600" />
+                      Imprimir
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => abrirDetalhes(f)}
+                      className="min-h-[36px] inline-flex items-center gap-1 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      Detalhes
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleEditarFechamento(f)}
+                      className="min-h-[36px] inline-flex items-center gap-1 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-semibold"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                      Alterar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleExcluirFechamento(f)}
+                      className="min-h-[36px] inline-flex items-center gap-1 px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-lg text-xs font-semibold"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Excluir
+                    </button>
+                    {f.tipoDiferenca === 'FALTA' && (
+                      <button
+                        type="button"
+                        onClick={() => abrirOcorrenciaParaFechamento(f)}
+                        className="min-h-[36px] inline-flex items-center gap-1 px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold"
+                      >
+                        <AlertTriangle className="w-3.5 h-3.5" />
+                        Rateio de Falta
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Tabela do Histórico para Tablet e Desktop */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-xs text-slate-600">
             <thead className="bg-slate-50/70 text-slate-700 font-bold uppercase text-[11px] border-b border-slate-200">
               <tr>

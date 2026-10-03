@@ -12,6 +12,7 @@ import {
   construirPromptAnaliseANP,
   gerarParecerLocalANP,
 } from './src/services/geminiCalculadoraAnpService';
+import { OpenRouterProvider } from './src/services/AIProvider';
 
 let aiClient: GoogleGenAI | null = null;
 function getAIClient(): GoogleGenAI {
@@ -53,40 +54,123 @@ async function startServer() {
   });
 
   /**
-   * Motor Google Gemini 3.8 Flash de Leitura e Reconhecimento Estruturado de Escalas para o Planner
+   * Endpoint de Análise de Imagem de Escala via OpenRouter (Modelo Multimodal)
+   * POST /api/analyze-schedule-image
    */
-  const handleGeminiEscalaOcr = async (req: express.Request, res: express.Response) => {
+  const handleAnalyzeScheduleImage = async (req: express.Request, res: express.Response) => {
     try {
-      const { imageBase64 } = req.body || {};
-
-      if (!imageBase64) {
-        return res.status(400).json({ error: 'Nenhuma imagem da escala foi enviada para leitura.' });
+      // 1. Validação estrutural do corpo da requisição
+      if (!req.body || typeof req.body !== 'object') {
+        return res.status(400).json({
+          success: false,
+          error: 'Corpo da requisição inválido. Envie um JSON com o campo "image" ou "imageBase64".',
+        });
       }
 
-      const geminiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || '';
+      const { image, imageBase64, mimeType = 'image/jpeg' } = req.body;
+      const rawImage = String(image || imageBase64 || '').trim();
 
-      if (geminiKey) {
-        const payloadResposta = await processarEscalaOcrComGemini(req.body, geminiKey);
-        payloadResposta.motorUtilizado = 'Google Gemini 3.8 Flash Vision';
-        console.log(
-          `[Gemini OCR Escala] Concluído via Google Gemini: ${payloadResposta.colaboradoresIdentificados?.length || 0} funcionários e ${payloadResposta.itensEscala?.length || 0} registros.`
-        );
-        return res.json(payloadResposta);
+      // 2. Validação da presença da imagem
+      if (!rawImage) {
+        return res.status(400).json({
+          success: false,
+          error: 'Nenhuma imagem da escala foi enviada para leitura.',
+        });
+      }
+
+      // 3. Validação do formato e conteúdo da imagem em Base64
+      const isDataUrl = rawImage.startsWith('data:image/');
+      const base64Content = isDataUrl
+        ? rawImage.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, '').trim()
+        : rawImage;
+
+      if (base64Content.length < 60) {
+        return res.status(400).json({
+          success: false,
+          error: 'Dados da imagem corrompidos ou insuficientes.',
+        });
+      }
+
+      // Validação de tipo MIME
+      const normalizedMime = isDataUrl
+        ? (rawImage.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/)?.[1] || mimeType)
+        : mimeType;
+
+      const allowedMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg', 'image/gif'];
+      if (!allowedMimes.includes(normalizedMime.toLowerCase())) {
+        return res.status(400).json({
+          success: false,
+          error: 'Formato de imagem não suportado. Utilize JPEG, PNG ou WebP.',
+        });
+      }
+
+      // 4. Obtenção segura das credenciais no servidor
+      const openRouterKey =
+        process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_API_KEY || '';
+      const openRouterModel =
+        process.env.OPENROUTER_MODEL ||
+        process.env.VITE_OPENROUTER_MODEL ||
+        'google/gemini-2.0-flash-lite-preview-02-05:free';
+
+      if (!openRouterKey) {
+        console.warn('[OpenRouter OCR] Chave OPENROUTER_API_KEY não configurada no ambiente.');
+        return res.status(401).json({
+          success: false,
+          error: 'Não foi possível conectar ao serviço de IA.',
+        });
+      }
+
+      // 5. Invocação segura do serviço OpenRouter
+      const result = await OpenRouterProvider.callOpenRouterDirect(
+        rawImage,
+        openRouterKey,
+        openRouterModel,
+        { mimeType: normalizedMime }
+      );
+
+      // 6. Resposta estruturada consistente com a interface AIProvider
+      return res.json({
+        success: true,
+        data: result.data,
+        cells: result.cells || [],
+        grid: result.data?.grid,
+        colaboradoresEscala: result.data?.colaboradoresEscala,
+        motorUtilizado: result.motorUtilizado || `OpenRouter (${openRouterModel})`,
+      });
+    } catch (error: any) {
+      console.error('[OpenRouter OCR Endpoint] Erro de execução:', error);
+      const msg = error instanceof Error ? error.message : String(error || '');
+
+      if (msg.includes('429') || msg.includes('rate limit')) {
+        return res.status(429).json({
+          success: false,
+          error: 'Limite temporário de utilização atingido.',
+        });
+      }
+
+      if (msg.includes('401') || msg.includes('403') || msg.includes('unauthorized')) {
+        return res.status(401).json({
+          success: false,
+          error: 'Não foi possível conectar ao serviço de IA.',
+        });
+      }
+
+      if (msg.includes('A imagem não pôde ser analisada')) {
+        return res.status(422).json({
+          success: false,
+          error: 'A imagem não pôde ser analisada.',
+        });
       }
 
       return res.status(500).json({
-        error: 'A chave de API GEMINI_API_KEY não está configurada no ambiente.',
-      });
-    } catch (error: any) {
-      console.error('[Gemini OCR Escala] Erro:', error);
-      const msg = error instanceof Error ? error.message : String(error || '');
-      res.status(500).json({
-        error: `Falha no reconhecimento da escala via Gemini: ${msg}`,
+        success: false,
+        error: 'Modelo de IA temporariamente indisponível.',
       });
     }
   };
 
-  app.post('/api/gemini/escala-ocr', handleGeminiEscalaOcr);
+  app.post('/api/analyze-schedule-image', handleAnalyzeScheduleImage);
+  app.post('/api/gemini/escala-ocr', handleAnalyzeScheduleImage);
 
   /**
    * Motor Google Gemini 3.8 Flash para Auditoria e Parecer de Conformidade ANP (Padrões Agosto de 2026)
@@ -201,70 +285,7 @@ Retorne EXCLUSIVAMENTE um JSON:
 
   app.post('/api/gemini/laudo-ocr', handleLaudoOcr);
 
-  /**
-   * Motor Completo de Leitura, Interpretação OCR e Reconhecimento Estruturado de Escalas
-   */
-  app.post('/api/gemini/escala-ocr', async (req, res) => {
-    try {
-      const { imageBase64 } = req.body || {};
-
-      if (!imageBase64) {
-        return res.status(400).json({ error: 'Nenhuma imagem da escala foi enviada para leitura.' });
-      }
-
-      const apiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || '';
-      if (!apiKey) {
-        return res.status(500).json({ error: 'A chave de API GEMINI_API_KEY não está configurada no ambiente.' });
-      }
-
-      const payloadResposta = await processarEscalaOcrComGemini(req.body, apiKey);
-
-      console.log(
-        `[Gemini OCR Escala] Concluído: ${payloadResposta.colaboradoresIdentificados?.length || 0} funcionários e ${payloadResposta.itensEscala?.length || 0} registros em ${payloadResposta.mesReferencia}.`
-      );
-
-      res.json(payloadResposta);
-    } catch (error: any) {
-      let rawMsg = error instanceof Error ? error.message : String(error || '');
-      try {
-        const parsedJson = JSON.parse(rawMsg);
-        if (parsedJson?.error?.message) {
-          rawMsg = parsedJson.error.message;
-        }
-      } catch {
-        // rawMsg já está limpa
-      }
-
-      const is503 =
-        rawMsg.includes('503') ||
-        rawMsg.includes('UNAVAILABLE') ||
-        rawMsg.includes('high demand');
-      const is429 =
-        rawMsg.includes('429') ||
-        rawMsg.includes('RESOURCE_EXHAUSTED') ||
-        rawMsg.includes('Quota exceeded');
-
-      let mensagemAmigavel = rawMsg || 'Falha ao processar a imagem da escala.';
-      let statusCode = 500;
-
-      if (is503) {
-        mensagemAmigavel =
-          'O serviço de visão computacional está temporariamente com alta demanda. Tente novamente em instantes.';
-        statusCode = 503;
-      } else if (is429) {
-        mensagemAmigavel =
-          'Limite temporário de requisições por minuto atingido. Aguarde alguns segundos e tente novamente.';
-        statusCode = 429;
-      }
-
-      console.error(`[Gemini OCR Escala] Erro (${statusCode}):`, mensagemAmigavel);
-
-      res.status(statusCode).json({
-        error: mensagemAmigavel,
-        isHighDemand: is503 || is429,
-      });
-    }
-  });
+  // app.post('/api/gemini/escala-ocr') já redirecionado para handleAnalyzeScheduleImage acima
 
   /**
    * Endpoint de OCR Multimodal de Aferição de Bicos, Bombas e Tanques via Gemini

@@ -823,12 +823,12 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
         </div>
       </div>
 
-      {/* Abas de Navegação */}
-      <div className="flex flex-wrap border-b border-slate-200 gap-2 sm:gap-5 bg-white px-6 pt-3 rounded-t-xl border-t border-x print:hidden">
+      {/* Abas de Navegação (Rolagem fluida no mobile) */}
+      <div className="flex items-center border-b border-slate-200 gap-2 sm:gap-5 bg-white px-4 sm:px-6 pt-3 rounded-t-xl border-t border-x print:hidden overflow-x-auto no-scrollbar">
         <button
           type="button"
           onClick={() => setAbaAtiva('AFERICOES')}
-          className={`pb-3 px-2 text-sm font-bold flex items-center gap-2 border-b-2 transition cursor-pointer ${
+          className={`pb-3 px-2 text-xs sm:text-sm font-bold flex items-center gap-2 border-b-2 transition cursor-pointer whitespace-nowrap shrink-0 ${
             abaAtiva === 'AFERICOES'
               ? 'border-amber-600 text-amber-700'
               : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -836,7 +836,7 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
         >
           <Fuel className="w-4 h-4" />
           Diagrama da Bomba & Diagnóstico 20L
-          <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-900">
+          <span className="px-2 py-0.5 rounded-full text-[10px] sm:text-[11px] font-bold bg-amber-100 text-amber-900">
             {bicos.length} bicos • {afericoes.length} aferições
           </span>
         </button>
@@ -844,7 +844,7 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
         <button
           type="button"
           onClick={() => setAbaAtiva('CADASTRO_TANQUES_BICOS')}
-          className={`pb-3 px-2 text-sm font-bold flex items-center gap-2 border-b-2 transition cursor-pointer ${
+          className={`pb-3 px-2 text-xs sm:text-sm font-bold flex items-center gap-2 border-b-2 transition cursor-pointer whitespace-nowrap shrink-0 ${
             abaAtiva === 'CADASTRO_TANQUES_BICOS'
               ? 'border-blue-600 text-blue-700'
               : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -852,7 +852,7 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
         >
           <Database className="w-4 h-4" />
           Cadastro de Bicos & Tanques
-          <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-blue-100 text-blue-900">
+          <span className="px-2 py-0.5 rounded-full text-[10px] sm:text-[11px] font-bold bg-blue-100 text-blue-900">
             {tanques.length} tanques • {bicos.length} bicos
           </span>
         </button>
@@ -860,7 +860,7 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
         <button
           type="button"
           onClick={() => setAbaAtiva('RELATORIO_FOTO')}
-          className={`pb-3 px-2 text-sm font-bold flex items-center gap-2 border-b-2 transition cursor-pointer ${
+          className={`pb-3 px-2 text-xs sm:text-sm font-bold flex items-center gap-2 border-b-2 transition cursor-pointer whitespace-nowrap shrink-0 ${
             abaAtiva === 'RELATORIO_FOTO'
               ? 'border-amber-600 text-amber-800'
               : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -873,7 +873,7 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
         <button
           type="button"
           onClick={() => setAbaAtiva('PRECOS')}
-          className={`pb-3 px-2 text-sm font-bold flex items-center gap-2 border-b-2 transition cursor-pointer ${
+          className={`pb-3 px-2 text-xs sm:text-sm font-bold flex items-center gap-2 border-b-2 transition cursor-pointer whitespace-nowrap shrink-0 ${
             abaAtiva === 'PRECOS'
               ? 'border-emerald-600 text-emerald-700'
               : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -882,7 +882,7 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
           <DollarSign className="w-4 h-4" />
           Preços & Descontos por Bico
           {estatisticasPrecos.totalComDesconto > 0 && (
-            <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800">
+            <span className="px-2 py-0.5 rounded-full text-[10px] sm:text-[11px] font-bold bg-emerald-100 text-emerald-800">
               {estatisticasPrecos.totalComDesconto} com desconto
             </span>
           )}

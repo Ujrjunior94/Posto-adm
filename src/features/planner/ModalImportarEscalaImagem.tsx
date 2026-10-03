@@ -14,7 +14,7 @@ import {
   executarSuiteDeTestesValidador,
   ResultadoTeste,
 } from './importadorEscalaImagemService';
-import { requisitarLeituraEscalaOCR } from '../../services/geminiOcrService';
+import { scheduleImageImporter } from '../../services/ai/scheduleImageImporter';
 import {
   Camera,
   Upload,
@@ -71,9 +71,8 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
   const [rotacaoGraus, setRotacaoGraus] = useState<number>(0);
   const [isDragOver, setIsDragOver] = useState(false);
 
-  // Configuração da IA
-  const [motorIA, setMotorIA] = useState<'gemini'>('gemini');
-  const [motorUtilizado, setMotorUtilizado] = useState<string>('Google Gemini 3.8 Flash Vision');
+  // Configuração da IA (OpenRouter API)
+  const [motorUtilizado, setMotorUtilizado] = useState<string>('OpenRouter Multimodal');
   const [mensagemProgresso, setMensagemProgresso] = useState<string>('');
   const [erroProcessamento, setErroProcessamento] = useState<string>('');
 
@@ -232,31 +231,21 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
     setEtapa('PROCESSANDO');
     setErroProcessamento('');
     setMensagemProgresso(
-      'Google Gemini 3.8 Flash Vision extraindo elementos visuais brutos da imagem...'
+      'OpenRouter API extraindo elementos visuais brutos da imagem...'
     );
 
     try {
-      const mesAnoStr = `${year}-${String(month).padStart(2, '0')}`;
-
-      // Envia requisição pura de leitura óptica
-      const ocrRawResponse = await requisitarLeituraEscalaOCR({
-        imageBase64: imgParaEnviar,
-        mimeType: 'image/jpeg',
-        mesAnoReferencia: mesAnoStr,
-        motor: 'gemini',
-        funcionariosCadastrados: [], // A IA NÃO recebe a lista para não alucinar vínculos
-      });
-
-      // VALIDAÇÃO 100% PELO MOTOR DO POSTO ADM
-      const resultadoValidador: ResultadoImportacaoEscala = processarLeituraBrutaParaValidacao(
-        ocrRawResponse,
+      // Processamento através do ScheduleImageImporter -> AIProvider -> OpenRouterProvider -> Validador Posto ADM
+      const resultadoValidador: ResultadoImportacaoEscala = await scheduleImageImporter.processImage(
+        imgParaEnviar,
         funcionariosCadastrados,
         TURNOS_PADRAO_POSTO,
         month,
-        year
+        year,
+        { mimeType: 'image/jpeg' }
       );
 
-      setMotorUtilizado(ocrRawResponse.motorUtilizado || 'Google Gemini 3.8 Flash Vision');
+      setMotorUtilizado(resultadoValidador.motorUtilizado || 'OpenRouter Multimodal');
 
       if (resultadoValidador.records.length === 0) {
         setErroProcessamento('Nenhuma célula ou texto legível foi extraído da imagem. Tente uma foto mais aproximada ou ajuste a rotação.');
@@ -506,7 +495,7 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
                 <div className="flex items-center gap-1 bg-blue-950/80 p-1 rounded-lg border border-blue-800 text-xs">
                   <div className="px-3.5 py-1.5 rounded-md font-bold bg-blue-600 text-white flex items-center gap-1.5 shadow-xs">
                     <Sparkles className="w-3.5 h-3.5 text-emerald-300" />
-                    <span>Google Gemini 2.5 Flash Vision (Oficial)</span>
+                    <span>OpenRouter API Multimodal</span>
                   </div>
                 </div>
               </div>

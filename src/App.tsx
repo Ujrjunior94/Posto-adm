@@ -61,6 +61,8 @@ import {
   Zap,
   Clock,
   ChevronRight,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 
 const repoFunc = new PostoSubcollectionRepository<Funcionario>('funcionarios');
@@ -219,6 +221,7 @@ const MainApp: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [modalLimpezaAberto, setModalLimpezaAberto] = useState(false);
   const [limpandoDados, setLimpandoDados] = useState(false);
   const [toastSucesso, setToastSucesso] = useState('');
@@ -650,61 +653,93 @@ const MainApp: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col md:flex-row text-slate-900 font-sans print:bg-white print:min-h-0">
-      {/* 1. Sidebar Desktop Ilustrada e Organizada por Categorias */}
-      <aside className="hidden md:flex flex-col w-68 bg-slate-900 text-slate-300 border-r border-slate-800 print:hidden shrink-0">
-        {/* Cabeçalho da Marca & Posto */}
-        <div className="p-4 border-b border-slate-800 bg-slate-950/60">
-          <div className="flex items-center gap-3">
+      {/* 1. Sidebar Desktop/Tablet Ilustrada e Organizada por Categorias (Colapsável) */}
+      <aside
+        className={`hidden md:flex flex-col ${
+          sidebarCollapsed ? 'w-20' : 'w-64'
+        } bg-slate-900 text-slate-300 border-r border-slate-800 print:hidden shrink-0 transition-all duration-200 select-none`}
+      >
+        {/* Cabeçalho da Marca & Posto com botão para recolher */}
+        <div className="p-3.5 border-b border-slate-800 bg-slate-950/60 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-3 min-w-0">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-cyan-500 flex items-center justify-center text-white shadow-md shadow-blue-600/30 font-bold shrink-0">
               <Fuel className="w-5 h-5" />
             </div>
-            <div className="min-w-0 flex-1">
-              <div className="font-extrabold text-white text-sm tracking-wide flex items-center gap-1.5">
-                <span>MEU POSTO</span>
-                <span className="text-[9px] font-black px-1.5 py-0.2 bg-blue-600 text-white rounded">
-                  2.0
-                </span>
+            {!sidebarCollapsed && (
+              <div className="min-w-0 flex-1">
+                <div className="font-extrabold text-white text-sm tracking-wide flex items-center gap-1.5">
+                  <span className="truncate">MEU POSTO</span>
+                  <span className="text-[9px] font-black px-1.5 py-0.2 bg-blue-600 text-white rounded shrink-0">
+                    2.0
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-400 truncate">Matriz Central</div>
               </div>
-              <div className="text-[11px] text-slate-400 truncate">Matriz Central</div>
-            </div>
+            )}
           </div>
+          <button
+            type="button"
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            title={sidebarCollapsed ? 'Expandir barra lateral' : 'Recolher para modo compacto'}
+            className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition shrink-0 cursor-pointer"
+          >
+            {sidebarCollapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+          </button>
         </div>
 
         {/* Perfil do Usuário e Turno Ativo */}
         <div className="p-3 border-b border-slate-800 bg-slate-950/30 space-y-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-7 h-7 rounded-full bg-slate-800 text-slate-300 font-bold text-xs flex items-center justify-center shrink-0 border border-slate-700">
+              <div
+                className="w-8 h-8 rounded-full bg-slate-800 text-slate-300 font-bold text-xs flex items-center justify-center shrink-0 border border-slate-700"
+                title={`${userProfile.nome} (${userProfile.role})`}
+              >
                 {userProfile.nome.slice(0, 1).toUpperCase()}
               </div>
-              <div className="truncate min-w-0">
-                <div className="font-semibold text-xs text-white truncate">{userProfile.nome}</div>
-                <div className="text-[10px] text-blue-400 font-bold uppercase">{userProfile.role}</div>
-              </div>
+              {!sidebarCollapsed && (
+                <div className="truncate min-w-0">
+                  <div className="font-semibold text-xs text-white truncate">{userProfile.nome}</div>
+                  <div className="text-[10px] text-blue-400 font-bold uppercase">{userProfile.role}</div>
+                </div>
+              )}
             </div>
-            <button
-              onClick={signOut}
-              title="Encerrar sessão"
-              className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
+            {!sidebarCollapsed && (
+              <button
+                onClick={signOut}
+                title="Encerrar sessão"
+                className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            )}
           </div>
 
           {/* Chip do Turno Atual */}
-          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-semibold border ${turnoAtual.cor}`}>
-            <TurnoIcone className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">{turnoAtual.nome}</span>
-          </div>
+          {!sidebarCollapsed ? (
+            <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-semibold border ${turnoAtual.cor}`}>
+              <TurnoIcone className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">{turnoAtual.nome}</span>
+            </div>
+          ) : (
+            <div
+              className="flex items-center justify-center p-1 rounded-lg border text-amber-400 border-slate-700"
+              title={turnoAtual.nome}
+            >
+              <TurnoIcone className="w-3.5 h-3.5" />
+            </div>
+          )}
         </div>
 
         {/* Lista de Navegação por Categorias */}
-        <nav className="flex-1 p-3 space-y-4 overflow-y-auto">
+        <nav className="flex-1 p-2 space-y-3 overflow-y-auto">
           {MENU_CATEGORIES.map((category) => (
             <div key={category.title} className="space-y-1">
-              <div className="px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                {category.title}
-              </div>
+              {!sidebarCollapsed && (
+                <div className="px-3 pt-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  {category.title}
+                </div>
+              )}
               {category.items.map((item) => {
                 const Icon = item.icon;
                 const active = activeTab === item.id;
@@ -712,7 +747,10 @@ const MainApp: React.FC = () => {
                   <button
                     key={item.id}
                     onClick={() => setActiveTab(item.id)}
-                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition active:scale-98 ${
+                    title={item.label}
+                    className={`w-full flex items-center ${
+                      sidebarCollapsed ? 'justify-center p-2.5' : 'justify-between px-3 py-2'
+                    } rounded-xl text-xs font-semibold transition active:scale-98 cursor-pointer ${
                       active
                         ? 'bg-blue-600 text-white shadow-xs'
                         : 'text-slate-400 hover:bg-slate-800/80 hover:text-slate-200'
@@ -720,9 +758,9 @@ const MainApp: React.FC = () => {
                   >
                     <div className="flex items-center gap-2.5 truncate">
                       <Icon className={`w-4 h-4 shrink-0 ${active ? 'text-white' : 'text-slate-400'}`} />
-                      <span className="truncate">{item.label}</span>
+                      {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
                     </div>
-                    {item.tag && (
+                    {!sidebarCollapsed && item.tag && (
                       <span
                         className={`text-[9px] font-black px-1.5 py-0.5 rounded-full border shrink-0 ${
                           active
@@ -743,34 +781,40 @@ const MainApp: React.FC = () => {
           <div className="pt-2 border-t border-slate-800">
             <button
               onClick={() => setModalLimpezaAberto(true)}
-              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-red-400 hover:bg-red-500/10 hover:text-red-300 transition"
+              className={`w-full flex items-center ${
+                sidebarCollapsed ? 'justify-center p-2.5' : 'gap-2.5 px-3 py-2'
+              } rounded-xl text-xs font-semibold text-red-400 hover:bg-red-500/10 hover:text-red-300 transition cursor-pointer`}
               title="Resetar banco de demonstração"
             >
               <Trash2 className="w-4 h-4 shrink-0" />
-              <span>Remover Demonstração</span>
+              {!sidebarCollapsed && <span>Remover Demonstração</span>}
             </button>
           </div>
         </nav>
 
         {/* Rodapé de Status de Rede e Sincronização 24h na Nuvem */}
         <div className="p-3 border-t border-slate-800 bg-slate-950/60 text-[11px] space-y-2">
-          <div className="flex items-center justify-between">
+          <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between'}`}>
             <div className="flex items-center gap-1.5">
               {isOnline ? (
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
               ) : (
                 <WifiOff className="w-3.5 h-3.5 text-red-400" />
               )}
-              <span className={`text-[11px] font-bold ${isOnline ? 'text-emerald-400' : 'text-red-400'}`}>
-                {syncState}
-              </span>
+              {!sidebarCollapsed && (
+                <span className={`text-[11px] font-bold ${isOnline ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {syncState}
+                </span>
+              )}
             </div>
-            <span className="text-[9px] font-mono text-slate-400">
-              Sync {ultimoPingNuvem}
-            </span>
+            {!sidebarCollapsed && (
+              <span className="text-[9px] font-mono text-slate-400">
+                Sync {ultimoPingNuvem}
+              </span>
+            )}
           </div>
 
-          {pendingCount > 0 && (
+          {!sidebarCollapsed && pendingCount > 0 && (
             <button
               onClick={syncNow}
               className="w-full py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-semibold rounded-lg transition flex items-center justify-center gap-1"
@@ -782,141 +826,179 @@ const MainApp: React.FC = () => {
         </div>
       </aside>
 
-      {/* 2. Topbar Mobile */}
-      <header className="md:hidden bg-slate-900 text-white p-3.5 flex items-center justify-between sticky top-0 z-40 print:hidden border-b border-slate-800">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-blue-600 to-cyan-500 flex items-center justify-center font-bold text-white shadow-sm">
+      {/* 2. Topbar Mobile Otimizada para Touch */}
+      <header className="md:hidden bg-slate-900/95 backdrop-blur-md text-white h-14 px-3.5 flex items-center justify-between sticky top-0 z-40 print:hidden border-b border-slate-800">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-blue-600 to-cyan-500 flex items-center justify-center font-bold text-white shadow-xs shrink-0">
             <Fuel className="w-4 h-4" />
           </div>
-          <div>
-            <span className="font-extrabold text-sm tracking-wide">MEU POSTO</span>
-            <span className="text-[9px] font-bold ml-1 px-1 rounded bg-blue-600 text-white">2.0</span>
+          <div className="min-w-0 flex items-center gap-1.5 truncate">
+            <span className="font-extrabold text-xs tracking-wide">MEU POSTO</span>
+            <span className="text-slate-400 text-xs">·</span>
+            <span className="text-xs font-semibold text-blue-400 truncate">
+              {currentTabDef.shortLabel}
+            </span>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 text-[11px] mr-1">
-            {isOnline ? (
-              <span className="w-2 h-2 rounded-full bg-emerald-400" />
-            ) : (
-              <span className="w-2 h-2 rounded-full bg-red-400" />
-            )}
+          <div
+            className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-slate-800/80 border border-slate-700"
+            title={isOnline ? 'Nuvem Conectada' : 'Offline'}
+          >
+            <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'}`} />
+            <span className="text-[10px] font-mono text-slate-300">24h</span>
           </div>
           <button
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300"
+            type="button"
+            onClick={() => setMobileMenuOpen(true)}
+            aria-label="Abrir Menu Completo"
+            className="min-h-[44px] min-w-[44px] flex items-center justify-center bg-slate-800 hover:bg-slate-700 active:scale-95 rounded-xl text-slate-200 transition cursor-pointer"
           >
-            {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            <Menu className="w-5 h-5" />
           </button>
         </div>
       </header>
 
-      {/* Drawer Mobile Ilustrado */}
+      {/* Drawer Mobile Moderno com Backdrop e Gestão Touch */}
       {mobileMenuOpen && (
-        <div className="md:hidden bg-slate-900 text-slate-300 p-4 space-y-3 border-b border-slate-800 max-h-[80vh] overflow-y-auto print:hidden">
-          {MENU_CATEGORIES.map((category) => (
-            <div key={category.title} className="space-y-1">
-              <div className="px-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                {category.title}
-              </div>
-              {category.items.map((item) => {
-                const Icon = item.icon;
-                const active = activeTab === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => {
-                      setActiveTab(item.id);
-                      setMobileMenuOpen(false);
-                    }}
-                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold ${
-                      active ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <Icon className="w-4 h-4" />
-                      <span>{item.label}</span>
-                    </div>
-                    {item.tag && (
-                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-400">
-                        {item.tag}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          ))}
+        <div className="md:hidden fixed inset-0 z-50 flex print:hidden">
+          {/* Backdrop escurecido */}
+          <div
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs transition-opacity"
+            onClick={() => setMobileMenuOpen(false)}
+          />
 
-          <div className="pt-2 border-t border-slate-800">
-            <button
-              onClick={() => {
-                setMobileMenuOpen(false);
-                setModalLimpezaAberto(true);
-              }}
-              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-red-400 hover:bg-red-500/10"
-            >
-              <Trash2 className="w-4 h-4" />
-              <span>Remover Demonstração</span>
-            </button>
+          {/* Painel lateral deslizante */}
+          <div className="relative w-80 max-w-[85vw] bg-slate-900 text-slate-200 h-full flex flex-col shadow-2xl border-r border-slate-800 z-10 animate-in slide-in-from-left duration-200">
+            {/* Header do Drawer */}
+            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold">
+                  <Fuel className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="font-bold text-xs text-white">MEU POSTO 2.0</div>
+                  <div className="text-[10px] text-slate-400">{userProfile.nome} ({userProfile.role})</div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMobileMenuOpen(false)}
+                className="min-h-[40px] min-w-[40px] flex items-center justify-center text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Lista com scroll e alvos de toque generosos */}
+            <div className="flex-1 p-3 space-y-4 overflow-y-auto">
+              {MENU_CATEGORIES.map((category) => (
+                <div key={category.title} className="space-y-1">
+                  <div className="px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    {category.title}
+                  </div>
+                  {category.items.map((item) => {
+                    const Icon = item.icon;
+                    const active = activeTab === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => {
+                          setActiveTab(item.id);
+                          setMobileMenuOpen(false);
+                        }}
+                        className={`w-full min-h-[44px] flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition active:scale-98 cursor-pointer ${
+                          active ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <Icon className={`w-4 h-4 ${active ? 'text-white' : 'text-slate-400'}`} />
+                          <span>{item.label}</span>
+                        </div>
+                        {item.tag && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-400">
+                            {item.tag}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+
+              <div className="pt-2 border-t border-slate-800 space-y-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    setModalLimpezaAberto(true);
+                  }}
+                  className="w-full min-h-[44px] flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-red-400 hover:bg-red-500/10 cursor-pointer"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>Remover Demonstração</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={signOut}
+                  className="w-full min-h-[44px] flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:bg-slate-800 hover:text-white cursor-pointer"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span>Encerrar Sessão</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
 
       {/* 3. Área Principal com Topbar de Atalhos Rápidos e Conteúdo */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Barra Superior Global com Indicador de Seção e Ações Rápidas */}
-        <header className="hidden md:flex items-center justify-between px-6 py-3.5 bg-white border-b border-slate-200 print:hidden shrink-0">
+        {/* Barra Superior Global com Indicador de Seção e Ações Rápidas (Desktop/Tablet) */}
+        <header className="hidden md:flex items-center justify-between px-4 lg:px-6 py-3 bg-white border-b border-slate-200 print:hidden shrink-0">
           {/* Seção Atual com Ícone e Descrição */}
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold shrink-0">
               <CurrentIcon className="w-5 h-5" />
             </div>
-            <div>
-              <div className="font-bold text-sm text-slate-900 leading-tight">
+            <div className="min-w-0">
+              <div className="font-bold text-sm text-slate-900 leading-tight truncate">
                 {currentTabDef.label}
               </div>
-              <div className="text-[11px] text-slate-500 leading-tight">
+              <div className="text-[11px] text-slate-500 leading-tight truncate">
                 {currentTabDef.description}
               </div>
             </div>
           </div>
 
-          {/* Atalhos Rápidos Diretos (1-Clique) e Status Nuvem 24h */}
-          <div className="flex items-center gap-2">
+          {/* Atalhos Rápidos Diretos (1-Clique) e Status Nuvem 24h com visual responsivo */}
+          <div className="flex items-center gap-1.5 lg:gap-2 shrink-0">
             <div
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 whitespace-nowrap"
+              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 whitespace-nowrap"
               title={`Sincronizado em tempo real no Google Cloud Firestore (${ultimoPingNuvem})`}
             >
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-              <span>Nuvem 24h Conectada</span>
+              <span>Nuvem 24h</span>
             </div>
 
             <button
-              onClick={() => setModalLimpezaAberto(true)}
-              disabled={limpandoDados}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 transition whitespace-nowrap"
-              title="Limpar todos os dados de demonstração da nuvem"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Limpar Dados</span>
-            </button>
-
-            <button
               onClick={() => setActiveTab('afericoes')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap ${
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap cursor-pointer ${
                 activeTab === 'afericoes'
                   ? 'bg-amber-600 text-white shadow-xs'
                   : 'bg-slate-100 hover:bg-amber-50 text-slate-700 hover:text-amber-800 border border-slate-200'
               }`}
             >
               <Gauge className="w-3.5 h-3.5" />
-              <span>Diagrama Bombas 20L</span>
+              <span>Bombas 20L</span>
             </button>
 
             <button
               onClick={() => setActiveTab('fechamento')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap ${
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap cursor-pointer ${
                 activeTab === 'fechamento'
                   ? 'bg-emerald-600 text-white shadow-xs'
                   : 'bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 border border-slate-200'
@@ -928,7 +1010,7 @@ const MainApp: React.FC = () => {
 
             <button
               onClick={() => setActiveTab('analises')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap ${
+              className={`hidden xl:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap cursor-pointer ${
                 activeTab === 'analises'
                   ? 'bg-teal-600 text-white shadow-xs'
                   : 'bg-slate-100 hover:bg-teal-50 text-slate-700 hover:text-teal-700 border border-slate-200'
@@ -940,7 +1022,7 @@ const MainApp: React.FC = () => {
 
             <button
               onClick={() => setActiveTab('tanques')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap ${
+              className={`hidden xl:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap cursor-pointer ${
                 activeTab === 'tanques'
                   ? 'bg-indigo-600 text-white shadow-xs'
                   : 'bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border border-slate-200'
@@ -948,6 +1030,16 @@ const MainApp: React.FC = () => {
             >
               <Fuel className="w-3.5 h-3.5" />
               <span>Régua</span>
+            </button>
+
+            <button
+              onClick={() => setModalLimpezaAberto(true)}
+              disabled={limpandoDados}
+              className="hidden lg:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 transition whitespace-nowrap cursor-pointer"
+              title="Limpar todos os dados de demonstração da nuvem"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Limpar</span>
             </button>
           </div>
         </header>
@@ -1055,7 +1147,7 @@ const MainApp: React.FC = () => {
         </div>
 
         {/* Conteúdo Principal Renderizado */}
-        <main className="flex-1 p-4 md:p-8 overflow-y-auto max-w-7xl mx-auto w-full print:p-0 print:m-0 print:max-w-none print:overflow-visible">
+        <main className="flex-1 p-3 sm:p-5 md:p-8 pb-24 md:pb-8 overflow-y-auto max-w-7xl mx-auto w-full print:p-0 print:m-0 print:max-w-none print:overflow-visible">
           {activeTab === 'dashboard' && (
             <DashboardView
               funcionarios={funcionarios}
@@ -1165,47 +1257,19 @@ const MainApp: React.FC = () => {
         </main>
 
         {/* Barra de Navegação Inferior Rápida (Mobile / Tablet de Pista) */}
-        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900 border-t border-slate-800 px-2 py-1.5 flex items-center justify-around print:hidden">
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 px-3 py-1 flex items-center justify-around print:hidden pb-safe">
           <button
             type="button"
             onClick={() => {
               setActiveTab('dashboard');
               setMobileMenuOpen(false);
             }}
-            className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-lg text-[10px] font-semibold ${
-              activeTab === 'dashboard' ? 'text-blue-400' : 'text-slate-400'
+            className={`min-h-[48px] min-w-[48px] flex flex-col items-center justify-center gap-0.5 rounded-xl text-[10px] font-semibold transition active:scale-95 cursor-pointer ${
+              activeTab === 'dashboard' ? 'text-blue-400 font-bold' : 'text-slate-400'
             }`}
           >
-            <LayoutDashboard className="w-4 h-4" />
+            <LayoutDashboard className="w-5 h-5" />
             <span>Início</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('afericoes');
-              setMobileMenuOpen(false);
-            }}
-            className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-lg text-[10px] font-semibold ${
-              activeTab === 'afericoes' ? 'text-amber-400' : 'text-slate-400'
-            }`}
-          >
-            <Gauge className="w-4 h-4" />
-            <span>Bombas 20L</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('fechamento');
-              setMobileMenuOpen(false);
-            }}
-            className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-lg text-[10px] font-semibold ${
-              activeTab === 'fechamento' ? 'text-emerald-400' : 'text-slate-400'
-            }`}
-          >
-            <DollarSign className="w-4 h-4" />
-            <span>Caixa</span>
           </button>
 
           <button
@@ -1214,36 +1278,48 @@ const MainApp: React.FC = () => {
               setActiveTab('planner');
               setMobileMenuOpen(false);
             }}
-            className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-lg text-[10px] font-semibold ${
-              activeTab === 'planner' ? 'text-blue-400' : 'text-slate-400'
+            className={`min-h-[48px] min-w-[48px] flex flex-col items-center justify-center gap-0.5 rounded-xl text-[10px] font-semibold transition active:scale-95 cursor-pointer ${
+              activeTab === 'planner' ? 'text-blue-400 font-bold' : 'text-slate-400'
             }`}
           >
-            <Calendar className="w-4 h-4" />
+            <Calendar className="w-5 h-5" />
             <span>Planner</span>
           </button>
 
           <button
             type="button"
             onClick={() => {
-              setActiveTab('ia-escala');
+              setActiveTab('afericoes');
               setMobileMenuOpen(false);
             }}
-            className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-lg text-[10px] font-semibold ${
-              activeTab === 'ia-escala' ? 'text-purple-400' : 'text-slate-400'
+            className={`min-h-[48px] min-w-[48px] flex flex-col items-center justify-center gap-0.5 rounded-xl text-[10px] font-semibold transition active:scale-95 cursor-pointer ${
+              activeTab === 'afericoes' ? 'text-amber-400 font-bold' : 'text-slate-400'
             }`}
           >
-            <Sparkles className="w-4 h-4" />
-            <span>OCR Escala</span>
+            <Gauge className="w-5 h-5" />
+            <span>Bombas</span>
           </button>
 
           <button
             type="button"
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-lg text-[10px] font-semibold ${
-              mobileMenuOpen ? 'text-white' : 'text-slate-400'
+            onClick={() => {
+              setActiveTab('fechamento');
+              setMobileMenuOpen(false);
+            }}
+            className={`min-h-[48px] min-w-[48px] flex flex-col items-center justify-center gap-0.5 rounded-xl text-[10px] font-semibold transition active:scale-95 cursor-pointer ${
+              activeTab === 'fechamento' ? 'text-emerald-400 font-bold' : 'text-slate-400'
             }`}
           >
-            <Menu className="w-4 h-4" />
+            <DollarSign className="w-5 h-5" />
+            <span>Caixa</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen(true)}
+            className="min-h-[48px] min-w-[48px] flex flex-col items-center justify-center gap-0.5 rounded-xl text-[10px] font-semibold text-slate-400 hover:text-white active:scale-95 cursor-pointer"
+          >
+            <Menu className="w-5 h-5" />
             <span>Menu</span>
           </button>
         </nav>

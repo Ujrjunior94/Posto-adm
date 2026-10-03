@@ -1199,10 +1199,10 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
                 </div>
 
                 {/* Corpo do Esquema: [LADO A: 3 BICOS] — [DESENHO DA BOMBA COM 6 MANGUEIRAS] — [LADO B: 3 BICOS] */}
-                <div className="p-4 sm:p-5 bg-slate-50/70">
-                  <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-center">
-                    {/* LADO A DA BOMBA (4 colunas -> 3 Bicos empilhados) */}
-                    <div className="xl:col-span-4 flex flex-col justify-between space-y-3">
+                <div className="p-3.5 sm:p-5 bg-slate-50/70">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+                    {/* LADO A DA BOMBA (1 coluna no tablet/desktop -> 3 Bicos empilhados) */}
+                    <div className="flex flex-col justify-between space-y-3">
                       <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30">
                         <span className="text-[11px] font-extrabold uppercase tracking-wider text-amber-950">
                           ◀ Lado A (Esquerda)
@@ -1217,8 +1217,8 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
                       </div>
                     </div>
 
-                    {/* DESENHO CENTRAL DA BOMBA DE COMBUSTÍVEL COM 3 BICOS DE CADA LADO (4 colunas) */}
-                    <div className="xl:col-span-4 flex items-center justify-center py-2">
+                    {/* DESENHO CENTRAL DA BOMBA DE COMBUSTÍVEL COM 3 BICOS DE CADA LADO (1 coluna) */}
+                    <div className="flex items-center justify-center py-2">
                       {renderDesenhoBombaSextupla(
                         bomba.nomeBomba,
                         idxBomba,
@@ -1227,8 +1227,8 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
                       )}
                     </div>
 
-                    {/* LADO B DA BOMBA (4 colunas -> 3 Bicos empilhados) */}
-                    <div className="xl:col-span-4 flex flex-col justify-between space-y-3">
+                    {/* LADO B DA BOMBA (1 coluna -> 3 Bicos empilhados) */}
+                    <div className="flex flex-col justify-between space-y-3">
                       <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-sky-500/10 border border-sky-500/30">
                         <span className="text-[10px] font-mono font-bold text-sky-900 bg-sky-200/70 px-1.5 py-0.5 rounded">
                           {bomba.ladoB.length} de 3 bicos
