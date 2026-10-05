@@ -392,6 +392,7 @@ export const FechamentoCaixaView: React.FC<FechamentoProps> = ({
             <option value="Manhã">Turno 1 — Manhã</option>
             <option value="Tarde">Turno 2 — Tarde</option>
             <option value="Horista">Turno Horista</option>
+            <option value="ADM">Turno ADM — Administrativo</option>
           </select>
 
           <select

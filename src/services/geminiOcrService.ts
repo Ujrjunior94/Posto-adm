@@ -385,7 +385,7 @@ export function classificarTurnoEHorario(
 ): {
   status: 'TRABALHO' | 'FOLGA' | 'PLANTAO' | 'FERIAS' | 'AFASTADO';
   turno: string;
-  sigla: 'T1' | 'T2' | 'T3' | 'HOR' | 'PLT' | 'S' | 'FE' | 'AT';
+  sigla: 'T1' | 'T2' | 'T3' | 'HOR' | 'ADM' | 'PLT' | 'S' | 'FE' | 'AT' | 'FOL' | 'FER';
   horarioInicio: string;
   horarioFim: string;
 } {
@@ -551,6 +551,29 @@ export function classificarTurnoEHorario(
     };
   }
 
+  // Turno ADM / Administrativo
+  if (
+    codigoUpper === 'ADM' ||
+    codigoUpper === 'AD' ||
+    codigoUpper === 'COM' ||
+    turnoLower === 'adm' ||
+    turnoLower === 'admin' ||
+    turnoLower === 'administrativo' ||
+    combinadoLower.includes('administrat') ||
+    combinadoLower.includes('adm') ||
+    (hIni.startsWith('08:') && (hFim.startsWith('17:') || hFim.startsWith('18:')))
+  ) {
+    if (!hIni) hIni = '08:00';
+    if (!hFim) hFim = '17:00';
+    return {
+      status: 'TRABALHO',
+      turno: 'Turno ADM (08h - 17h)',
+      sigla: 'ADM',
+      horarioInicio: hIni,
+      horarioFim: hFim,
+    };
+  }
+
   // Turno Horista / Intermediário
   if (
     codigoUpper === 'HOR' ||
@@ -591,7 +614,8 @@ export function classificarTurnoEHorario(
 }
 
 /**
- * Converte qualquer descrição de turno para um dos 3 IDs oficiais de turnoPreferencial do cadastro de Funcionário
+ * Converte qualquer descrição de turno para um dos IDs oficiais de turnoPreferencial do cadastro de Funcionário
+ * Turnos oficiais: T1, T2, Horista, ADM, Folga, Férias
  */
 export function normalizarTurnoPreferencialCadastro(turnoRaw?: string, horarioInicio?: string): string {
   const classif = classificarTurnoEHorario(
@@ -601,8 +625,11 @@ export function normalizarTurnoPreferencialCadastro(turnoRaw?: string, horarioIn
     horarioInicio || '',
     ''
   );
+  if (classif.sigla === 'ADM') return 'Turno ADM (08h - 17h)';
   if (classif.sigla === 'HOR') return 'Turno Horista';
-  if (classif.sigla === 'T2' || classif.sigla === 'T3') return 'Turno 2 - Tarde (14h - 22h)';
+  if (classif.sigla === 'T2') return 'Turno 2 - Tarde (14h - 22h)';
+  if (classif.status === 'FOLGA') return 'Folga';
+  if (classif.status === 'FERIAS') return 'Férias';
   return 'Turno 1 - Manhã (06h - 14h)';
 }
 
@@ -843,6 +870,36 @@ export function estruturarRespostaEscalaOcr(
       nomeOriginal,
       dias,
     }));
+  } else if (
+    colaboradoresEscala.length === 0 &&
+    Array.isArray(parsed.cells) &&
+    parsed.cells.length > 0
+  ) {
+    const rowsMap = new Map<number, any[]>();
+    parsed.cells.forEach((c: any) => {
+      const r = typeof c.rowIndex === 'number' ? c.rowIndex : 0;
+      if (!rowsMap.has(r)) rowsMap.set(r, []);
+      rowsMap.get(r)!.push(c);
+    });
+
+    const reconstructedColabs: any[] = [];
+    rowsMap.forEach((rowCells) => {
+      rowCells.sort((a: any, b: any) => (a.columnIndex || 0) - (b.columnIndex || 0));
+      const empCell = rowCells.find((c: any) => c.role === 'EMPLOYEE') || rowCells[0];
+      const shiftCells = rowCells.filter((c: any) => c !== empCell);
+
+      if (empCell && empCell.rawText) {
+        reconstructedColabs.push({
+          nomeOriginal: empCell.rawText,
+          dias: shiftCells.map((sc: any, idx: number) => ({
+            dia: String(sc.columnIndex || idx + 1).padStart(2, '0'),
+            codigoOriginal: sc.rawText || '',
+            turno: sc.rawText || '',
+          })),
+        });
+      }
+    });
+    colaboradoresEscala = reconstructedColabs;
   }
 
   const colaboradoresIdentificados: any[] = [];
@@ -1263,8 +1320,23 @@ export async function requisitarLeituraEscalaOCR(payload: EscalaOcrRequestPayloa
       if (response.ok) {
         const rawText = await response.text();
         const data = parseAndRepairJson(rawText);
-        if (data && (data.success !== false)) {
-          return data.data || data;
+        if (data && data.success !== false) {
+          const rawResult = data.data || data;
+          let structured: any;
+          if (rawResult.itensEscala && rawResult.colaboradoresIdentificados) {
+            structured = { ...rawResult };
+          } else {
+            structured = estruturarRespostaEscalaOcr(
+              rawResult,
+              payload,
+              data.motorUtilizado || 'OpenRouter API'
+            );
+          }
+          structured.rawJson = data.raw || data.data || data;
+          structured.cells = data.cells || rawResult.cells || [];
+          structured.motorUtilizado =
+            data.motorUtilizado || structured.motorUtilizado || 'OpenRouter API';
+          return structured;
         }
       } else {
         const errText = await response.text().catch(() => '');

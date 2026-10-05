@@ -69,6 +69,103 @@ export interface RegiaoImagemEscala {
   rotulo?: string;
 }
 
+export type SiglaTurnoOficial = 'T1' | 'T2' | 'HOR' | 'ADM' | 'FOL' | 'FER';
+
+export interface TurnoOficialConfig {
+  id: string;
+  sigla: string;
+  nome: string;
+  nomeCurto: string;
+  inicio: string;
+  fim: string;
+  tipo: 'TRABALHO' | 'FOLGA' | 'FERIAS';
+  corBadge: string;
+  corTexto: string;
+  corBorda: string;
+  descricao: string;
+}
+
+export const TURNOS_OFICIAIS_POSTO: TurnoOficialConfig[] = [
+  {
+    id: 'Turno 1 - Manhã (06h - 14h)',
+    sigla: 'T1',
+    nome: 'Turno 1 — Manhã (06h às 14h)',
+    nomeCurto: 'Turno 1 (Manhã)',
+    inicio: '06:00',
+    fim: '14:00',
+    tipo: 'TRABALHO',
+    corBadge: 'bg-amber-100 text-amber-900 border-amber-300',
+    corTexto: 'text-amber-800',
+    corBorda: 'border-amber-200',
+    descricao: '06h00 às 14h00',
+  },
+  {
+    id: 'Turno 2 - Tarde (14h - 22h)',
+    sigla: 'T2',
+    nome: 'Turno 2 — Tarde (14h às 22h)',
+    nomeCurto: 'Turno 2 (Tarde)',
+    inicio: '14:00',
+    fim: '22:00',
+    tipo: 'TRABALHO',
+    corBadge: 'bg-blue-100 text-blue-900 border-blue-300',
+    corTexto: 'text-blue-800',
+    corBorda: 'border-blue-200',
+    descricao: '14h00 às 22h00',
+  },
+  {
+    id: 'Turno Horista',
+    sigla: 'HOR',
+    nome: 'Turno Horista (08h às 14h / Flexível)',
+    nomeCurto: 'Turno Horista',
+    inicio: '08:00',
+    fim: '14:00',
+    tipo: 'TRABALHO',
+    corBadge: 'bg-teal-100 text-teal-900 border-teal-300',
+    corTexto: 'text-teal-800',
+    corBorda: 'border-teal-200',
+    descricao: '08h00 às 14h00 / Flexível',
+  },
+  {
+    id: 'Turno ADM (08h - 17h)',
+    sigla: 'ADM',
+    nome: 'Turno ADM — Administrativo (08h às 17h)',
+    nomeCurto: 'Turno ADM (Administrativo)',
+    inicio: '08:00',
+    fim: '17:00',
+    tipo: 'TRABALHO',
+    corBadge: 'bg-indigo-100 text-indigo-900 border-indigo-300',
+    corTexto: 'text-indigo-800',
+    corBorda: 'border-indigo-200',
+    descricao: '08h00 às 17h00',
+  },
+  {
+    id: 'Folga',
+    sigla: 'FOL',
+    nome: 'Folga / DSR Semanal',
+    nomeCurto: 'Folga (DSR)',
+    inicio: '00:00',
+    fim: '00:00',
+    tipo: 'FOLGA',
+    corBadge: 'bg-emerald-100 text-emerald-900 border-emerald-300',
+    corTexto: 'text-emerald-800',
+    corBorda: 'border-emerald-200',
+    descricao: 'Descanso Semanal Remunerado',
+  },
+  {
+    id: 'Férias',
+    sigla: 'FER',
+    nome: 'Férias Regulamentares',
+    nomeCurto: 'Férias',
+    inicio: '00:00',
+    fim: '00:00',
+    tipo: 'FERIAS',
+    corBadge: 'bg-orange-100 text-orange-900 border-orange-300',
+    corTexto: 'text-orange-800',
+    corBorda: 'border-orange-200',
+    descricao: 'Período Aquisitivo de Férias',
+  },
+];
+
 export interface Escala {
   id: string;
   postoId: string;
@@ -77,7 +174,7 @@ export interface Escala {
   data: string; // YYYY-MM-DD
   dataFormatada?: string; // DD/MM/AAAA
   diaSemana?: string;
-  turno: string; // Manhã, Tarde, Noite, Horista, Plantão, Folga, Outro
+  turno: string; // Turno 1 - Manhã, Turno 2 - Tarde, Turno Horista, Turno ADM, Folga, Férias
   horarioInicio: string; // Entrada HH:MM
   horarioFim: string; // Saída HH:MM
   intervalo?: string | null; // HH:MM — HH:MM ou null

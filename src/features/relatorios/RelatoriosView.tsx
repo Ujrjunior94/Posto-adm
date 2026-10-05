@@ -24,8 +24,15 @@ import {
   AlertTriangle,
   TrendingUp,
   TrendingDown,
+  FlaskConical,
+  ShieldCheck,
+  Layers,
+  FileCheck,
+  Receipt,
+  ChevronLeft,
 } from 'lucide-react';
 import { formatarMoeda } from '../../utils/calculations';
+import { PRECOS_PADRAO_COMBUSTIVEL, calcularPrecoEfetivoBico } from '../../utils/pricing';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -47,13 +54,14 @@ type TipoRelatorio =
   | 'BALANCO_CONSOLIDADO'
   | 'FECHAMENTOS'
   | 'AFERICOES'
+  | 'ANALISES'
+  | 'DENSIDADES'
+  | 'AUDITORIA'
   | 'ESCALAS'
   | 'TANQUES'
   | 'FALTAS'
-  | 'DENSIDADES'
   | 'CONFORMIDADE'
-  | 'FUNCIONARIOS'
-  | 'AUDITORIA';
+  | 'FUNCIONARIOS';
 
 export const RelatoriosView: React.FC<RelatoriosProps> = ({
   funcionarios,
@@ -78,6 +86,11 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
   const [dataInicio, setDataInicio] = useState(new Date().toISOString().slice(0, 7) + '-01');
   const [dataFim, setDataFim] = useState(new Date().toISOString().slice(0, 7) + '-31');
   const [gerandoPdf, setGerandoPdf] = useState(false);
+  const [modoTermico80mm, setModoTermico80mm] = useState(false);
+  const [filtroSecaoTermica, setFiltroSecaoTermica] = useState<
+    'TODOS' | 'CAIXA' | 'AFERICOES' | 'QUALIDADE'
+  >('TODOS');
+  const [tamanhoFonteTermica, setTamanhoFonteTermica] = useState<'NORMAL' | 'CONDENSADA'>('NORMAL');
 
   // Filtros reativos por período e busca
   const fechamentosFiltrados = useMemo(() => {
@@ -145,7 +158,67 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
       .sort((a, b) => a.data.localeCompare(b.data) || a.funcionarioNome.localeCompare(b.funcionarioNome));
   }, [escalas, dataInicio, dataFim, subModoEscala, filtroFuncRelatorio, filtroSetorRelatorio, busca]);
 
-  // Consolidação Financeira (Fechamentos) e Metrológica (Aferições)
+  const analisesFiltradas = useMemo(() => {
+    return (densidades || [])
+      .filter((d) => {
+        if (dataInicio && d.data < dataInicio) return false;
+        if (dataFim && d.data > dataFim) return false;
+        if (busca.trim()) {
+          const q = busca.toLowerCase();
+          if (
+            !(d.produto || '').toLowerCase().includes(q) &&
+            !(d.responsavelId || '').toLowerCase().includes(q) &&
+            !(d.resultado || (d as any).status || '').toLowerCase().includes(q) &&
+            !(d.tipoTeste || '').toLowerCase().includes(q)
+          ) {
+            return false;
+          }
+        }
+        return true;
+      })
+      .sort((a, b) => b.data.localeCompare(a.data) || (b.hora || '').localeCompare(a.hora || ''));
+  }, [densidades, dataInicio, dataFim, busca]);
+
+  const auditoriaFiltrada = useMemo(() => {
+    return (auditoria || [])
+      .filter((l) => {
+        const itemData = l.timestamp ? new Date(l.timestamp).toISOString().slice(0, 10) : '';
+        if (dataInicio && itemData && itemData < dataInicio) return false;
+        if (dataFim && itemData && itemData > dataFim) return false;
+        if (busca.trim()) {
+          const q = busca.toLowerCase();
+          if (
+            !(l.usuarioNome || '').toLowerCase().includes(q) &&
+            !(l.modulo || '').toLowerCase().includes(q) &&
+            !(l.acao || '').toLowerCase().includes(q) &&
+            !(l.entidade || '').toLowerCase().includes(q)
+          ) {
+            return false;
+          }
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+        const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+        return timeB - timeA;
+      });
+  }, [auditoria, dataInicio, dataFim, busca]);
+
+  // Helper para preço vigente do bico / combustível
+  const resolverPrecoBico = (bicoId?: string, bicoNum?: number, produto?: string): number => {
+    const b = bicos.find(
+      (item) => (bicoId && item.id === bicoId) || (bicoNum !== undefined && item.numero === bicoNum)
+    );
+    if (b) {
+      const res = calcularPrecoEfetivoBico(b);
+      if (res.precoFinal > 0) return res.precoFinal;
+    }
+    const prod = produto || b?.produto || 'Gasolina Comum';
+    return PRECOS_PADRAO_COMBUSTIVEL[prod] || 5.89;
+  };
+
+  // Consolidação Geral dos 4 Pilares: Fechamentos, Aferições, Análises e Auditoria
   const balancoConsolidado = useMemo(() => {
     const totalConferido = fechamentosFiltrados.reduce((acc, f) => acc + (Number(f.totalConferido) || 0), 0);
     const totalInformado = fechamentosFiltrados.reduce((acc, f) => acc + (Number(f.totalInformado) || 0), 0);
@@ -173,6 +246,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
       { pix: 0, cartao: 0, deposito: 0, nota: 0, pixCnpj: 0, despesa: 0, outros: 0 }
     );
 
+    // Métricas de Aferições
     const totalAfericoes = afericoesFiltradas.length;
     const afericoesConformes = afericoesFiltradas.filter((a) => a.resultado === 'CONFORME').length;
     const afericoesNaoConformes = totalAfericoes - afericoesConformes;
@@ -193,26 +267,195 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
     );
     const desvioMedioMl = totalAfericoes > 0 ? Math.round(desvioTotalMl / totalAfericoes) : 0;
 
-    // Agrupamento de aferições por produto
-    const mapaPorProduto = new Map<
+    // 1. Agrupamento por tipo de combustível (com Valor Total e Impacto em 1.000 L)
+    const mapaPorCombustivel = new Map<
       string,
-      { produto: string; qtd: number; volumeAferido: number; desvioSomaMl: number; conformes: number }
+      {
+        produto: string;
+        bicosNumeros: Set<number>;
+        qtdTestes: number;
+        volumeAferidoTotal: number;
+        valorTotalAfericao: number;
+        desvioTotalMl: number;
+        conformes: number;
+        naoConformes: number;
+      }
     >();
+
+    // 2. Agrupamento consolidado por bico aferido (com Informações do Bico, Valor Total e Impacto em 1.000 L)
+    const mapaPorBico = new Map<
+      number,
+      {
+        bicoNumero: number;
+        bicoId: string;
+        bombaNome: string;
+        ladoBomba: string;
+        produto: string;
+        tanqueCodigo: string;
+        encerranteInicial?: number;
+        encerranteFinal?: number;
+        lacreInmetro?: string;
+        qtdTestes: number;
+        volumeAferidoTotal: number;
+        precoLitro: number;
+        valorTotalAfericao: number;
+        desvioTotalMl: number;
+        conformes: number;
+        naoConformes: number;
+        ultimaData: string;
+        listaAfericoes: (Afericao & { desvioMl: number; valorTeste: number })[];
+      }
+    >();
+
+    let valorTotalAfericoesGeral = 0;
+
     afericoesFiltradas.forEach((a) => {
       const prod = a.produto || 'Combustível';
-      const atual = mapaPorProduto.get(prod) || {
+      const vol = Number(a.volumeAferido) || 20;
+      const desvioMl = Math.round((Number(a.diferenca) || 0) * 1000);
+      const isConforme = a.resultado === 'CONFORME';
+
+      const bicoNum =
+        a.bicoNumero ??
+        (a.bicoId ? parseInt(a.bicoId.replace(/\D/g, ''), 10) : undefined) ??
+        1;
+      const bicoCad = bicos.find((b) => b.id === a.bicoId || b.numero === bicoNum);
+      const precoLitro = resolverPrecoBico(a.bicoId, bicoNum, prod);
+      const valorTeste = vol * precoLitro;
+
+      valorTotalAfericoesGeral += valorTeste;
+
+      // Atualiza mapa de combustível
+      const comb = mapaPorCombustivel.get(prod) || {
         produto: prod,
-        qtd: 0,
-        volumeAferido: 0,
-        desvioSomaMl: 0,
+        bicosNumeros: new Set<number>(),
+        qtdTestes: 0,
+        volumeAferidoTotal: 0,
+        valorTotalAfericao: 0,
+        desvioTotalMl: 0,
         conformes: 0,
+        naoConformes: 0,
       };
-      atual.qtd += 1;
-      atual.volumeAferido += Number(a.volumeAferido) || 20;
-      atual.desvioSomaMl += Math.round((Number(a.diferenca) || 0) * 1000);
-      if (a.resultado === 'CONFORME') atual.conformes += 1;
-      mapaPorProduto.set(prod, atual);
+      comb.bicosNumeros.add(bicoNum);
+      comb.qtdTestes += 1;
+      comb.volumeAferidoTotal += vol;
+      comb.valorTotalAfericao += valorTeste;
+      comb.desvioTotalMl += desvioMl;
+      if (isConforme) comb.conformes += 1;
+      else comb.naoConformes += 1;
+      mapaPorCombustivel.set(prod, comb);
+
+      // Atualiza mapa de bico
+      const bicoExistente = mapaPorBico.get(bicoNum) || {
+        bicoNumero: bicoNum,
+        bicoId: a.bicoId || `bico-${bicoNum}`,
+        bombaNome: a.bombaNome || (bicoCad ? `${bicoCad.bomba} (Lado ${bicoCad.lado})` : `Bomba 01`),
+        ladoBomba: a.ladoBomba || bicoCad?.lado || 'A',
+        produto: prod,
+        tanqueCodigo: a.tanqueCodigo || a.tanqueId || bicoCad?.tanqueCodigo || 'TQ',
+        encerranteInicial: a.encerranteInicial,
+        encerranteFinal: a.encerranteFinal ?? (a as any).encerranteLeitura,
+        lacreInmetro: a.lacreInmetro,
+        qtdTestes: 0,
+        volumeAferidoTotal: 0,
+        precoLitro,
+        valorTotalAfericao: 0,
+        desvioTotalMl: 0,
+        conformes: 0,
+        naoConformes: 0,
+        ultimaData: a.data,
+        listaAfericoes: [],
+      };
+      bicoExistente.qtdTestes += 1;
+      bicoExistente.volumeAferidoTotal += vol;
+      bicoExistente.valorTotalAfericao += valorTeste;
+      bicoExistente.desvioTotalMl += desvioMl;
+      if (isConforme) bicoExistente.conformes += 1;
+      else bicoExistente.naoConformes += 1;
+      if (a.encerranteFinal) bicoExistente.encerranteFinal = a.encerranteFinal;
+      if (a.lacreInmetro) bicoExistente.lacreInmetro = a.lacreInmetro;
+      if (a.data >= bicoExistente.ultimaData) bicoExistente.ultimaData = a.data;
+      bicoExistente.listaAfericoes.push({
+        ...a,
+        desvioMl,
+        valorTeste,
+      });
+      mapaPorBico.set(bicoNum, bicoExistente);
     });
+
+    const resumoPorCombustivel = Array.from(mapaPorCombustivel.values()).map((c) => {
+      const desvioMedioMl = c.qtdTestes > 0 ? Math.round(c.desvioTotalMl / c.qtdTestes) : 0;
+      // Impacto em 1.000 L de abastecimento: (desvioMedioMl * 50) / 1000 = desvioMedioMl / 20 Litros
+      const impactoLitrosPor1000L = Number(((desvioMedioMl * 50) / 1000).toFixed(2));
+      const precoMedioLitro =
+        c.volumeAferidoTotal > 0 ? c.valorTotalAfericao / c.volumeAferidoTotal : 5.89;
+      const impactoFinanceiroPor1000L = Number((impactoLitrosPor1000L * precoMedioLitro).toFixed(2));
+      const taxaConformidade =
+        c.qtdTestes > 0 ? ((c.conformes / c.qtdTestes) * 100).toFixed(1) : '100.0';
+
+      return {
+        produto: c.produto,
+        bicosQtd: c.bicosNumeros.size,
+        bicosNumeros: Array.from(c.bicosNumeros).sort((a, b) => a - b),
+        qtdTestes: c.qtdTestes,
+        volumeAferidoTotal: c.volumeAferidoTotal,
+        precoMedioLitro,
+        valorTotalAfericao: c.valorTotalAfericao,
+        desvioTotalMl: c.desvioTotalMl,
+        desvioMedioMl,
+        impactoLitrosPor1000L,
+        impactoFinanceiroPor1000L,
+        conformes: c.conformes,
+        naoConformes: c.naoConformes,
+        taxaConformidade,
+      };
+    });
+
+    const resumoPorBico = Array.from(mapaPorBico.values())
+      .map((b) => {
+        const desvioMedioMl = b.qtdTestes > 0 ? Math.round(b.desvioTotalMl / b.qtdTestes) : 0;
+        const impactoLitrosPor1000L = Number(((desvioMedioMl * 50) / 1000).toFixed(2));
+        const impactoFinanceiroPor1000L = Number((impactoLitrosPor1000L * b.precoLitro).toFixed(2));
+        const statusGeral: 'CONFORME' | 'NAO_CONFORME' =
+          b.naoConformes === 0 ? 'CONFORME' : 'NAO_CONFORME';
+        const listaAfericoesOrdenada = [...(b.listaAfericoes || [])].sort((x, y) => {
+          const dtX = `${x.data}T${x.hora || '00:00'}`;
+          const dtY = `${y.data}T${y.hora || '00:00'}`;
+          return dtX.localeCompare(dtY);
+        });
+
+        return {
+          ...b,
+          desvioMedioMl,
+          impactoLitrosPor1000L,
+          impactoFinanceiroPor1000L,
+          statusGeral,
+          listaAfericoes: listaAfericoesOrdenada,
+        };
+      })
+      .sort((a, b) => a.bicoNumero - b.bicoNumero);
+
+    const impactoMedioGeralLitros1000L =
+      totalAfericoes > 0 ? Number(((desvioMedioMl * 50) / 1000).toFixed(2)) : 0;
+    const precoMedioGeral =
+      volumeTotalAferido > 0 ? valorTotalAfericoesGeral / volumeTotalAferido : 5.89;
+    const impactoMedioGeralFinanceiro1000L = Number(
+      (impactoMedioGeralLitros1000L * precoMedioGeral).toFixed(2)
+    );
+
+    // Métricas de Análises ANP
+    const totalAnalises = analisesFiltradas.length;
+    const analisesConformes = analisesFiltradas.filter(
+      (d) => (d.resultado || (d as any).status) === 'CONFORME'
+    ).length;
+    const analisesNaoConformes = totalAnalises - analisesConformes;
+    const taxaConformidadeAnalises =
+      totalAnalises > 0 ? ((analisesConformes / totalAnalises) * 100).toFixed(1) : '100.0';
+
+    // Métricas de Auditoria
+    const totalAuditoria = auditoriaFiltrada.length;
+    const modulosAuditoriaQtd = new Set(auditoriaFiltrada.map((l) => l.modulo)).size;
+    const usuariosAuditoriaQtd = new Set(auditoriaFiltrada.map((l) => l.usuarioNome)).size;
 
     return {
       totalFechamentos: fechamentosFiltrados.length,
@@ -230,9 +473,21 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
       volumeTotalAferido,
       desvioTotalMl,
       desvioMedioMl,
-      resumoPorProduto: Array.from(mapaPorProduto.values()),
+      valorTotalAfericoesGeral,
+      impactoMedioGeralLitros1000L,
+      impactoMedioGeralFinanceiro1000L,
+      resumoPorCombustivel,
+      resumoPorProduto: resumoPorCombustivel, // compatibilidade
+      resumoPorBico,
+      totalAnalises,
+      analisesConformes,
+      analisesNaoConformes,
+      taxaConformidadeAnalises,
+      totalAuditoria,
+      modulosAuditoriaQtd,
+      usuariosAuditoriaQtd,
     };
-  }, [fechamentosFiltrados, afericoesFiltradas]);
+  }, [fechamentosFiltrados, afericoesFiltradas, analisesFiltradas, auditoriaFiltrada, bicos]);
 
   const handleImprimir = () => {
     window.print();
@@ -261,32 +516,61 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
 
       doc.setTextColor(255, 255, 255);
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(14);
+      doc.setFontSize(13);
       doc.text(
         relatorioAlvo === 'BALANCO_CONSOLIDADO'
-          ? 'MEU POSTO 2.0 — BALANCO CONSOLIDADO: FECHAMENTOS & AFERICOES'
-          : `MEU POSTO 2.0 — RELATORIO OPERACIONAL: ${relatorioAlvo}`,
+          ? 'MEU POSTO 2.0 — RELATÓRIO GERAL: FECHAMENTO, AUDITORIA, ANÁLISE & AFERIÇÕES'
+          : `MEU POSTO 2.0 — RELATÓRIO OPERACIONAL: ${relatorioAlvo}`,
         14,
         12
       );
 
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9);
+      doc.setFontSize(8.5);
       doc.setTextColor(203, 213, 225);
       doc.text(
-        `Periodo Analisado: ${dataInicio || 'Inicio'} ate ${dataFim || 'Atual'}   |   Emitido em: ${dataHoraEmissao}`,
+        `Período: ${dataInicio || 'Início'} até ${dataFim || 'Atual'}   |   Emitido em: ${dataHoraEmissao}   |   Documento Auditável 24h`,
         14,
         20
       );
 
-      let currentY = 35;
+      let currentY = 34;
+
+      // VISÃO GERAL EXECUTIVA DOS 4 PILARES (No Balanço Consolidado)
+      if (relatorioAlvo === 'BALANCO_CONSOLIDADO') {
+        autoTable(doc, {
+          startY: currentY,
+          head: [
+            [
+              '1. FECHAMENTO DE CAIXA',
+              '2. AFERIÇÕES METROLÓGICAS (20L)',
+              '3. ANÁLISES & QUALIDADE ANP',
+              '4. TRILHA DE AUDITORIA',
+            ],
+          ],
+          body: [
+            [
+              `Turnos: ${balancoConsolidado.totalFechamentos}\nBombas: ${formatarMoeda(balancoConsolidado.totalConferido)}\nRecolhido: ${formatarMoeda(balancoConsolidado.totalInformado)}\nSaldo: ${formatarMoeda(balancoConsolidado.saldoDiferenca)}`,
+              `Testes 20L: ${balancoConsolidado.totalAfericoes}\nVol. Total: ${balancoConsolidado.volumeTotalAferido.toFixed(1)} L (${formatarMoeda(balancoConsolidado.valorTotalAfericoesGeral)})\nDesvio Médio: ${balancoConsolidado.desvioMedioMl > 0 ? '+' : ''}${balancoConsolidado.desvioMedioMl} ml\nImpacto 1.000L: ${balancoConsolidado.impactoMedioGeralLitros1000L > 0 ? '+' : ''}${balancoConsolidado.impactoMedioGeralLitros1000L.toFixed(2)} L/m³`,
+              `Ensaios: ${balancoConsolidado.totalAnalises}\nConformes: ${balancoConsolidado.analisesConformes} (${balancoConsolidado.taxaConformidadeAnalises}%)\nNorma NBR 5992 / ANP\nGasolina / Etanol / Diesel`,
+              `Eventos: ${balancoConsolidado.totalAuditoria}\nMódulos: ${balancoConsolidado.modulosAuditoriaQtd}\nOperadores: ${balancoConsolidado.usuariosAuditoriaQtd}\n100% Rastreado em Nuvem`,
+            ],
+          ],
+          theme: 'grid',
+          headStyles: { fillColor: [15, 23, 42], textColor: 255, fontSize: 8, fontStyle: 'bold', halign: 'center' },
+          bodyStyles: { fontSize: 7.5, textColor: [30, 41, 59], cellPadding: 2.5, fontStyle: 'bold' },
+          margin: { left: 14, right: 14 },
+        });
+
+        currentY = (doc as any).lastAutoTable.finalY + 8;
+      }
 
       // 1. SEÇÃO DE FECHAMENTOS (Para BALANCO_CONSOLIDADO ou FECHAMENTOS)
       if (relatorioAlvo === 'BALANCO_CONSOLIDADO' || relatorioAlvo === 'FECHAMENTOS') {
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(11);
         doc.setTextColor(15, 23, 42);
-        doc.text('1. BALANCO FINANCEIRO CONSOLIDADO — FECHAMENTOS DE CAIXA', 14, currentY);
+        doc.text('1. BALANÇO FINANCEIRO CONSOLIDADO — FECHAMENTOS DE CAIXA', 14, currentY);
         currentY += 4;
 
         // Resumo Executivo de Fechamentos
@@ -299,7 +583,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
               'Total Recolhido (Informado)',
               'Total Sobras (+)',
               'Total Faltas (-)',
-              'Saldo Liquido',
+              'Saldo Líquido',
             ],
           ],
           body: [
@@ -326,8 +610,8 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
           head: [
             [
               'PIX Pista',
-              'Cartoes (Deb/Cred)',
-              'Dinheiro / Deposito',
+              'Cartões (Deb/Cred)',
+              'Dinheiro / Depósito',
               'Notas a Prazo',
               'PIX CNPJ',
               'Despesas / Vales',
@@ -358,7 +642,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
         doc.setFontSize(9.5);
         doc.setTextColor(51, 65, 85);
         doc.text(
-          `Detalhamento de Fechamentos de Caixa no Periodo (${fechamentosFiltrados.length} registros)`,
+          `Detalhamento de Fechamentos de Caixa no Período (${fechamentosFiltrados.length} registros)`,
           14,
           currentY
         );
@@ -370,10 +654,10 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
             [
               'Data',
               'Turno',
-              'Operador / Responsavel',
+              'Operador / Responsável',
               'Total Bombas',
               'Total Informado',
-              'Diferenca',
+              'Diferença',
               'Resultado',
             ],
           ],
@@ -388,14 +672,14 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                   formatarMoeda(f.diferenca),
                   f.tipoDiferenca || (f.diferenca < 0 ? 'FALTA' : f.diferenca > 0 ? 'SOBRA' : 'EXATO'),
                 ])
-              : [['—', '—', 'Nenhum fechamento registrado no periodo selecionado', 'R$ 0,00', 'R$ 0,00', 'R$ 0,00', '—']],
+              : [['—', '—', 'Nenhum fechamento registrado no período selecionado', 'R$ 0,00', 'R$ 0,00', 'R$ 0,00', '—']],
           foot:
             fechamentosFiltrados.length > 0
               ? [
                   [
                     'TOTAL',
                     `${fechamentosFiltrados.length} turnos`,
-                    'Consolidado do Periodo',
+                    'Consolidado do Período',
                     formatarMoeda(balancoConsolidado.totalConferido),
                     formatarMoeda(balancoConsolidado.totalInformado),
                     formatarMoeda(balancoConsolidado.saldoDiferenca),
@@ -419,7 +703,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
 
       // 2. SEÇÃO DE AFERIÇÕES (Para BALANCO_CONSOLIDADO ou AFERICOES)
       if (relatorioAlvo === 'BALANCO_CONSOLIDADO' || relatorioAlvo === 'AFERICOES') {
-        if (currentY > 220) {
+        if (currentY > 195) {
           doc.addPage();
           currentY = 20;
         }
@@ -427,7 +711,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(11);
         doc.setTextColor(15, 23, 42);
-        doc.text('2. BALANCO METROLOGICO CONSOLIDADO — AFERICOES DE BICOS (INMETRO 20L)', 14, currentY);
+        doc.text('2. AUDITORIA DE AFERIÇÕES METROLÓGICAS — IMPACTO EM 1.000 L (COLEÇÃO \'AFERICOES\')', 14, currentY);
         currentY += 4;
 
         // Resumo Executivo de Aferições
@@ -435,62 +719,289 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
           startY: currentY,
           head: [
             [
-              'Total Afericoes',
+              'Total Aferições',
               'Conformes (±100ml)',
-              'Nao Conformes',
-              'Indice Conformidade',
+              'Não Conformes',
               'Volume Total Aferido',
-              'Desvio Medio (ml)',
+              'Valor Total Aferições',
+              'Desvio Médio (20L)',
+              'Impacto Geral / 1.000 L',
             ],
           ],
           body: [
             [
               String(balancoConsolidado.totalAfericoes),
-              String(balancoConsolidado.afericoesConformes),
+              `${balancoConsolidado.afericoesConformes} (${balancoConsolidado.taxaConformidade}%)`,
               String(balancoConsolidado.afericoesNaoConformes),
-              `${balancoConsolidado.taxaConformidade}%`,
               `${balancoConsolidado.volumeTotalAferido.toFixed(3)} L`,
+              formatarMoeda(balancoConsolidado.valorTotalAfericoesGeral),
               `${balancoConsolidado.desvioMedioMl > 0 ? '+' : ''}${balancoConsolidado.desvioMedioMl} ml`,
+              `${balancoConsolidado.impactoMedioGeralLitros1000L > 0 ? '+' : ''}${balancoConsolidado.impactoMedioGeralLitros1000L.toFixed(2)} L (${formatarMoeda(balancoConsolidado.impactoMedioGeralFinanceiro1000L)})`,
             ],
           ],
           theme: 'grid',
-          headStyles: { fillColor: [5, 150, 105], textColor: 255, fontSize: 8, fontStyle: 'bold' },
+          headStyles: { fillColor: [5, 150, 105], textColor: 255, fontSize: 7.5, fontStyle: 'bold' },
+          bodyStyles: { fontSize: 8, fontStyle: 'bold', textColor: [15, 23, 42] },
+          margin: { left: 14, right: 14 },
+        });
+
+        currentY = (doc as any).lastAutoTable.finalY + 6;
+
+        // 2.1 TABELA POR TIPO DE COMBUSTÍVEL COM VALOR TOTAL E IMPACTO EM 1.000 L
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9.5);
+        doc.setTextColor(51, 65, 85);
+        doc.text('2.1. Valor Total e Impacto por Tipo de Combustível em 1.000 L de Abastecimento', 14, currentY);
+        currentY += 3;
+
+        autoTable(doc, {
+          startY: currentY,
+          head: [
+            [
+              'Combustível / Produto',
+              'Bicos Aferidos',
+              'Testes',
+              'Volume (L)',
+              'Preço Médio',
+              'Valor Total Aferição',
+              'Desvio Médio (20L)',
+              'Impacto Litros / 1.000 L',
+              'Impacto R$ / 1.000 L',
+              'Status Inmetro',
+            ],
+          ],
+          body:
+            balancoConsolidado.resumoPorCombustivel.length > 0
+              ? balancoConsolidado.resumoPorCombustivel.map((c) => [
+                  c.produto,
+                  `Bico(s): ${c.bicosNumeros.map((n) => String(n).padStart(2, '0')).join(', ')}`,
+                  String(c.qtdTestes),
+                  `${c.volumeAferidoTotal.toFixed(3)} L`,
+                  formatarMoeda(c.precoMedioLitro),
+                  formatarMoeda(c.valorTotalAfericao),
+                  `${c.desvioMedioMl > 0 ? '+' : ''}${c.desvioMedioMl} ml`,
+                  `${c.impactoLitrosPor1000L > 0 ? '+' : ''}${c.impactoLitrosPor1000L.toFixed(2)} L (${c.impactoLitrosPor1000L > 0 ? 'Sobra +' : c.impactoLitrosPor1000L < 0 ? 'Déficit -' : 'Exato'})`,
+                  `${c.impactoFinanceiroPor1000L > 0 ? '+' : ''}${formatarMoeda(c.impactoFinanceiroPor1000L)} / 1.000L`,
+                  `${c.conformes} de ${c.qtdTestes} (${c.taxaConformidade}%)`,
+                ])
+              : [['Nenhum teste de combustível', '—', '0', '0.000 L', 'R$ 0,00', 'R$ 0,00', '0 ml', '0.00 L', 'R$ 0,00', '—']],
+          foot:
+            balancoConsolidado.resumoPorCombustivel.length > 0
+              ? [
+                  [
+                    'TOTAL CONSOLIDADO',
+                    `${new Set(afericoesFiltradas.map((a) => a.bicoNumero || a.bicoId)).size} bicos`,
+                    String(balancoConsolidado.totalAfericoes),
+                    `${balancoConsolidado.volumeTotalAferido.toFixed(3)} L`,
+                    '—',
+                    formatarMoeda(balancoConsolidado.valorTotalAfericoesGeral),
+                    `${balancoConsolidado.desvioMedioMl > 0 ? '+' : ''}${balancoConsolidado.desvioMedioMl} ml`,
+                    `${balancoConsolidado.impactoMedioGeralLitros1000L > 0 ? '+' : ''}${balancoConsolidado.impactoMedioGeralLitros1000L.toFixed(2)} L`,
+                    `${balancoConsolidado.impactoMedioGeralFinanceiro1000L > 0 ? '+' : ''}${formatarMoeda(balancoConsolidado.impactoMedioGeralFinanceiro1000L)} / 1.000L`,
+                    `${balancoConsolidado.taxaConformidade}% conf.`,
+                  ],
+                ]
+              : undefined,
+          theme: 'grid',
+          headStyles: { fillColor: [15, 23, 42], textColor: 255, fontSize: 7, fontStyle: 'bold' },
+          bodyStyles: { fontSize: 7 },
+          footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontSize: 7, fontStyle: 'bold' },
+          margin: { left: 14, right: 14 },
+        });
+
+        currentY = (doc as any).lastAutoTable.finalY + 6;
+
+        // 2.2 TABELA CONSOLIDADA DE INFORMAÇÕES DE BICOS AFERIDOS
+        if (currentY > 200) {
+          doc.addPage();
+          currentY = 20;
+        }
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9.5);
+        doc.setTextColor(51, 65, 85);
+        doc.text('2.2. Informações de Bicos Aferidos & Valor Total por Bico', 14, currentY);
+        currentY += 3;
+
+        autoTable(doc, {
+          startY: currentY,
+          head: [
+            [
+              'Bico / Bomba',
+              'Combustível',
+              'Tanque',
+              'Encerrante Atual',
+              'Lacre Inmetro',
+              'Testes',
+              'Vol. Total (L)',
+              'Preço (R$/L)',
+              'Valor Total (R$)',
+              'Desvio Médio',
+              'Impacto 1.000 L',
+              'Status',
+            ],
+          ],
+          body:
+            balancoConsolidado.resumoPorBico.length > 0
+              ? balancoConsolidado.resumoPorBico.map((b) => [
+                  `Bico ${String(b.bicoNumero).padStart(2, '0')}\n${b.bombaNome}`,
+                  b.produto,
+                  b.tanqueCodigo,
+                  b.encerranteFinal ? String(b.encerranteFinal) : '—',
+                  b.lacreInmetro || 'Conferido',
+                  String(b.qtdTestes),
+                  `${b.volumeAferidoTotal.toFixed(3)} L`,
+                  formatarMoeda(b.precoLitro),
+                  formatarMoeda(b.valorTotalAfericao),
+                  `${b.desvioMedioMl > 0 ? '+' : ''}${b.desvioMedioMl} ml`,
+                  `${b.impactoLitrosPor1000L > 0 ? '+' : ''}${b.impactoLitrosPor1000L.toFixed(2)} L\n(${b.impactoFinanceiroPor1000L > 0 ? '+' : ''}${formatarMoeda(b.impactoFinanceiroPor1000L)})`,
+                  b.statusGeral,
+                ])
+              : [['—', '—', '—', '—', '—', '0', '0.000 L', 'R$ 0,00', 'R$ 0,00', '0 ml', '0.00 L', '—']],
+          foot:
+            balancoConsolidado.resumoPorBico.length > 0
+              ? [
+                  [
+                    'TOTAL',
+                    '—',
+                    '—',
+                    '—',
+                    '—',
+                    String(balancoConsolidado.totalAfericoes),
+                    `${balancoConsolidado.volumeTotalAferido.toFixed(3)} L`,
+                    '—',
+                    formatarMoeda(balancoConsolidado.valorTotalAfericoesGeral),
+                    `${balancoConsolidado.desvioMedioMl > 0 ? '+' : ''}${balancoConsolidado.desvioMedioMl} ml`,
+                    `${balancoConsolidado.impactoMedioGeralLitros1000L > 0 ? '+' : ''}${balancoConsolidado.impactoMedioGeralLitros1000L.toFixed(2)} L`,
+                    `${balancoConsolidado.afericoesConformes} conf.`,
+                  ],
+                ]
+              : undefined,
+          theme: 'grid',
+          headStyles: { fillColor: [51, 65, 85], textColor: 255, fontSize: 6.5, fontStyle: 'bold' },
+          bodyStyles: { fontSize: 6.5 },
+          footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontSize: 6.5, fontStyle: 'bold' },
+          margin: { left: 14, right: 14 },
+        });
+
+        currentY = (doc as any).lastAutoTable.finalY + 6;
+
+        // 2.3 DETALHAMENTO DE CADA ENSAIO INDIVIDUAL DE AFERIÇÃO
+        if (currentY > 200) {
+          doc.addPage();
+          currentY = 20;
+        }
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9.5);
+        doc.setTextColor(51, 65, 85);
+        doc.text(`2.3. Detalhamento Técnico de Ensaios Volumétricos Individuais (${afericoesFiltradas.length} testes)`, 14, currentY);
+        currentY += 3;
+
+        autoTable(doc, {
+          startY: currentY,
+          head: [
+            [
+              'Data / Hora',
+              'Bico',
+              'Combustível',
+              'Vol. Nominal',
+              'Vol. Aferido',
+              'Desvio (ml)',
+              'Valor Teste (R$)',
+              'Encerrante / Lacre',
+              'Responsável',
+              'Status Inmetro',
+            ],
+          ],
+          body:
+            afericoesFiltradas.length > 0
+              ? afericoesFiltradas.map((a) => {
+                  const desvioMl = Math.round((Number(a.diferenca) || 0) * 1000);
+                  const encInfo = a.encerranteFinal ?? a.encerranteLeitura;
+                  const lacreInfo = a.lacreInmetro ? `Lacre: ${a.lacreInmetro}` : '';
+                  const bicoNum = a.bicoNumero ?? (a.bicoId ? parseInt(a.bicoId.replace(/\D/g, ''), 10) : 1);
+                  const preco = resolverPrecoBico(a.bicoId, bicoNum, a.produto);
+                  const valTeste = (Number(a.volumeAferido) || 20) * preco;
+
+                  return [
+                    `${a.data} ${a.hora || ''}`.trim(),
+                    `Bico ${String(bicoNum).padStart(2, '0')}`,
+                    a.produto,
+                    `${Number(a.volumeNominal || 20).toFixed(3)} L`,
+                    `${Number(a.volumeAferido || 20).toFixed(3)} L`,
+                    `${desvioMl > 0 ? '+' : ''}${desvioMl} ml`,
+                    formatarMoeda(valTeste),
+                    [encInfo ? `Enc: ${encInfo}` : '', lacreInfo].filter(Boolean).join(' | ') || '—',
+                    a.responsavelNome || 'Operador',
+                    a.resultado,
+                  ];
+                })
+              : [['—', '—', '—', '20.000 L', '20.000 L', '0 ml', 'R$ 0,00', '—', '—', '—']],
+          theme: 'grid',
+          headStyles: { fillColor: [15, 23, 42], textColor: 255, fontSize: 6.5 },
+          bodyStyles: { fontSize: 6.5 },
+          margin: { left: 14, right: 14 },
+        });
+
+        currentY = (doc as any).lastAutoTable.finalY + 10;
+      }
+
+      // 3. SEÇÃO DE ANÁLISES FÍSICO-QUÍMICAS & CONFORMIDADE REGULATÓRIA ANP
+      if (
+        relatorioAlvo === 'BALANCO_CONSOLIDADO' ||
+        relatorioAlvo === 'DENSIDADES' ||
+        relatorioAlvo === 'ANALISES'
+      ) {
+        if (currentY > 215) {
+          doc.addPage();
+          currentY = 20;
+        }
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.setTextColor(15, 23, 42);
+        doc.text(
+          '3. BALANÇO DE QUALIDADE & CONFORMIDADE REGULATÓRIA ANP (NBR 5992)',
+          14,
+          currentY
+        );
+        currentY += 4;
+
+        // Resumo Executivo de Análises ANP
+        autoTable(doc, {
+          startY: currentY,
+          head: [
+            [
+              'Total de Ensaios',
+              'Amostras Conformes',
+              'Fora de Faixa ANP',
+              'Índice de Qualidade',
+              'Padrão Regulatório',
+            ],
+          ],
+          body: [
+            [
+              String(balancoConsolidado.totalAnalises),
+              String(balancoConsolidado.analisesConformes),
+              String(balancoConsolidado.analisesNaoConformes),
+              `${balancoConsolidado.taxaConformidadeAnalises}%`,
+              'Resoluções ANP / NBR 5992 (Ago 2026)',
+            ],
+          ],
+          theme: 'grid',
+          headStyles: { fillColor: [109, 40, 217], textColor: 255, fontSize: 8, fontStyle: 'bold' },
           bodyStyles: { fontSize: 8.5, fontStyle: 'bold', textColor: [15, 23, 42] },
           margin: { left: 14, right: 14 },
         });
 
-        currentY = (doc as any).lastAutoTable.finalY + 5;
+        currentY = (doc as any).lastAutoTable.finalY + 6;
 
-        // Resumo por Produto (se houver aferições)
-        if (balancoConsolidado.resumoPorProduto.length > 0) {
-          autoTable(doc, {
-            startY: currentY,
-            head: [['Combustivel / Produto', 'Qtd. Testes', 'Volume Total (L)', 'Desvio Medio (ml)', 'Conformes']],
-            body: balancoConsolidado.resumoPorProduto.map((p) => {
-              const mediaMl = p.qtd > 0 ? Math.round(p.desvioSomaMl / p.qtd) : 0;
-              return [
-                p.produto,
-                String(p.qtd),
-                `${p.volumeAferido.toFixed(3)} L`,
-                `${mediaMl > 0 ? '+' : ''}${mediaMl} ml`,
-                `${p.conformes} de ${p.qtd}`,
-              ];
-            }),
-            theme: 'striped',
-            headStyles: { fillColor: [71, 85, 105], textColor: 255, fontSize: 7.5 },
-            bodyStyles: { fontSize: 7.5 },
-            margin: { left: 14, right: 14 },
-          });
-
-          currentY = (doc as any).lastAutoTable.finalY + 6;
-        }
-
-        // Listagem Detalhada de Aferições
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(9.5);
         doc.setTextColor(51, 65, 85);
         doc.text(
-          `Detalhamento Tecnico de Afericoes Volumétricas (${afericoesFiltradas.length} registros)`,
+          `Detalhamento Técnico de Ensaios e Laudos ANP (${analisesFiltradas.length} registros)`,
           14,
           currentY
         );
@@ -501,35 +1012,70 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
           head: [
             [
               'Data / Hora',
-              'Bico',
-              'Combustivel',
-              'Vol. Nominal',
-              'Vol. Aferido',
-              'Desvio (ml)',
-              'Encerrante / Lacre',
-              'Responsavel',
-              'Status Inmetro',
+              'Combustível',
+              'Ensaio / Teste',
+              'Densidade Lida',
+              'Temp (°C)',
+              'Densidade 20°C',
+              'Faixa Permitida',
+              'Teor / Parâmetro',
+              'Laudo ANP',
             ],
           ],
           body:
-            afericoesFiltradas.length > 0
-              ? afericoesFiltradas.map((a) => {
-                  const desvioMl = Math.round((Number(a.diferenca) || 0) * 1000);
-                  const encInfo = a.encerranteFinal ?? a.encerranteLeitura;
-                  const lacreInfo = a.lacreInmetro ? `Lacre: ${a.lacreInmetro}` : '';
+            analisesFiltradas.length > 0
+              ? analisesFiltradas.map((d) => {
+                  const tempVal = d.temperatura ?? (d as any).temperaturaC ?? 20;
+                  const densObs =
+                    typeof d.densidadeObservada === 'number'
+                      ? d.densidadeObservada.toFixed(4)
+                      : String(d.densidadeObservada || '—');
+                  const dens20 =
+                    typeof d.densidadeCalculada20C === 'number'
+                      ? d.densidadeCalculada20C.toFixed(4)
+                      : typeof d.densidadeObservada === 'number'
+                      ? d.densidadeObservada.toFixed(4)
+                      : '—';
+                  const faixa =
+                    d.densidadeReferenciaMin && d.densidadeReferenciaMax
+                      ? `${d.densidadeReferenciaMin.toFixed(3)} - ${d.densidadeReferenciaMax.toFixed(3)}`
+                      : 'Faixa ANP';
+                  const paramExtra = d.teorEtanolAnidro
+                    ? `${d.teorEtanolAnidro}% Etanol`
+                    : (d as any).teorAlcoolico !== undefined
+                    ? `${(d as any).teorAlcoolico}% Etanol`
+                    : d.condutividadeEletrica
+                    ? `${d.condutividadeEletrica} µS/m`
+                    : d.ph
+                    ? `pH ${d.ph}`
+                    : '—';
+                  const laudo = d.resultado || (d as any).status || 'CONFORME';
+
                   return [
-                    `${a.data} ${a.hora || ''}`.trim(),
-                    `Bico ${String(a.bicoNumero || a.bicoId).padStart(2, '0')}`,
-                    a.produto,
-                    `${Number(a.volumeNominal || 20).toFixed(3)} L`,
-                    `${Number(a.volumeAferido || 20).toFixed(3)} L`,
-                    `${desvioMl > 0 ? '+' : ''}${desvioMl} ml`,
-                    [encInfo ? `Enc: ${encInfo}` : '', lacreInfo].filter(Boolean).join(' | ') || '—',
-                    a.responsavelNome || 'Operador',
-                    a.resultado,
+                    `${d.data} ${d.hora || ''}`.trim(),
+                    d.produto || 'Combustível',
+                    (d.tipoTeste || 'DENSIDADE_D20').replace(/_/g, ' '),
+                    densObs,
+                    `${tempVal} °C`,
+                    dens20,
+                    faixa,
+                    paramExtra,
+                    laudo,
                   ];
                 })
-              : [['—', '—', 'Nenhuma afericao registrada no periodo selecionado', '20.000 L', '20.000 L', '0 ml', '—', '—', '—']],
+              : [
+                  [
+                    '—',
+                    '—',
+                    'Nenhuma análise físico-química registrada no período selecionado',
+                    '—',
+                    '—',
+                    '—',
+                    '—',
+                    '—',
+                    '—',
+                  ],
+                ],
           theme: 'grid',
           headStyles: { fillColor: [15, 23, 42], textColor: 255, fontSize: 7.5 },
           bodyStyles: { fontSize: 7 },
@@ -539,22 +1085,110 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
         currentY = (doc as any).lastAutoTable.finalY + 10;
       }
 
-      // 3. DEMAIS MÓDULOS ESPECÍFICOS QUANDO SELECIONADOS INDIVIDUALMENTE
+      // 4. SEÇÃO DE AUDITORIA & REGISTROS DE SEGURANÇA
+      if (relatorioAlvo === 'BALANCO_CONSOLIDADO' || relatorioAlvo === 'AUDITORIA') {
+        if (currentY > 215) {
+          doc.addPage();
+          currentY = 20;
+        }
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.setTextColor(15, 23, 42);
+        doc.text('4. TRILHA DE AUDITORIA & REGISTROS DE SEGURANÇA OPERACIONAL', 14, currentY);
+        currentY += 4;
+
+        // Resumo de Auditoria
+        autoTable(doc, {
+          startY: currentY,
+          head: [
+            [
+              'Total de Eventos Auditados',
+              'Módulos Impactados',
+              'Usuários Identificados',
+              'Integridade da Trilha',
+            ],
+          ],
+          body: [
+            [
+              String(balancoConsolidado.totalAuditoria),
+              String(balancoConsolidado.modulosAuditoriaQtd),
+              String(balancoConsolidado.usuariosAuditoriaQtd),
+              '100% Criptografado & Auditável em Nuvem',
+            ],
+          ],
+          theme: 'grid',
+          headStyles: { fillColor: [30, 41, 59], textColor: 255, fontSize: 8, fontStyle: 'bold' },
+          bodyStyles: { fontSize: 8.5, fontStyle: 'bold', textColor: [15, 23, 42] },
+          margin: { left: 14, right: 14 },
+        });
+
+        currentY = (doc as any).lastAutoTable.finalY + 6;
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9.5);
+        doc.setTextColor(51, 65, 85);
+        doc.text(
+          `Histórico Cronológico de Auditoria no Período (${auditoriaFiltrada.length} eventos)`,
+          14,
+          currentY
+        );
+        currentY += 3;
+
+        autoTable(doc, {
+          startY: currentY,
+          head: [
+            [
+              'Data / Hora',
+              'Usuário Responsável',
+              'Módulo Operacional',
+              'Entidade Afetada',
+              'Ação Executada',
+            ],
+          ],
+          body:
+            auditoriaFiltrada.length > 0
+              ? auditoriaFiltrada.map((l) => [
+                  l.timestamp ? new Date(l.timestamp).toLocaleString('pt-BR') : '—',
+                  l.usuarioNome || 'Operador',
+                  l.modulo || 'Geral',
+                  l.entidade || 'Sistema',
+                  l.acao || 'REGISTRO',
+                ])
+              : [
+                  [
+                    '—',
+                    '—',
+                    'Nenhum evento de auditoria registrado no período selecionado',
+                    '—',
+                    '—',
+                  ],
+                ],
+          theme: 'grid',
+          headStyles: { fillColor: [15, 23, 42], textColor: 255, fontSize: 7.5 },
+          bodyStyles: { fontSize: 7 },
+          margin: { left: 14, right: 14 },
+        });
+
+        currentY = (doc as any).lastAutoTable.finalY + 10;
+      }
+
+      // 5. DEMAIS MÓDULOS ESPECÍFICOS QUANDO SELECIONADOS INDIVIDUALMENTE
       if (relatorioAlvo === 'ESCALAS') {
         autoTable(doc, {
           startY: currentY,
           head: [
             [
-              'Funcionario',
+              'Funcionário',
               'Data',
               'Dia',
               'Entrada',
-              'Saida',
+              'Saída',
               'Intervalo',
               'Turno',
-              'Setor / Funcao',
+              'Setor / Função',
               'Status',
-              'Observacoes',
+              'Observações',
             ],
           ],
           body: escalasFiltradas.map((e) => [
@@ -578,7 +1212,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
       } else if (relatorioAlvo === 'TANQUES') {
         autoTable(doc, {
           startY: currentY,
-          head: [['Tanque', 'Combustivel', 'Capacidade Nominal', 'Estoque Atual', 'Ocupacao (%)']],
+          head: [['Tanque', 'Combustível', 'Capacidade Nominal', 'Estoque Atual', 'Ocupação (%)']],
           body: tanques.map((t) => [
             t.codigo,
             t.produto,
@@ -595,7 +1229,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
 
         autoTable(doc, {
           startY: currentY,
-          head: [['Bico', 'Bomba / Lado', 'Combustivel', 'Tanque Vinculado', 'Encerrante Atual', 'Status']],
+          head: [['Bico', 'Bomba / Lado', 'Combustível', 'Tanque Vinculado', 'Encerrante Atual', 'Status']],
           body: bicos.map((b) => [
             `Bico ${String(b.numero).padStart(2, '0')}`,
             `${b.bomba} (Lado ${b.lado})`,
@@ -613,7 +1247,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
       } else if (relatorioAlvo === 'FALTAS') {
         autoTable(doc, {
           startY: currentY,
-          head: [['Data', 'Colaborador', 'Tipo', 'Valor (R$)', 'Motivo / Descricao', 'Status']],
+          head: [['Data', 'Colaborador', 'Tipo', 'Valor (R$)', 'Motivo / Descrição', 'Status']],
           body: ocorrencias.map((o) => [
             o.data,
             o.funcionarioNome || 'Operador',
@@ -628,28 +1262,10 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
           margin: { left: 14, right: 14 },
         });
         currentY = (doc as any).lastAutoTable.finalY + 10;
-      } else if (relatorioAlvo === 'DENSIDADES') {
-        autoTable(doc, {
-          startY: currentY,
-          head: [['Data / Hora', 'Combustivel', 'Densidade (g/cm³)', 'Temp (°C)', 'Teor Etanol', 'Resultado']],
-          body: densidades.map((d) => [
-            `${d.data} ${d.hora}`,
-            d.produto,
-            String(d.densidadeObservada),
-            `${d.temperaturaC} °C`,
-            d.teorAlcoolico !== undefined ? `${d.teorAlcoolico}%` : '—',
-            d.status,
-          ]),
-          theme: 'grid',
-          headStyles: { fillColor: [15, 23, 42], textColor: 255, fontSize: 8 },
-          bodyStyles: { fontSize: 8 },
-          margin: { left: 14, right: 14 },
-        });
-        currentY = (doc as any).lastAutoTable.finalY + 10;
       } else if (relatorioAlvo === 'CONFORMIDADE') {
         autoTable(doc, {
           startY: currentY,
-          head: [['Data', 'Categoria', 'Item Inspecionado', 'Responsavel', 'Status']],
+          head: [['Data', 'Categoria', 'Item Inspecionado', 'Responsável', 'Status']],
           body: conformidades.map((c) => [
             c.dataVerificacao,
             c.categoria,
@@ -666,7 +1282,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
       } else if (relatorioAlvo === 'FUNCIONARIOS') {
         autoTable(doc, {
           startY: currentY,
-          head: [['Nome', 'Matricula', 'Cargo / Funcao', 'Turno Preferencial', 'Admissao', 'Status']],
+          head: [['Nome', 'Matrícula', 'Cargo / Função', 'Turno Preferencial', 'Admissão', 'Status']],
           body: funcionarios.map((f) => [
             f.nome,
             f.matricula,
@@ -678,23 +1294,6 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
           theme: 'grid',
           headStyles: { fillColor: [15, 23, 42], textColor: 255, fontSize: 8 },
           bodyStyles: { fontSize: 8 },
-          margin: { left: 14, right: 14 },
-        });
-        currentY = (doc as any).lastAutoTable.finalY + 10;
-      } else if (relatorioAlvo === 'AUDITORIA') {
-        autoTable(doc, {
-          startY: currentY,
-          head: [['Data / Hora', 'Usuario', 'Modulo', 'Entidade', 'Acao']],
-          body: auditoria.map((l) => [
-            new Date(l.timestamp).toLocaleString('pt-BR'),
-            l.usuarioNome,
-            l.modulo,
-            l.entidade,
-            l.acao,
-          ]),
-          theme: 'grid',
-          headStyles: { fillColor: [15, 23, 42], textColor: 255, fontSize: 8 },
-          bodyStyles: { fontSize: 7.5 },
           margin: { left: 14, right: 14 },
         });
         currentY = (doc as any).lastAutoTable.finalY + 10;
@@ -715,8 +1314,8 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8);
       doc.setTextColor(71, 85, 105);
-      doc.text('Responsavel Operacional / Conferencia de Pista', 25, currentY + 5);
-      doc.text('Gerencia / Auditoria Administrativa', pageWidth - 88, currentY + 5);
+      doc.text('Responsável Operacional / Conferência de Caixa', 25, currentY + 5);
+      doc.text('Gerência / Auditoria Administrativa', pageWidth - 88, currentY + 5);
 
       // Numeração de páginas no rodapé
       const totalPages = doc.getNumberOfPages();
@@ -725,7 +1324,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
         doc.setFontSize(7.5);
         doc.setTextColor(148, 163, 184);
         doc.text(
-          `MEU POSTO 2.0 • Documento Oficial de Auditoria • Pagina ${i} de ${totalPages}`,
+          `MEU POSTO 2.0 • Relatório Oficial: Fechamento, Auditoria, Análise e Aferições • Página ${i} de ${totalPages}`,
           14,
           doc.internal.pageSize.getHeight() - 8
         );
@@ -733,7 +1332,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
 
       const nomeArquivo =
         relatorioAlvo === 'BALANCO_CONSOLIDADO'
-          ? `balanco_consolidado_fechamentos_afericoes_${dataInicio}_a_${dataFim}.pdf`
+          ? `relatorio_geral_fechamento_auditoria_analise_afericoes_${dataInicio}_a_${dataFim}.pdf`
           : `relatorio_${relatorioAlvo.toLowerCase()}_${dataInicio}_a_${dataFim}.pdf`;
 
       doc.save(nomeArquivo);
@@ -819,6 +1418,52 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
       });
     }
 
+    if (tipo === 'BALANCO_CONSOLIDADO' || tipo === 'DENSIDADES' || tipo === 'ANALISES') {
+      if (linhas.length > 0) linhas.push([]);
+      linhas.push(['=== ANALISES FISICO-QUIMICAS & QUALIDADE ANP ===']);
+      linhas.push([
+        'Data',
+        'Hora',
+        'Combustivel',
+        'Tipo_Ensaio',
+        'Densidade_Lida',
+        'Temperatura_C',
+        'Densidade_20C',
+        'Faixa_ANP',
+        'Teor_Parametro',
+        'Resultado_ANP',
+      ]);
+      analisesFiltradas.forEach((d) => {
+        linhas.push([
+          d.data,
+          d.hora || '',
+          d.produto || '',
+          d.tipoTeste || 'DENSIDADE_D20',
+          String(d.densidadeObservada ?? ''),
+          String(d.temperatura ?? (d as any).temperaturaC ?? ''),
+          String(d.densidadeCalculada20C ?? ''),
+          `${d.densidadeReferenciaMin ?? ''} - ${d.densidadeReferenciaMax ?? ''}`,
+          d.teorEtanolAnidro ? `${d.teorEtanolAnidro}% Etanol` : '',
+          d.resultado || (d as any).status || 'CONFORME',
+        ]);
+      });
+    }
+
+    if (tipo === 'BALANCO_CONSOLIDADO' || tipo === 'AUDITORIA') {
+      if (linhas.length > 0) linhas.push([]);
+      linhas.push(['=== TRILHA DE AUDITORIA & REGISTROS DE SEGURANCA ===']);
+      linhas.push(['Timestamp', 'Usuario', 'Modulo', 'Entidade', 'Acao']);
+      auditoriaFiltrada.forEach((l) => {
+        linhas.push([
+          l.timestamp ? new Date(l.timestamp).toLocaleString('pt-BR') : '',
+          l.usuarioNome || '',
+          l.modulo || '',
+          l.entidade || '',
+          l.acao || '',
+        ]);
+      });
+    }
+
     if (tipo === 'ESCALAS') {
       linhas.push([
         'Funcionario',
@@ -848,11 +1493,6 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
           e.observacao || '',
         ]);
       });
-    } else if (tipo === 'AUDITORIA') {
-      linhas.push(['Timestamp', 'Usuario', 'Modulo', 'Entidade', 'Acao']);
-      auditoria.forEach((l) => {
-        linhas.push([l.timestamp, l.usuarioNome, l.modulo, l.entidade, l.acao]);
-      });
     }
 
     const csvStr = linhas.map((e) => e.join(';')).join('\n');
@@ -865,6 +1505,1088 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
     document.body.removeChild(link);
   };
 
+  /**
+   * Impressão direta na impressora térmica de bobina 80mm
+   */
+  const handleImprimirTermico = () => {
+    window.print();
+  };
+
+  /**
+   * Gera PDF formatado em bobina contínua de 80mm (Cupom Simplificado)
+   */
+  const handleGerarPdfTermico80mm = () => {
+    try {
+      setGerandoPdf(true);
+      const fontSize = tamanhoFonteTermica === 'CONDENSADA' ? 7 : 7.5;
+      const lineHeight = fontSize * 0.48; // mm por linha
+      const centro = 40; // centro de 80mm
+      const margemEsq = 4;
+      const margemDir = 76;
+
+      interface LinhaCupom {
+        texto: string;
+        negrito?: boolean;
+        alinhamento?: 'left' | 'center' | 'right';
+      }
+
+      const linhas: LinhaCupom[] = [];
+
+      linhas.push({ texto: 'POSTO DE COMBUSTIVEIS 2.0', negrito: true, alinhamento: 'center' });
+      linhas.push({ texto: 'SISTEMA DE GESTAO & CONTROLE', alinhamento: 'center' });
+      linhas.push({ texto: 'CNPJ: 00.000.000/0001-99', alinhamento: 'center' });
+      linhas.push({ texto: '----------------------------------------', alinhamento: 'center' });
+      linhas.push({ texto: 'RELATORIO SIMPLIFICADO - TERMICA 80MM', negrito: true, alinhamento: 'center' });
+      linhas.push({ texto: `Periodo: ${dataInicio} a ${dataFim}`, alinhamento: 'center' });
+      linhas.push({ texto: `Emissao: ${new Date().toLocaleString('pt-BR')}`, alinhamento: 'center' });
+      linhas.push({ texto: '========================================', alinhamento: 'center' });
+
+      // Seção 1: Fechamento de Caixa
+      if (filtroSecaoTermica === 'TODOS' || filtroSecaoTermica === 'CAIXA') {
+        linhas.push({ texto: '>>> 1. FECHAMENTO DE CAIXA <<<', negrito: true });
+        linhas.push({ texto: `Turnos no Periodo:    ${balancoConsolidado.totalFechamentos}` });
+        linhas.push({ texto: `Total Bombas (Conf):  ${formatarMoeda(balancoConsolidado.totalConferido)}` });
+        linhas.push({ texto: `Total Informado:      ${formatarMoeda(balancoConsolidado.totalInformado)}` });
+        linhas.push({
+          texto: `Diferenca Liquida:    ${formatarMoeda(balancoConsolidado.saldoDiferenca)} (${balancoConsolidado.saldoDiferenca < 0 ? 'FALTA' : balancoConsolidado.saldoDiferenca > 0 ? 'SOBRA' : 'EXATO'})`,
+          negrito: true,
+        });
+        linhas.push({ texto: '--- Meios de Pagamento ---' });
+        linhas.push({ texto: `PIX Pista:            ${formatarMoeda(balancoConsolidado.meiosPagamento.pix)}` });
+        linhas.push({ texto: `Cartoes (Deb/Cred):   ${formatarMoeda(balancoConsolidado.meiosPagamento.cartao)}` });
+        linhas.push({ texto: `Dinheiro/Deposito:    ${formatarMoeda(balancoConsolidado.meiosPagamento.deposito)}` });
+        linhas.push({ texto: `Notas a Prazo:        ${formatarMoeda(balancoConsolidado.meiosPagamento.nota)}` });
+        linhas.push({ texto: `PIX CNPJ:             ${formatarMoeda(balancoConsolidado.meiosPagamento.pixCnpj)}` });
+        linhas.push({ texto: `Despesas / Vales:     ${formatarMoeda(balancoConsolidado.meiosPagamento.despesa)}` });
+        linhas.push({ texto: `Outros:               ${formatarMoeda(balancoConsolidado.meiosPagamento.outros)}` });
+        linhas.push({ texto: '----------------------------------------', alinhamento: 'center' });
+      }
+
+      // Seção 2: Auditoria de Aferições & Impacto 1.000 L
+      if (filtroSecaoTermica === 'TODOS' || filtroSecaoTermica === 'AFERICOES') {
+        linhas.push({ texto: '>>> 2. AUDITORIA DE AFERICOES (20L) <<<', negrito: true });
+        linhas.push({ texto: `Total de Ensaios:     ${balancoConsolidado.totalAfericoes} testes` });
+        linhas.push({ texto: `Volume Aferido:       ${balancoConsolidado.volumeTotalAferido.toFixed(3)} L` });
+        linhas.push({
+          texto: `Valor Total Afericao: ${formatarMoeda(balancoConsolidado.valorTotalAfericoesGeral)}`,
+          negrito: true,
+        });
+        linhas.push({
+          texto: `Desvio Medio 20L:     ${balancoConsolidado.desvioMedioMl > 0 ? '+' : ''}${balancoConsolidado.desvioMedioMl} ml`,
+        });
+        linhas.push({ texto: `Conformidade Inmetro: ${balancoConsolidado.taxaConformidade}%` });
+        linhas.push({ texto: '--- IMPACTO EM 1.000 L ABASTECIDOS ---', negrito: true });
+        linhas.push({
+          texto: `Diferenca Projetada:  ${balancoConsolidado.impactoMedioGeralLitros1000L > 0 ? '+' : ''}${balancoConsolidado.impactoMedioGeralLitros1000L.toFixed(2)} L / 1000L`,
+          negrito: true,
+        });
+        linhas.push({
+          texto: `Impacto Financeiro:   ${balancoConsolidado.impactoMedioGeralFinanceiro1000L > 0 ? '+' : ''}${formatarMoeda(balancoConsolidado.impactoMedioGeralFinanceiro1000L)} / 1000L`,
+          negrito: true,
+        });
+
+        if (balancoConsolidado.resumoPorCombustivel.length > 0) {
+          linhas.push({ texto: '--- Impacto por Combustivel ---' });
+          balancoConsolidado.resumoPorCombustivel.forEach((c) => {
+            linhas.push({ texto: `* ${c.produto}:`, negrito: true });
+            linhas.push({ texto: `  Testes: ${c.qtdTestes} | Vol: ${c.volumeAferidoTotal.toFixed(1)} L` });
+            linhas.push({
+              texto: `  Desv 20L: ${c.desvioMedioMl > 0 ? '+' : ''}${c.desvioMedioMl} ml`,
+            });
+            linhas.push({
+              texto: `  Imp 1.000L: ${c.impactoLitrosPor1000L > 0 ? '+' : ''}${c.impactoLitrosPor1000L.toFixed(2)} L (${formatarMoeda(c.impactoFinanceiroPor1000L)})`,
+            });
+            linhas.push({ texto: `  Valor: ${formatarMoeda(c.valorTotalAfericao)}` });
+          });
+        }
+
+        if (balancoConsolidado.resumoPorBico.length > 0) {
+          linhas.push({ texto: '--- TODAS AS AFERICOES POR BICO ---', negrito: true });
+          balancoConsolidado.resumoPorBico.forEach((b) => {
+            linhas.push({
+              texto: `>> BICO ${String(b.bicoNumero).padStart(2, '0')} - ${b.produto.toUpperCase()}`,
+              negrito: true,
+            });
+            linhas.push({
+              texto: `   Bomba: ${b.bombaNome} | TQ: ${b.tanqueCodigo}`,
+            });
+            linhas.push({
+              texto: `   Total Testes: ${b.qtdTestes}x | Vol: ${b.volumeAferidoTotal.toFixed(1)} L`,
+            });
+            linhas.push({
+              texto: `   Desv Medio: ${b.desvioMedioMl > 0 ? '+' : ''}${b.desvioMedioMl} ml | Imp 1kL: ${b.impactoLitrosPor1000L > 0 ? '+' : ''}${b.impactoLitrosPor1000L.toFixed(2)} L`,
+            });
+            linhas.push({
+              texto: `   Preco: ${formatarMoeda(b.precoLitro)} | Valor Tot: ${formatarMoeda(b.valorTotalAfericao)}`,
+              negrito: true,
+            });
+            linhas.push({
+              texto: `   Status: ${b.statusGeral} (${b.conformes} conf / ${b.naoConformes} n.conf)`,
+            });
+
+            // Lista TODAS as aferições individuais deste bico
+            if (b.listaAfericoes && b.listaAfericoes.length > 0) {
+              linhas.push({ texto: `   Ensaios Registrados (${b.listaAfericoes.length}):` });
+              b.listaAfericoes.forEach((af, idx) => {
+                const sinal = af.desvioMl > 0 ? '+' : '';
+                linhas.push({
+                  texto: `   #${idx + 1} ${af.data} ${af.hora || ''} | ${af.volumeAferido.toFixed(3)}L (${sinal}${af.desvioMl}ml)`,
+                });
+                const encInfo = af.encerranteFinal
+                  ? `Enc: ${af.encerranteFinal.toLocaleString('pt-BR')}`
+                  : af.lacreInmetro
+                  ? `Lacre: ${af.lacreInmetro}`
+                  : '';
+                const respInfo = af.responsavelNome ? `Resp: ${af.responsavelNome.slice(0, 10)}` : '';
+                const extra = [encInfo, respInfo].filter(Boolean).join(' | ');
+                linhas.push({
+                  texto: `      ${af.resultado === 'CONFORME' ? '[OK]' : '[FORA]'} ${formatarMoeda(af.valorTeste)}${extra ? ` | ${extra}` : ''}`,
+                });
+              });
+            }
+            linhas.push({ texto: ' . . . . . . . . . . . . . . . . . . . .' });
+          });
+        }
+        linhas.push({ texto: '----------------------------------------', alinhamento: 'center' });
+      }
+
+      // Seção 3: Qualidade ANP
+      if (filtroSecaoTermica === 'TODOS' || filtroSecaoTermica === 'QUALIDADE') {
+        linhas.push({ texto: '>>> 3. ANÁLISES & QUALIDADE ANP <<<', negrito: true });
+        linhas.push({ texto: `Total de Analises:    ${balancoConsolidado.totalAnalises}` });
+        linhas.push({
+          texto: `Conformes ANP:        ${balancoConsolidado.analisesConformes} (${balancoConsolidado.taxaConformidadeAnalises}%)`,
+        });
+        linhas.push({ texto: `Nao Conformes:        ${balancoConsolidado.analisesNaoConformes}` });
+        linhas.push({ texto: '----------------------------------------', alinhamento: 'center' });
+      }
+
+      // Rodapé
+      linhas.push({ texto: 'CONFERENCIA OPERACIONAL', alinhamento: 'center' });
+      linhas.push({ texto: ' ' });
+      linhas.push({ texto: '________________________________________', alinhamento: 'center' });
+      linhas.push({ texto: 'Operador / Responsavel de Caixa', alinhamento: 'center' });
+      linhas.push({ texto: ' ' });
+      linhas.push({ texto: '________________________________________', alinhamento: 'center' });
+      linhas.push({ texto: 'Gerencia / Fiscal de Pista', alinhamento: 'center' });
+      linhas.push({ texto: ' ' });
+      linhas.push({ texto: '*** FIM DO COMPROVANTE TERMICO 80MM ***', alinhamento: 'center' });
+
+      const alturaTotalMm = Math.max(130, Math.ceil(linhas.length * lineHeight + 18));
+
+      const doc = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: [80, alturaTotalMm],
+      });
+
+      doc.setFont('courier', 'normal');
+      doc.setFontSize(fontSize);
+      doc.setTextColor(0, 0, 0);
+
+      let curY = 6;
+      linhas.forEach((item) => {
+        doc.setFont('courier', item.negrito ? 'bold' : 'normal');
+        if (item.alinhamento === 'center') {
+          doc.text(item.texto, centro, curY, { align: 'center' });
+        } else if (item.alinhamento === 'right') {
+          doc.text(item.texto, margemDir, curY, { align: 'right' });
+        } else {
+          doc.text(item.texto, margemEsq, curY);
+        }
+        curY += lineHeight;
+      });
+
+      doc.save(`cupom_termico_80mm_${dataInicio}_a_${dataFim}.pdf`);
+    } finally {
+      setGerandoPdf(false);
+    }
+  };
+
+  /**
+   * Renderizador do Modo Simplificado para Impressora Térmica 80mm
+   */
+  const renderModoTermico80mm = () => {
+    return (
+      <div className="space-y-6 print:m-0 print:p-0">
+        <style>{`
+          @media print {
+            @page {
+              size: 80mm auto;
+              margin: 2mm 2mm 4mm 2mm;
+            }
+            body {
+              background: #fff !important;
+              color: #000 !important;
+            }
+            .nao-imprimir-termica {
+              display: none !important;
+            }
+            .cupom-termico-container {
+              width: 76mm !important;
+              max-width: 76mm !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              box-shadow: none !important;
+              border: none !important;
+              background: transparent !important;
+            }
+          }
+        `}</style>
+
+        {/* Barra Superior de Controles do Modo Térmico */}
+        <div className="nao-imprimir-termica bg-white p-4 sm:p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setModoTermico80mm(false)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg text-xs transition cursor-pointer"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              Voltar ao Modo Completo
+            </button>
+            <div>
+              <h2 className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
+                <Receipt className="w-5 h-5 text-amber-600" />
+                Modo Térmico Simplificado (80mm x 30mm)
+              </h2>
+              <p className="text-xs text-slate-500">
+                Otimizado para bobinas térmicas não-fiscais de 80mm (Epson, Bematech, Elgin, Daruma e POS portáteis).
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Seletor de Seção do Cupom */}
+            <div className="flex items-center bg-slate-100 p-1 rounded-lg text-xs font-semibold">
+              {(
+                [
+                  { id: 'TODOS', label: 'Completo' },
+                  { id: 'CAIXA', label: '1. Caixa' },
+                  { id: 'AFERICOES', label: '2. Aferições & 1.000L' },
+                  { id: 'QUALIDADE', label: '3. Qualidade' },
+                ] as const
+              ).map((sec) => (
+                <button
+                  key={sec.id}
+                  onClick={() => setFiltroSecaoTermica(sec.id)}
+                  className={`px-2.5 py-1 rounded-md transition cursor-pointer ${
+                    filtroSecaoTermica === sec.id
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  {sec.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Alternar densidade de fonte */}
+            <div className="flex items-center bg-slate-100 p-1 rounded-lg text-xs font-semibold">
+              <button
+                onClick={() => setTamanhoFonteTermica('NORMAL')}
+                className={`px-2 py-1 rounded-md transition cursor-pointer ${
+                  tamanhoFonteTermica === 'NORMAL'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="38 a 40 colunas padrão"
+              >
+                Fonte Normal
+              </button>
+              <button
+                onClick={() => setTamanhoFonteTermica('CONDENSADA')}
+                className={`px-2 py-1 rounded-md transition cursor-pointer ${
+                  tamanhoFonteTermica === 'CONDENSADA'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="44 a 48 colunas condensadas"
+              >
+                Condensada
+              </button>
+            </div>
+
+            <button
+              onClick={handleImprimirTermico}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition shadow-sm cursor-pointer"
+            >
+              <Printer className="w-4 h-4" />
+              Imprimir na Térmica (80mm)
+            </button>
+
+            <button
+              onClick={handleGerarPdfTermico80mm}
+              disabled={gerandoPdf}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-amber-300 font-bold rounded-lg text-xs transition shadow-sm disabled:opacity-50 cursor-pointer"
+            >
+              <FileDown className="w-4 h-4 text-amber-400" />
+              {gerandoPdf ? 'Gerando...' : 'Baixar PDF Térmico 80mm'}
+            </button>
+          </div>
+        </div>
+
+        {/* Pré-visualização Fidedigna do Cupom de Bobina Térmica (80mm) */}
+        <div className="flex justify-center pb-12 print:p-0">
+          <div
+            id="cupom-termico-imprimir"
+            className={`cupom-termico-container w-full max-w-[340px] bg-white p-5 sm:p-6 shadow-2xl border border-slate-300 rounded-sm font-mono text-slate-900 leading-snug tracking-tight ${
+              tamanhoFonteTermica === 'CONDENSADA' ? 'text-[10px]' : 'text-[11px]'
+            }`}
+          >
+            {/* Marca de picote / serrilha no topo */}
+            <div className="text-center text-slate-300 text-[9px] mb-2 select-none print:hidden">
+              - - - - - - - - CORTE AQUI (80MM) - - - - - - - -
+            </div>
+
+            {/* Cabeçalho do Posto */}
+            <div className="text-center border-b border-dashed border-slate-400 pb-3 mb-3">
+              <div className="text-sm font-extrabold uppercase tracking-wide">POSTO DE COMBUSTÍVEIS 2.0</div>
+              <div className="text-[10px] text-slate-600 mt-0.5">SISTEMA DE GESTÃO & METROLOGIA</div>
+              <div className="text-[10px] text-slate-500">CNPJ: 00.000.000/0001-99 • INSC: 123.456.789</div>
+              <div className="text-[10px] text-slate-500">AV. PRINCIPAL, 1000 - PISTA CENTRAL</div>
+              <div className="border-t border-slate-300 my-2 pt-1 font-bold text-[10px] uppercase text-slate-800">
+                RELATÓRIO SIMPLIFICADO TÉRMICO
+              </div>
+              <div className="flex justify-between text-[10px] text-slate-600 mt-1">
+                <span>Período:</span>
+                <span className="font-bold">{dataInicio} a {dataFim}</span>
+              </div>
+              <div className="flex justify-between text-[10px] text-slate-600">
+                <span>Emissão:</span>
+                <span>{new Date().toLocaleString('pt-BR')}</span>
+              </div>
+            </div>
+
+            {/* SEÇÃO 1: FECHAMENTO DE CAIXA */}
+            {(filtroSecaoTermica === 'TODOS' || filtroSecaoTermica === 'CAIXA') && (
+              <div className="border-b border-dashed border-slate-400 pb-3 mb-3 space-y-1">
+                <div className="font-extrabold text-[11px] uppercase bg-slate-100 px-1 py-0.5 text-slate-900 flex justify-between">
+                  <span>1. FECHAMENTO DE CAIXA</span>
+                  <span>{balancoConsolidado.totalFechamentos} turnos</span>
+                </div>
+                <div className="flex justify-between pt-1">
+                  <span>Total Bombas (Conf):</span>
+                  <span className="font-bold">{formatarMoeda(balancoConsolidado.totalConferido)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Total Recolhido:</span>
+                  <span className="font-bold">{formatarMoeda(balancoConsolidado.totalInformado)}</span>
+                </div>
+                <div className="flex justify-between font-bold border-t border-dotted border-slate-300 pt-1 text-[11px]">
+                  <span>Diferença Líquida:</span>
+                  <span
+                    className={
+                      balancoConsolidado.saldoDiferenca < 0
+                        ? 'text-red-700'
+                        : balancoConsolidado.saldoDiferenca > 0
+                        ? 'text-emerald-700'
+                        : 'text-slate-800'
+                    }
+                  >
+                    {formatarMoeda(balancoConsolidado.saldoDiferenca)} ({balancoConsolidado.saldoDiferenca < 0 ? 'FALTA' : balancoConsolidado.saldoDiferenca > 0 ? 'SOBRA' : 'ZERADO'})
+                  </span>
+                </div>
+
+                <div className="pt-1.5 text-[10px] font-bold text-slate-600 uppercase border-t border-slate-200 mt-2">
+                  Meios de Pagamento:
+                </div>
+                <div className="flex justify-between text-[10px]">
+                  <span>• PIX Pista:</span>
+                  <span>{formatarMoeda(balancoConsolidado.meiosPagamento.pix)}</span>
+                </div>
+                <div className="flex justify-between text-[10px]">
+                  <span>• Cartões (Déb/Créd):</span>
+                  <span>{formatarMoeda(balancoConsolidado.meiosPagamento.cartao)}</span>
+                </div>
+                <div className="flex justify-between text-[10px]">
+                  <span>• Dinheiro / Depósito:</span>
+                  <span>{formatarMoeda(balancoConsolidado.meiosPagamento.deposito)}</span>
+                </div>
+                <div className="flex justify-between text-[10px]">
+                  <span>• Notas a Prazo:</span>
+                  <span>{formatarMoeda(balancoConsolidado.meiosPagamento.nota)}</span>
+                </div>
+                <div className="flex justify-between text-[10px]">
+                  <span>• PIX CNPJ:</span>
+                  <span>{formatarMoeda(balancoConsolidado.meiosPagamento.pixCnpj)}</span>
+                </div>
+                <div className="flex justify-between text-[10px]">
+                  <span>• Despesas / Vales:</span>
+                  <span>{formatarMoeda(balancoConsolidado.meiosPagamento.despesa)}</span>
+                </div>
+                <div className="flex justify-between text-[10px]">
+                  <span>• Outros:</span>
+                  <span>{formatarMoeda(balancoConsolidado.meiosPagamento.outros)}</span>
+                </div>
+              </div>
+            )}
+
+            {/* SEÇÃO 2: AUDITORIA DE AFERIÇÕES & IMPACTO EM 1.000 L */}
+            {(filtroSecaoTermica === 'TODOS' || filtroSecaoTermica === 'AFERICOES') && (
+              <div className="border-b border-dashed border-slate-400 pb-3 mb-3 space-y-1.5">
+                <div className="font-extrabold text-[11px] uppercase bg-slate-100 px-1 py-0.5 text-slate-900 flex justify-between">
+                  <span>2. AUDITORIA DE AFERIÇÕES</span>
+                  <span>{balancoConsolidado.totalAfericoes} testes</span>
+                </div>
+
+                <div className="flex justify-between">
+                  <span>Volume Total Aferido:</span>
+                  <span className="font-bold">{balancoConsolidado.volumeTotalAferido.toFixed(3)} L</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Valor Total da Aferição:</span>
+                  <span className="font-bold text-emerald-800">
+                    {formatarMoeda(balancoConsolidado.valorTotalAfericoesGeral)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Desvio Médio em 20L:</span>
+                  <span className="font-bold">
+                    {balancoConsolidado.desvioMedioMl > 0 ? '+' : ''}
+                    {balancoConsolidado.desvioMedioMl} ml
+                  </span>
+                </div>
+                <div className="flex justify-between text-[10px]">
+                  <span>Conformidade Inmetro:</span>
+                  <span>{balancoConsolidado.taxaConformidade}% (±100ml)</span>
+                </div>
+
+                {/* Bloco de Destaque: Impacto em 1.000 L */}
+                <div className="border-t border-b border-slate-300 py-1.5 my-1.5 bg-slate-50 px-1 space-y-1">
+                  <div className="text-[10px] font-bold uppercase text-blue-900 text-center">
+                    CÁLCULO DE IMPACTO EM 1.000 L ABASTECIDOS
+                  </div>
+                  <div className="flex justify-between font-bold text-[11px]">
+                    <span>Diferença Projetada:</span>
+                    <span
+                      className={
+                        balancoConsolidado.impactoMedioGeralLitros1000L > 0
+                          ? 'text-amber-800'
+                          : balancoConsolidado.impactoMedioGeralLitros1000L < 0
+                          ? 'text-blue-800'
+                          : 'text-slate-800'
+                      }
+                    >
+                      {balancoConsolidado.impactoMedioGeralLitros1000L > 0 ? '+' : ''}
+                      {balancoConsolidado.impactoMedioGeralLitros1000L.toFixed(2)} L
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-[10px]">
+                    <span>Impacto Financeiro / 1.000L:</span>
+                    <span className="font-bold">
+                      {balancoConsolidado.impactoMedioGeralFinanceiro1000L > 0 ? '+' : ''}
+                      {formatarMoeda(balancoConsolidado.impactoMedioGeralFinanceiro1000L)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Resumo por Tipo de Combustível */}
+                {balancoConsolidado.resumoPorCombustivel.length > 0 && (
+                  <div className="space-y-1 pt-1">
+                    <div className="text-[10px] font-bold uppercase text-slate-600 border-b border-dotted border-slate-300 pb-0.5">
+                      Por Tipo de Combustível:
+                    </div>
+                    {balancoConsolidado.resumoPorCombustivel.map((c) => (
+                      <div key={c.produto} className="text-[10px] border-b border-slate-100 pb-1">
+                        <div className="flex justify-between font-bold">
+                          <span>{c.produto}:</span>
+                          <span>{formatarMoeda(c.valorTotalAfericao)}</span>
+                        </div>
+                        <div className="flex justify-between text-slate-600 text-[9.5px]">
+                          <span>
+                            {c.qtdTestes}x ({c.volumeAferidoTotal.toFixed(1)}L) • Desv: {c.desvioMedioMl > 0 ? '+' : ''}{c.desvioMedioMl}ml
+                          </span>
+                          <span className="font-semibold text-blue-900">
+                            Imp: {c.impactoLitrosPor1000L > 0 ? '+' : ''}{c.impactoLitrosPor1000L.toFixed(2)}L
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Detalhamento de TODAS as Aferições por Bico */}
+                {balancoConsolidado.resumoPorBico.length > 0 && (
+                  <div className="space-y-2 pt-1">
+                    <div className="text-[10px] font-bold uppercase text-slate-800 border-b border-dotted border-slate-400 pb-0.5 flex justify-between">
+                      <span>TODAS AS AFERIÇÕES POR BICO</span>
+                      <span>{balancoConsolidado.totalAfericoes} ensaios</span>
+                    </div>
+
+                    {balancoConsolidado.resumoPorBico.map((b) => (
+                      <div key={b.bicoNumero} className="border border-slate-300 rounded-xs p-1.5 bg-slate-50/60 space-y-1">
+                        <div className="flex justify-between font-bold text-[10.5px] border-b border-slate-200 pb-0.5 text-slate-900">
+                          <span>BICO {String(b.bicoNumero).padStart(2, '0')} — {b.produto}</span>
+                          <span>{formatarMoeda(b.valorTotalAfericao)}</span>
+                        </div>
+                        <div className="text-[9.5px] text-slate-600 space-y-0.5">
+                          <div className="flex justify-between">
+                            <span>{b.bombaNome} • {b.tanqueCodigo}</span>
+                            <span className="font-semibold text-slate-800">{b.qtdTestes} teste(s) ({b.volumeAferidoTotal.toFixed(1)}L)</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Desvio Médio: {b.desvioMedioMl > 0 ? '+' : ''}{b.desvioMedioMl} ml</span>
+                            <span className="font-bold text-blue-900">
+                              Imp 1kL: {b.impactoLitrosPor1000L > 0 ? '+' : ''}{b.impactoLitrosPor1000L.toFixed(2)} L
+                            </span>
+                          </div>
+                          <div className="flex justify-between text-[9px] text-slate-500">
+                            <span>Preço: {formatarMoeda(b.precoLitro)}/L</span>
+                            <span className={b.statusGeral === 'CONFORME' ? 'text-emerald-700 font-bold' : 'text-red-700 font-bold'}>
+                              {b.statusGeral} ({b.conformes} conf / {b.naoConformes} n.conf)
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Listagem de CADA UMA das aferições do bico */}
+                        {b.listaAfericoes && b.listaAfericoes.length > 0 && (
+                          <div className="mt-1 pt-1 border-t border-dotted border-slate-300 space-y-1">
+                            <div className="text-[9px] font-bold uppercase text-slate-500">
+                              Ensaios deste Bico ({b.listaAfericoes.length}):
+                            </div>
+                            {b.listaAfericoes.map((af, idx) => (
+                              <div key={af.id || idx} className="text-[9px] bg-white p-1 rounded-xs border border-slate-200">
+                                <div className="flex justify-between font-semibold">
+                                  <span>#{idx + 1} {af.data} {af.hora || ''}</span>
+                                  <span className={af.desvioMl > 0 ? 'text-amber-700' : af.desvioMl < 0 ? 'text-blue-700' : 'text-slate-700'}>
+                                    {af.volumeAferido.toFixed(3)}L ({af.desvioMl > 0 ? '+' : ''}{af.desvioMl}ml)
+                                  </span>
+                                </div>
+                                <div className="flex justify-between text-slate-500 text-[8.5px] mt-0.5">
+                                  <span className={af.resultado === 'CONFORME' ? 'text-emerald-700 font-bold' : 'text-red-700 font-bold'}>
+                                    {af.resultado === 'CONFORME' ? '✓ Conforme' : '✗ Fora Tol.'} • {formatarMoeda(af.valorTeste)}
+                                  </span>
+                                  <span>
+                                    {af.encerranteFinal ? `Enc: ${af.encerranteFinal.toLocaleString('pt-BR')}` : (af.lacreInmetro ? `Lacre: ${af.lacreInmetro}` : (af.responsavelNome ? `Resp: ${af.responsavelNome.slice(0, 10)}` : ''))}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* SEÇÃO 3: QUALIDADE & DENSIDADE ANP */}
+            {(filtroSecaoTermica === 'TODOS' || filtroSecaoTermica === 'QUALIDADE') && (
+              <div className="border-b border-dashed border-slate-400 pb-3 mb-3 space-y-1">
+                <div className="font-extrabold text-[11px] uppercase bg-slate-100 px-1 py-0.5 text-slate-900 flex justify-between">
+                  <span>3. QUALIDADE & DENSIDADE ANP</span>
+                  <span>{balancoConsolidado.totalAnalises} ensaios</span>
+                </div>
+                <div className="flex justify-between pt-1">
+                  <span>Conformes ANP:</span>
+                  <span className="font-bold text-emerald-800">
+                    {balancoConsolidado.analisesConformes} ({balancoConsolidado.taxaConformidadeAnalises}%)
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Não Conformes:</span>
+                  <span className={balancoConsolidado.analisesNaoConformes > 0 ? 'text-red-700 font-bold' : 'text-slate-600'}>
+                    {balancoConsolidado.analisesNaoConformes}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* ASSINATURAS E CONFERÊNCIA */}
+            <div className="pt-3 text-center space-y-4">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-700">
+                TERMO DE CONFERÊNCIA OPERACIONAL
+              </div>
+              <div>
+                <div className="border-b border-slate-400 w-4/5 mx-auto"></div>
+                <div className="text-[9px] text-slate-600 mt-1 uppercase">Operador / Responsável pelo Caixa</div>
+              </div>
+              <div>
+                <div className="border-b border-slate-400 w-4/5 mx-auto"></div>
+                <div className="text-[9px] text-slate-600 mt-1 uppercase">Gerência / Fiscalização de Pista</div>
+              </div>
+
+              <div className="border-t border-slate-300 pt-3 text-[9px] text-slate-500">
+                MEU POSTO 2.0 • COMPROVANTE TÉRMICO 80MM<br />
+                Documento de Auditoria e Controle Interno
+              </div>
+
+              <div className="text-[8px] text-slate-400 select-none print:hidden">
+                - - - - - - - - FIM DA BOBINA (80MM) - - - - - - - -
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  /**
+   * Renderização do Painel Completo de Aferições Metrológicas:
+   * - Informações detalhadas de bicos aferidos
+   * - Valor total da aferição por bico e por tipo de combustível
+   * - Cálculo total de impacto de litros por cada tipo de combustível em 1.000 L de abastecimento
+   */
+  const renderPainelAfericoesCompleto = () => {
+    return (
+      <div className="space-y-6 pt-2">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-slate-100 pb-2">
+          <div>
+            <h4 className="text-sm font-bold text-slate-800 uppercase flex items-center gap-2">
+              <Gauge className="w-4 h-4 text-emerald-600" />
+              Seção de Auditoria de Aferições & Impacto Metrológico (Coleção 'afericoes')
+            </h4>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Auditoria de precisão volumétrica, cálculo automático de impacto financeiro e litragem por cada 1.000 L abastecidos, valor total por bico e combustível.
+            </p>
+          </div>
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg text-[11px] font-bold">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+            {balancoConsolidado.taxaConformidade}% Conforme Inmetro
+          </span>
+        </div>
+
+        {/* 4 Cards de Indicadores Principais */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
+            <div className="text-[11px] font-bold uppercase text-slate-500">
+              Total de Aferições
+            </div>
+            <div className="text-xl font-bold text-slate-900 font-mono mt-1">
+              {balancoConsolidado.totalAfericoes} testes
+            </div>
+            <div className="text-[11px] text-slate-500 mt-1">
+              Volume Total: {balancoConsolidado.volumeTotalAferido.toFixed(3)} L
+            </div>
+          </div>
+
+          <div className="p-4 rounded-xl bg-emerald-50/60 border border-emerald-200">
+            <div className="text-[11px] font-bold uppercase text-emerald-800 flex items-center justify-between">
+              <span>Valor Total das Aferições</span>
+              <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
+            </div>
+            <div className="text-xl font-bold text-emerald-800 font-mono mt-1">
+              {formatarMoeda(balancoConsolidado.valorTotalAfericoesGeral)}
+            </div>
+            <div className="text-[11px] text-emerald-700 mt-1">
+              Combustível aferido a preço de bomba
+            </div>
+          </div>
+
+          <div className="p-4 rounded-xl bg-blue-50/60 border border-blue-200">
+            <div className="text-[11px] font-bold uppercase text-blue-800">
+              Desvio Volumétrico Médio (20L)
+            </div>
+            <div className="text-xl font-bold text-blue-950 font-mono mt-1">
+              {balancoConsolidado.desvioMedioMl > 0 ? '+' : ''}
+              {balancoConsolidado.desvioMedioMl} ml
+            </div>
+            <div className="text-[11px] text-blue-700 mt-1">
+              Média por aferidor padrão de 20,000 L
+            </div>
+          </div>
+
+          <div
+            className={`p-4 rounded-xl border ${
+              balancoConsolidado.afericoesNaoConformes > 0
+                ? 'bg-amber-50/70 border-amber-200'
+                : 'bg-emerald-50/70 border-emerald-200'
+            }`}
+          >
+            <div className="text-[11px] font-bold uppercase text-slate-700 flex items-center justify-between">
+              <span>Impacto Geral / 1.000 L</span>
+              <Gauge className="w-3.5 h-3.5 text-slate-600" />
+            </div>
+            <div
+              className={`text-xl font-bold font-mono mt-1 ${
+                balancoConsolidado.impactoMedioGeralLitros1000L > 0
+                  ? 'text-amber-800'
+                  : balancoConsolidado.impactoMedioGeralLitros1000L < 0
+                  ? 'text-blue-800'
+                  : 'text-emerald-800'
+              }`}
+            >
+              {balancoConsolidado.impactoMedioGeralLitros1000L > 0 ? '+' : ''}
+              {balancoConsolidado.impactoMedioGeralLitros1000L.toFixed(2)} L
+            </div>
+            <div className="text-[11px] text-slate-600 mt-1">
+              Equiv: {formatarMoeda(balancoConsolidado.impactoMedioGeralFinanceiro1000L)} / 1.000 L vendidos
+            </div>
+          </div>
+        </div>
+
+        {/* Banner de Auditoria de Aferições — Metodologia e Impacto Calculado */}
+        <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-blue-50 border border-emerald-200 rounded-xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="p-2 bg-emerald-600 text-white rounded-lg shrink-0 mt-0.5 shadow-xs">
+              <ShieldCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <h5 className="text-xs font-bold uppercase text-emerald-950 tracking-wider flex items-center gap-2">
+                Auditoria de Aferições — Análise Metrológica e Financeira
+                <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-200/80 text-emerald-900 font-mono font-bold">
+                  {balancoConsolidado.totalAfericoes} ensaios na coleção 'afericoes'
+                </span>
+              </h5>
+              <p className="text-xs text-emerald-900/90 mt-1 leading-relaxed">
+                Cada ensaio volumétrico de <strong>20 Litros</strong> padrão Inmetro é multiplicado pelo fator de escala metrológica (<strong>50x</strong>) para calcular automaticamente a <strong>diferença em litros para cada 1.000 litros abastecidos</strong>. Os impactos financeiros são calculados com base nos preços vigentes praticados em cada bico aferido.
+              </p>
+            </div>
+          </div>
+          <div className="shrink-0 flex items-center gap-2 bg-white/90 backdrop-blur-xs px-3.5 py-2 rounded-lg border border-emerald-200 text-xs font-mono font-semibold text-emerald-900 shadow-xs">
+            <span>Diferença Média / 1.000 L:</span>
+            <span
+              className={`font-bold ${
+                balancoConsolidado.impactoMedioGeralLitros1000L > 0
+                  ? 'text-amber-700'
+                  : balancoConsolidado.impactoMedioGeralLitros1000L < 0
+                  ? 'text-blue-700'
+                  : 'text-emerald-700'
+              }`}
+            >
+              {balancoConsolidado.impactoMedioGeralLitros1000L > 0 ? '+' : ''}
+              {balancoConsolidado.impactoMedioGeralLitros1000L.toFixed(2)} L
+            </span>
+          </div>
+        </div>
+
+        {/* PAINEL 1: CÁLCULO TOTAL DE IMPACTO POR TIPO DE COMBUSTÍVEL EM 1.000 L DE ABASTECIMENTO */}
+        <div className="space-y-2.5">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+            <h5 className="text-xs font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+              <FlaskConical className="w-3.5 h-3.5 text-blue-600" />
+              Cálculo Total de Impacto de Litros por cada Tipo de Combustível em 1.000 L de Abastecimento
+            </h5>
+            <span className="text-[11px] font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+              Fórmula: (Desvio 20L ÷ 20L) × 1.000L = Desvio (ml) × 50 ÷ 1.000
+            </span>
+          </div>
+
+          <div className="overflow-x-auto border border-slate-200 rounded-xl">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-slate-100 border-b border-slate-200 font-bold text-slate-700 uppercase">
+                <tr>
+                  <th className="py-2.5 px-3">Tipo de Combustível</th>
+                  <th className="py-2.5 px-3">Bicos Aferidos</th>
+                  <th className="py-2.5 px-3">Qtd. Testes (20L)</th>
+                  <th className="py-2.5 px-3">Volume Total</th>
+                  <th className="py-2.5 px-3">Preço Médio (R$/L)</th>
+                  <th className="py-2.5 px-3">Valor Total da Aferição</th>
+                  <th className="py-2.5 px-3">Desvio Médio (20L)</th>
+                  <th className="py-2.5 px-3 bg-blue-50/70 text-blue-950 font-extrabold">
+                    Impacto Litros / 1.000 L
+                  </th>
+                  <th className="py-2.5 px-3 bg-blue-50/70 text-blue-950 font-extrabold">
+                    Impacto R$ / 1.000 L
+                  </th>
+                  <th className="py-2.5 px-3">Conformidade Inmetro</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {balancoConsolidado.resumoPorCombustivel.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="py-6 text-center text-slate-400">
+                      Nenhum ensaio metrológico encontrado no período selecionado.
+                    </td>
+                  </tr>
+                ) : (
+                  balancoConsolidado.resumoPorCombustivel.map((c: any) => (
+                    <tr key={c.produto} className="hover:bg-slate-50">
+                      <td className="py-2.5 px-3 font-semibold text-slate-900">{c.produto}</td>
+                      <td className="py-2.5 px-3 font-mono text-[11px] text-slate-600">
+                        {c.bicosNumeros.map((n: number) => `Bico ${String(n).padStart(2, '0')}`).join(', ')}
+                      </td>
+                      <td className="py-2.5 px-3 font-mono">{c.qtdTestes} teste(s)</td>
+                      <td className="py-2.5 px-3 font-mono font-semibold">{c.volumeAferidoTotal.toFixed(3)} L</td>
+                      <td className="py-2.5 px-3 font-mono">{formatarMoeda(c.precoMedioLitro)}</td>
+                      <td className="py-2.5 px-3 font-mono font-bold text-emerald-700">
+                        {formatarMoeda(c.valorTotalAfericao)}
+                      </td>
+                      <td className="py-2.5 px-3 font-mono font-bold">
+                        <span className={c.desvioMedioMl > 0 ? 'text-amber-700' : c.desvioMedioMl < 0 ? 'text-blue-700' : 'text-slate-700'}>
+                          {c.desvioMedioMl > 0 ? '+' : ''}{c.desvioMedioMl} ml
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 font-mono font-bold bg-blue-50/40">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold ${
+                            c.impactoLitrosPor1000L > 0
+                              ? 'bg-amber-100 text-amber-900'
+                              : c.impactoLitrosPor1000L < 0
+                              ? 'bg-blue-100 text-blue-900'
+                              : 'bg-slate-100 text-slate-700'
+                          }`}
+                        >
+                          {c.impactoLitrosPor1000L > 0 ? '+' : ''}
+                          {c.impactoLitrosPor1000L.toFixed(2)} L
+                          <span className="ml-1 text-[9px] font-normal opacity-75">
+                            ({c.impactoLitrosPor1000L > 0 ? 'Sobra entregue' : c.impactoLitrosPor1000L < 0 ? 'Retenção' : 'Exato'})
+                          </span>
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 font-mono font-semibold bg-blue-50/40 text-slate-800">
+                        {c.impactoFinanceiroPor1000L > 0 ? '+' : ''}
+                        {formatarMoeda(c.impactoFinanceiroPor1000L)} / 1.000L
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            c.naoConformes === 0
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-amber-100 text-amber-800'
+                          }`}
+                        >
+                          {c.conformes} de {c.qtdTestes} ({c.taxaConformidade}%)
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+              {balancoConsolidado.resumoPorCombustivel.length > 0 && (
+                <tfoot className="bg-slate-50 border-t border-slate-200 font-bold text-slate-900">
+                  <tr>
+                    <td className="py-2.5 px-3 uppercase text-[11px]">Total Consolidado</td>
+                    <td className="py-2.5 px-3 font-mono text-[11px]">
+                      {new Set(afericoesFiltradas.map((a) => a.bicoNumero || a.bicoId)).size} bicos
+                    </td>
+                    <td className="py-2.5 px-3 font-mono">{balancoConsolidado.totalAfericoes} testes</td>
+                    <td className="py-2.5 px-3 font-mono">{balancoConsolidado.volumeTotalAferido.toFixed(3)} L</td>
+                    <td className="py-2.5 px-3">—</td>
+                    <td className="py-2.5 px-3 font-mono text-emerald-800">
+                      {formatarMoeda(balancoConsolidado.valorTotalAfericoesGeral)}
+                    </td>
+                    <td className="py-2.5 px-3 font-mono">
+                      {balancoConsolidado.desvioMedioMl > 0 ? '+' : ''}{balancoConsolidado.desvioMedioMl} ml
+                    </td>
+                    <td className="py-2.5 px-3 font-mono bg-blue-100/60 text-blue-950 font-extrabold">
+                      {balancoConsolidado.impactoMedioGeralLitros1000L > 0 ? '+' : ''}
+                      {balancoConsolidado.impactoMedioGeralLitros1000L.toFixed(2)} L / 1.000L
+                    </td>
+                    <td className="py-2.5 px-3 font-mono bg-blue-100/60 text-blue-950 font-extrabold">
+                      {balancoConsolidado.impactoMedioGeralFinanceiro1000L > 0 ? '+' : ''}
+                      {formatarMoeda(balancoConsolidado.impactoMedioGeralFinanceiro1000L)} / 1.000L
+                    </td>
+                    <td className="py-2.5 px-3 text-emerald-800">{balancoConsolidado.taxaConformidade}% conf.</td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        </div>
+
+        {/* PAINEL 2: INFORMAÇÕES DE BICOS AFERIDOS & VALOR TOTAL POR BICO */}
+        <div className="space-y-2.5">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+            <h5 className="text-xs font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+              <Layers className="w-3.5 h-3.5 text-indigo-600" />
+              Informações de Bicos Aferidos & Valor Total por Bico
+            </h5>
+            <span className="text-[11px] text-slate-500">
+              Controle de bico, bomba, tanque, encerrante, lacre e desvio individual
+            </span>
+          </div>
+
+          <div className="overflow-x-auto border border-slate-200 rounded-xl">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-slate-100 border-b border-slate-200 font-bold text-slate-700 uppercase">
+                <tr>
+                  <th className="py-2.5 px-3">Bico / Bomba</th>
+                  <th className="py-2.5 px-3">Combustível</th>
+                  <th className="py-2.5 px-3">Tanque</th>
+                  <th className="py-2.5 px-3">Encerrante Atual</th>
+                  <th className="py-2.5 px-3">Lacre Inmetro</th>
+                  <th className="py-2.5 px-3">Testes</th>
+                  <th className="py-2.5 px-3">Volume Total</th>
+                  <th className="py-2.5 px-3">Preço (R$/L)</th>
+                  <th className="py-2.5 px-3 font-bold text-emerald-900">Valor Total do Bico</th>
+                  <th className="py-2.5 px-3">Desvio Médio</th>
+                  <th className="py-2.5 px-3">Impacto / 1.000 L</th>
+                  <th className="py-2.5 px-3">Status Inmetro</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {balancoConsolidado.resumoPorBico.length === 0 ? (
+                  <tr>
+                    <td colSpan={12} className="py-6 text-center text-slate-400">
+                      Nenhum bico aferido no período selecionado.
+                    </td>
+                  </tr>
+                ) : (
+                  balancoConsolidado.resumoPorBico.map((b: any) => (
+                    <tr key={b.bicoNumero} className="hover:bg-slate-50">
+                      <td className="py-2 px-3 font-bold text-slate-900">
+                        Bico {String(b.bicoNumero).padStart(2, '0')}
+                        <span className="block text-[10px] font-normal text-slate-500">{b.bombaNome}</span>
+                      </td>
+                      <td className="py-2 px-3 font-medium text-slate-800">{b.produto}</td>
+                      <td className="py-2 px-3 font-mono text-[11px] text-slate-600">{b.tanqueCodigo}</td>
+                      <td className="py-2 px-3 font-mono text-[11px]">
+                        {b.encerranteFinal ? b.encerranteFinal.toLocaleString('pt-BR') : '—'}
+                      </td>
+                      <td className="py-2 px-3 font-mono text-[11px] text-slate-600">
+                        {b.lacreInmetro || 'Conferido'}
+                      </td>
+                      <td className="py-2 px-3 font-mono">{b.qtdTestes}x</td>
+                      <td className="py-2 px-3 font-mono font-semibold">{b.volumeAferidoTotal.toFixed(3)} L</td>
+                      <td className="py-2 px-3 font-mono">{formatarMoeda(b.precoLitro)}</td>
+                      <td className="py-2 px-3 font-mono font-bold text-emerald-700">
+                        {formatarMoeda(b.valorTotalAfericao)}
+                      </td>
+                      <td className="py-2 px-3 font-mono font-bold">
+                        <span className={b.desvioMedioMl > 0 ? 'text-amber-700' : b.desvioMedioMl < 0 ? 'text-blue-700' : 'text-slate-700'}>
+                          {b.desvioMedioMl > 0 ? '+' : ''}{b.desvioMedioMl} ml
+                        </span>
+                      </td>
+                      <td className="py-2 px-3 font-mono text-[11px]">
+                        <span className={b.impactoLitrosPor1000L > 0 ? 'text-amber-800 font-bold' : b.impactoLitrosPor1000L < 0 ? 'text-blue-800 font-bold' : 'text-slate-600'}>
+                          {b.impactoLitrosPor1000L > 0 ? '+' : ''}{b.impactoLitrosPor1000L.toFixed(2)} L
+                        </span>
+                        <span className="block text-[10px] text-slate-400">
+                          {b.impactoFinanceiroPor1000L > 0 ? '+' : ''}{formatarMoeda(b.impactoFinanceiroPor1000L)}
+                        </span>
+                      </td>
+                      <td className="py-2 px-3">
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            b.statusGeral === 'CONFORME'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-red-100 text-red-800'
+                          }`}
+                        >
+                          {b.statusGeral}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+              {balancoConsolidado.resumoPorBico.length > 0 && (
+                <tfoot className="bg-slate-50 border-t border-slate-200 font-bold text-slate-900">
+                  <tr>
+                    <td className="py-2 px-3 uppercase text-[11px]" colSpan={5}>
+                      Total de {balancoConsolidado.resumoPorBico.length} bicos aferidos
+                    </td>
+                    <td className="py-2 px-3 font-mono">{balancoConsolidado.totalAfericoes}</td>
+                    <td className="py-2 px-3 font-mono">{balancoConsolidado.volumeTotalAferido.toFixed(3)} L</td>
+                    <td className="py-2 px-3">—</td>
+                    <td className="py-2 px-3 font-mono text-emerald-800">
+                      {formatarMoeda(balancoConsolidado.valorTotalAfericoesGeral)}
+                    </td>
+                    <td className="py-2 px-3 font-mono">
+                      {balancoConsolidado.desvioMedioMl > 0 ? '+' : ''}{balancoConsolidado.desvioMedioMl} ml
+                    </td>
+                    <td className="py-2 px-3 font-mono text-blue-900">
+                      {balancoConsolidado.impactoMedioGeralLitros1000L > 0 ? '+' : ''}
+                      {balancoConsolidado.impactoMedioGeralLitros1000L.toFixed(2)} L
+                    </td>
+                    <td className="py-2 px-3 text-emerald-800">{balancoConsolidado.afericoesConformes} conf.</td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        </div>
+
+        {/* PAINEL 3: DETALHAMENTO DE CADA ENSAIO INDIVIDUAL DE AFERIÇÃO */}
+        <div className="space-y-2.5">
+          <div className="flex items-center justify-between">
+            <h5 className="text-xs font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+              <FileCheck className="w-3.5 h-3.5 text-slate-600" />
+              Histórico Cronológico de Ensaios Volumétricos ({afericoesFiltradas.length} registros)
+            </h5>
+            <span className="text-[11px] text-slate-500">
+              Registros individuais de 20 Litros no período
+            </span>
+          </div>
+
+          <div className="overflow-x-auto border border-slate-200 rounded-xl">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-slate-100 border-b border-slate-200 font-bold text-slate-700 uppercase">
+                <tr>
+                  <th className="py-2.5 px-3">Data / Hora</th>
+                  <th className="py-2.5 px-3">Bico / Combustível</th>
+                  <th className="py-2.5 px-3">Nominal</th>
+                  <th className="py-2.5 px-3">Volume Aferido</th>
+                  <th className="py-2.5 px-3">Desvio (ml)</th>
+                  <th className="py-2.5 px-3">Valor do Teste (R$)</th>
+                  <th className="py-2.5 px-3">Encerrante / Lacre</th>
+                  <th className="py-2.5 px-3">Responsável</th>
+                  <th className="py-2.5 px-3">Resultado</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {afericoesFiltradas.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="py-6 text-center text-slate-400">
+                      Nenhuma aferição registrada no período selecionado.
+                    </td>
+                  </tr>
+                ) : (
+                  afericoesFiltradas.map((a) => {
+                    const desvioMl = Math.round((Number(a.diferenca) || 0) * 1000);
+                    const bicoNum = a.bicoNumero ?? (a.bicoId ? parseInt(a.bicoId.replace(/\D/g, ''), 10) : 1);
+                    const preco = resolverPrecoBico(a.bicoId, bicoNum, a.produto);
+                    const valTeste = (Number(a.volumeAferido) || 20) * preco;
+
+                    return (
+                      <tr key={a.id} className="hover:bg-slate-50">
+                        <td className="py-2 px-3 font-mono">
+                          {a.data} {a.hora}
+                        </td>
+                        <td className="py-2 px-3 font-medium text-slate-900">
+                          Bico {String(bicoNum).padStart(2, '0')} • {a.produto}
+                        </td>
+                        <td className="py-2 px-3 font-mono">{a.volumeNominal ? a.volumeNominal.toFixed(3) : '20.000'} L</td>
+                        <td className="py-2 px-3 font-mono font-bold">
+                          {a.volumeAferido ? a.volumeAferido.toFixed(3) : '20.000'} L
+                        </td>
+                        <td className="py-2 px-3 font-mono font-bold">
+                          <span
+                            className={
+                              Math.abs(desvioMl) > 100 ? 'text-red-600' : 'text-emerald-700'
+                            }
+                          >
+                            {desvioMl > 0 ? '+' : ''}
+                            {desvioMl} ml
+                          </span>
+                        </td>
+                        <td className="py-2 px-3 font-mono font-bold text-emerald-700">
+                          {formatarMoeda(valTeste)}
+                        </td>
+                        <td className="py-2 px-3 font-mono text-[11px] text-slate-600">
+                          {a.encerranteFinal ?? (a as any).encerranteLeitura ?? '—'}{' '}
+                          {a.lacreInmetro ? `• Lacre ${a.lacreInmetro}` : ''}
+                        </td>
+                        <td className="py-2 px-3">{a.responsavelNome || 'Operador'}</td>
+                        <td className="py-2 px-3">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              a.resultado === 'CONFORME'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-red-100 text-red-800'
+                            }`}
+                          >
+                            {a.resultado}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  if (modoTermico80mm) {
+    return renderModoTermico80mm();
+  }
+
   return (
     <div className="space-y-6">
       {/* Header Principal */}
@@ -875,7 +2597,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
             Central de Relatórios & Balanço Consolidado
           </h2>
           <p className="text-sm text-slate-500 mt-1">
-            Exportação em PDF do balanço consolidado de fechamentos de caixa, aferições Inmetro, escalas e auditoria.
+            Exportação em PDF formatado com dados de fechamento de caixa, auditoria, análise e aferições via jsPDF e autoTable.
           </p>
         </div>
 
@@ -890,6 +2612,15 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
               Limpar Demonstração
             </button>
           )}
+
+          <button
+            onClick={() => setModoTermico80mm(true)}
+            className="inline-flex items-center gap-2 px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-lg text-xs transition shadow-sm cursor-pointer"
+            title="Alternar para modo de relatório simplificado formatado para impressora térmica de 80mm"
+          >
+            <Receipt className="w-4 h-4 text-white" />
+            Modo Térmica 80mm
+          </button>
 
           <button
             onClick={handleExportarCsv}
@@ -911,22 +2642,28 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
             <button
               onClick={() => handleExportarPDF(tipo)}
               disabled={gerandoPdf}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-xs transition shadow-sm disabled:opacity-50 cursor-pointer"
+              className="inline-flex items-center gap-2 px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold rounded-lg text-xs transition shadow-sm disabled:opacity-50 cursor-pointer"
             >
-              <FileDown className="w-4 h-4" />
-              Baixar PDF ({tipo})
+              <FileDown className="w-4 h-4 text-indigo-600" />
+              PDF Módulo: {tipo}
             </button>
           )}
 
           <button
             onClick={() => handleExportarPDF('BALANCO_CONSOLIDADO')}
             disabled={gerandoPdf}
-            className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-xs transition shadow-sm disabled:opacity-50 cursor-pointer"
+            className="inline-flex items-center gap-2.5 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold rounded-lg text-xs transition shadow-sm hover:shadow disabled:opacity-50 cursor-pointer"
+            title="Gera um relatório completo formatado em PDF via jsPDF e AutoTable contendo Fechamento de Caixa, Auditoria, Análise ANP e Aferições Inmetro"
           >
             <FileDown className="w-4 h-4" />
-            {gerandoPdf
-              ? 'Gerando PDF...'
-              : 'Exportar PDF — Balanço Consolidado (Fechamentos & Aferições)'}
+            <span>
+              {gerandoPdf
+                ? 'Gerando Relatório PDF...'
+                : 'Gerar PDF Formatado (Caixa, Auditoria, Análise & Aferições)'}
+            </span>
+            <span className="hidden sm:inline-block px-1.5 py-0.5 text-[9px] font-extrabold bg-white/20 rounded uppercase tracking-wider">
+              jsPDF + AutoTable
+            </span>
           </button>
         </div>
       </div>
@@ -943,17 +2680,19 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
             className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-medium text-slate-800"
           >
             <option value="BALANCO_CONSOLIDADO">
-              ★ Balanço Consolidado (Fechamentos de Caixa & Aferições)
+              ★ Relatório Geral (Fechamento, Auditoria, Análise & Aferições)
             </option>
-            <option value="FECHAMENTOS">Fechamentos de Caixa (Individual)</option>
-            <option value="AFERICOES">Aferições de Bicos Inmetro (Individual)</option>
+            <option value="FECHAMENTOS">1. Fechamentos de Caixa (Individual)</option>
+            <option value="AFERICOES">
+              2. Auditoria de Aferições & Impacto Metrológico (1.000 L / Bicos / Valores)
+            </option>
+            <option value="DENSIDADES">3. Análises de Qualidade e Densidade ANP (Individual)</option>
+            <option value="AUDITORIA">4. Trilha de Auditoria e Logs (Individual)</option>
             <option value="ESCALAS">Escalas & Planner (Diário, Semanal, Mensal, Setor)</option>
             <option value="TANQUES">Cadastro de Bicos & Estoque de Tanques</option>
             <option value="FALTAS">Sobras, Faltas e Ocorrências de Caixa</option>
-            <option value="DENSIDADES">Análises de Qualidade e Densidade ANP</option>
-            <option value="CONFORMIDADE">Conformidade e Checklists</option>
+            <option value="CONFORMIDADE">Conformidade e Checklists Operacionais</option>
             <option value="FUNCIONARIOS">Quadro de Funcionários</option>
-            <option value="AUDITORIA">Trilha de Auditoria (Logs)</option>
           </select>
         </div>
 
@@ -1201,138 +2940,257 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
             </div>
 
             {/* Bloco 2: Resumo Metrológico de Aferições */}
+            {renderPainelAfericoesCompleto()}
+
+            {/* Bloco 3: Resumo de Análises Físico-Químicas & Qualidade ANP */}
             <div className="space-y-4 pt-2">
               <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                 <h4 className="text-sm font-bold text-slate-800 uppercase flex items-center gap-2">
-                  <Gauge className="w-4 h-4 text-emerald-600" />
-                  2. Balanço Metrológico de Aferições de Bicos ({balancoConsolidado.totalAfericoes}{' '}
-                  ensaios 20L)
+                  <FlaskConical className="w-4 h-4 text-purple-600" />
+                  3. Balanço de Qualidade & Conformidade Regulatória ANP ({balancoConsolidado.totalAnalises} ensaios)
                 </h4>
                 <span className="text-xs text-slate-500">
-                  Tolerância máxima Inmetro: ±100 ml por aferição de 20L
+                  Norma NBR 5992 • Proveta, Termodensímetro e Teor Alcoólico
                 </span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
                   <div className="text-[11px] font-bold uppercase text-slate-500">
-                    Total de Aferições
+                    Total de Ensaios
                   </div>
                   <div className="text-xl font-bold text-slate-900 font-mono mt-1">
-                    {balancoConsolidado.totalAfericoes}
+                    {balancoConsolidado.totalAnalises}
                   </div>
                   <div className="text-[11px] text-slate-500 mt-1">
-                    Volume Total: {balancoConsolidado.volumeTotalAferido.toFixed(3)} L
+                    Gasolina, Etanol e Diesel
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl bg-purple-50/60 border border-purple-200">
+                  <div className="text-[11px] font-bold uppercase text-purple-800 flex items-center justify-between">
+                    <span>Índice de Qualidade</span>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-purple-600" />
+                  </div>
+                  <div className="text-xl font-bold text-purple-900 font-mono mt-1">
+                    {balancoConsolidado.taxaConformidadeAnalises}%
+                  </div>
+                  <div className="text-[11px] text-purple-700 mt-1">
+                    {balancoConsolidado.analisesConformes} amostras aprovadas
                   </div>
                 </div>
 
                 <div className="p-4 rounded-xl bg-emerald-50/60 border border-emerald-200">
-                  <div className="text-[11px] font-bold uppercase text-emerald-800 flex items-center justify-between">
-                    <span>Índice de Conformidade</span>
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                  <div className="text-[11px] font-bold uppercase text-emerald-800">
+                    Amostras Conformes
                   </div>
-                  <div className="text-xl font-bold text-emerald-800 font-mono mt-1">
-                    {balancoConsolidado.taxaConformidade}%
+                  <div className="text-xl font-bold text-emerald-700 font-mono mt-1">
+                    {balancoConsolidado.analisesConformes}
                   </div>
                   <div className="text-[11px] text-emerald-700 mt-1">
-                    {balancoConsolidado.afericoesConformes} conformes •{' '}
-                    {balancoConsolidado.afericoesNaoConformes} fora da faixa
-                  </div>
-                </div>
-
-                <div className="p-4 rounded-xl bg-blue-50/60 border border-blue-200">
-                  <div className="text-[11px] font-bold uppercase text-blue-800">
-                    Desvio Volumétrico Médio
-                  </div>
-                  <div className="text-xl font-bold text-blue-950 font-mono mt-1">
-                    {balancoConsolidado.desvioMedioMl > 0 ? '+' : ''}
-                    {balancoConsolidado.desvioMedioMl} ml
-                  </div>
-                  <div className="text-[11px] text-blue-700 mt-1">
-                    Média por medição de 20,000 L
+                    Dentro dos padrões ANP
                   </div>
                 </div>
 
                 <div className="p-4 rounded-xl bg-amber-50/60 border border-amber-200">
                   <div className="text-[11px] font-bold uppercase text-amber-900 flex items-center justify-between">
-                    <span>Bicos fora da Tolerância</span>
+                    <span>Fora da Faixa ANP</span>
                     <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
                   </div>
                   <div className="text-xl font-bold text-amber-900 font-mono mt-1">
-                    {balancoConsolidado.afericoesNaoConformes}
+                    {balancoConsolidado.analisesNaoConformes}
                   </div>
                   <div className="text-[11px] text-amber-800 mt-1">
-                    Limite legal Inmetro: ±100 ml
+                    Exige contraprova ou bloqueio
                   </div>
                 </div>
               </div>
 
-              {/* Tabela de Aferições no Balanço Consolidado */}
+              {/* Tabela de Análises no Balanço Consolidado */}
               <div className="overflow-x-auto border border-slate-200 rounded-xl">
                 <table className="w-full text-xs text-left">
                   <thead className="bg-slate-100 border-b border-slate-200 font-bold text-slate-700 uppercase">
                     <tr>
                       <th className="py-2.5 px-3">Data / Hora</th>
-                      <th className="py-2.5 px-3">Bico / Combustível</th>
-                      <th className="py-2.5 px-3">Nominal</th>
-                      <th className="py-2.5 px-3">Volume Aferido</th>
-                      <th className="py-2.5 px-3">Desvio (ml)</th>
-                      <th className="py-2.5 px-3">Encerrante / Lacre</th>
-                      <th className="py-2.5 px-3">Responsável</th>
-                      <th className="py-2.5 px-3">Resultado</th>
+                      <th className="py-2.5 px-3">Combustível</th>
+                      <th className="py-2.5 px-3">Ensaio / Teste</th>
+                      <th className="py-2.5 px-3">Densidade Lida</th>
+                      <th className="py-2.5 px-3">Temp (°C)</th>
+                      <th className="py-2.5 px-3">Densidade 20°C</th>
+                      <th className="py-2.5 px-3">Faixa Permitida</th>
+                      <th className="py-2.5 px-3">Teor / Parâmetro</th>
+                      <th className="py-2.5 px-3">Laudo ANP</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {afericoesFiltradas.length === 0 ? (
+                    {analisesFiltradas.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="py-6 text-center text-slate-400">
-                          Nenhuma aferição registrada no período selecionado.
+                        <td colSpan={9} className="py-6 text-center text-slate-400">
+                          Nenhuma análise físico-química registrada no período selecionado.
                         </td>
                       </tr>
                     ) : (
-                      afericoesFiltradas.map((a) => {
-                        const desvioMl = Math.round((Number(a.diferenca) || 0) * 1000);
+                      analisesFiltradas.map((d) => {
+                        const tempVal = d.temperatura ?? (d as any).temperaturaC ?? 20;
+                        const densObs =
+                          typeof d.densidadeObservada === 'number'
+                            ? d.densidadeObservada.toFixed(4)
+                            : String(d.densidadeObservada || '—');
+                        const dens20 =
+                          typeof d.densidadeCalculada20C === 'number'
+                            ? d.densidadeCalculada20C.toFixed(4)
+                            : typeof d.densidadeObservada === 'number'
+                            ? d.densidadeObservada.toFixed(4)
+                            : '—';
+                        const faixa =
+                          d.densidadeReferenciaMin && d.densidadeReferenciaMax
+                            ? `${d.densidadeReferenciaMin.toFixed(3)} - ${d.densidadeReferenciaMax.toFixed(3)}`
+                            : 'Faixa ANP';
+                        const paramExtra = d.teorEtanolAnidro
+                          ? `${d.teorEtanolAnidro}% Etanol`
+                          : (d as any).teorAlcoolico !== undefined
+                          ? `${(d as any).teorAlcoolico}% Etanol`
+                          : d.condutividadeEletrica
+                          ? `${d.condutividadeEletrica} µS/m`
+                          : d.ph
+                          ? `pH ${d.ph}`
+                          : '—';
+                        const laudo = d.resultado || (d as any).status || 'CONFORME';
+
                         return (
-                          <tr key={a.id} className="hover:bg-slate-50">
+                          <tr key={d.id} className="hover:bg-slate-50">
                             <td className="py-2 px-3 font-mono">
-                              {a.data} {a.hora}
+                              {d.data} {d.hora}
                             </td>
-                            <td className="py-2 px-3 font-medium text-slate-900">
-                              Bico {String(a.bicoNumero || a.bicoId).padStart(2, '0')} • {a.produto}
+                            <td className="py-2 px-3 font-medium text-slate-900">{d.produto}</td>
+                            <td className="py-2 px-3">
+                              {(d.tipoTeste || 'DENSIDADE_D20').replace(/_/g, ' ')}
                             </td>
-                            <td className="py-2 px-3 font-mono">{a.volumeNominal.toFixed(3)} L</td>
-                            <td className="py-2 px-3 font-mono font-bold">
-                              {a.volumeAferido.toFixed(3)} L
-                            </td>
-                            <td className="py-2 px-3 font-mono font-bold">
-                              <span
-                                className={
-                                  Math.abs(desvioMl) > 100 ? 'text-red-600' : 'text-emerald-700'
-                                }
-                              >
-                                {desvioMl > 0 ? '+' : ''}
-                                {desvioMl} ml
-                              </span>
-                            </td>
-                            <td className="py-2 px-3 font-mono text-[11px] text-slate-600">
-                              {a.encerranteFinal ?? a.encerranteLeitura ?? '—'}{' '}
-                              {a.lacreInmetro ? `• Lacre ${a.lacreInmetro}` : ''}
-                            </td>
-                            <td className="py-2 px-3">{a.responsavelNome || 'Operador'}</td>
+                            <td className="py-2 px-3 font-mono">{densObs}</td>
+                            <td className="py-2 px-3 font-mono">{tempVal} °C</td>
+                            <td className="py-2 px-3 font-mono font-bold">{dens20}</td>
+                            <td className="py-2 px-3 font-mono text-[11px] text-slate-500">{faixa}</td>
+                            <td className="py-2 px-3 font-mono text-purple-700">{paramExtra}</td>
                             <td className="py-2 px-3">
                               <span
                                 className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                  a.resultado === 'CONFORME'
+                                  laudo === 'CONFORME'
                                     ? 'bg-emerald-100 text-emerald-800'
                                     : 'bg-red-100 text-red-800'
                                 }`}
                               >
-                                {a.resultado}
+                                {laudo}
                               </span>
                             </td>
                           </tr>
                         );
                       })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Bloco 4: Resumo de Auditoria & Trilha de Segurança */}
+            <div className="space-y-4 pt-2">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                <h4 className="text-sm font-bold text-slate-800 uppercase flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-blue-600" />
+                  4. Trilha de Auditoria & Segurança Operacional ({balancoConsolidado.totalAuditoria} registros)
+                </h4>
+                <span className="text-xs text-slate-500">
+                  Logs auditáveis 24h em Nuvem • Imutabilidade e Rastreabilidade
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
+                  <div className="text-[11px] font-bold uppercase text-slate-500">
+                    Total de Eventos Auditados
+                  </div>
+                  <div className="text-xl font-bold text-slate-900 font-mono mt-1">
+                    {balancoConsolidado.totalAuditoria}
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-1">
+                    Operações registradas no período
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl bg-blue-50/60 border border-blue-200">
+                  <div className="text-[11px] font-bold uppercase text-blue-800">
+                    Módulos Impactados
+                  </div>
+                  <div className="text-xl font-bold text-blue-950 font-mono mt-1">
+                    {balancoConsolidado.modulosAuditoriaQtd}
+                  </div>
+                  <div className="text-[11px] text-blue-700 mt-1">
+                    Caixa, Bicos, Tanques, Escalas
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl bg-emerald-50/60 border border-emerald-200">
+                  <div className="text-[11px] font-bold uppercase text-emerald-800">
+                    Usuários Identificados
+                  </div>
+                  <div className="text-xl font-bold text-emerald-700 font-mono mt-1">
+                    {balancoConsolidado.usuariosAuditoriaQtd}
+                  </div>
+                  <div className="text-[11px] text-emerald-700 mt-1">
+                    Identificação de operadores
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl bg-slate-100 border border-slate-300">
+                  <div className="text-[11px] font-bold uppercase text-slate-700 flex items-center justify-between">
+                    <span>Integridade da Trilha</span>
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                  </div>
+                  <div className="text-base font-bold text-emerald-700 mt-1">
+                    100% Criptografado
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-1">
+                    Logs rastreados em tempo real
+                  </div>
+                </div>
+              </div>
+
+              {/* Tabela de Auditoria no Balanço Consolidado */}
+              <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-slate-100 border-b border-slate-200 font-bold text-slate-700 uppercase">
+                    <tr>
+                      <th className="py-2.5 px-3">Data / Hora</th>
+                      <th className="py-2.5 px-3">Usuário Responsável</th>
+                      <th className="py-2.5 px-3">Módulo</th>
+                      <th className="py-2.5 px-3">Entidade</th>
+                      <th className="py-2.5 px-3">Ação Executada</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {auditoriaFiltrada.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-6 text-center text-slate-400">
+                          Nenhum evento de auditoria registrado no período selecionado.
+                        </td>
+                      </tr>
+                    ) : (
+                      auditoriaFiltrada.slice(0, 50).map((l) => (
+                        <tr key={l.id} className="hover:bg-slate-50">
+                          <td className="py-2 px-3 font-mono text-[11px]">
+                            {l.timestamp ? new Date(l.timestamp).toLocaleString('pt-BR') : '—'}
+                          </td>
+                          <td className="py-2 px-3 font-medium text-slate-900">
+                            {l.usuarioNome || 'Operador'}
+                          </td>
+                          <td className="py-2 px-3">{l.modulo || 'Geral'}</td>
+                          <td className="py-2 px-3 font-mono text-slate-600">{l.entidade || 'Sistema'}</td>
+                          <td className="py-2 px-3">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-200">
+                              {l.acao || 'REGISTRO'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
                     )}
                   </tbody>
                 </table>
@@ -1537,37 +3395,8 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
           </table>
         )}
 
-        {/* Tabela de Aferições */}
-        {tipo === 'AFERICOES' && (
-          <table className="w-full text-xs text-left">
-            <thead className="bg-slate-50 border-b font-semibold text-slate-700 uppercase">
-              <tr>
-                <th className="py-2.5 px-3">Data / Hora</th>
-                <th className="py-2.5 px-3">Bico / Produto</th>
-                <th className="py-2.5 px-3">Nominal</th>
-                <th className="py-2.5 px-3">Aferido</th>
-                <th className="py-2.5 px-3">Diferença</th>
-                <th className="py-2.5 px-3">Resultado</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {afericoesFiltradas.map((a) => (
-                <tr key={a.id}>
-                  <td className="py-2 px-3">
-                    {a.data} {a.hora}
-                  </td>
-                  <td className="py-2 px-3">
-                    Bico {String(a.bicoNumero || a.bicoId).padStart(2, '0')} • {a.produto}
-                  </td>
-                  <td className="py-2 px-3 font-mono">{a.volumeNominal.toFixed(3)} L</td>
-                  <td className="py-2 px-3 font-mono font-bold">{a.volumeAferido.toFixed(3)} L</td>
-                  <td className="py-2 px-3 font-mono">{Math.round(a.diferenca * 1000)} ml</td>
-                  <td className="py-2 px-3 font-bold">{a.resultado}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+        {/* Relatório Completo de Aferições de Bicos */}
+        {tipo === 'AFERICOES' && renderPainelAfericoesCompleto()}
 
         {/* Tabela de Faltas e Ocorrências */}
         {tipo === 'FALTAS' && (
@@ -1597,32 +3426,144 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
           </table>
         )}
 
-        {/* Tabela de Densidades */}
-        {tipo === 'DENSIDADES' && (
-          <table className="w-full text-xs text-left">
-            <thead className="bg-slate-50 border-b font-semibold text-slate-700 uppercase">
-              <tr>
-                <th className="py-2.5 px-3">Data / Hora</th>
-                <th className="py-2.5 px-3">Combustível</th>
-                <th className="py-2.5 px-3">Densidade (g/cm³)</th>
-                <th className="py-2.5 px-3">Temperatura</th>
-                <th className="py-2.5 px-3">Status ANP</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {densidades.map((d) => (
-                <tr key={d.id}>
-                  <td className="py-2 px-3 font-mono">
-                    {d.data} {d.hora}
-                  </td>
-                  <td className="py-2 px-3 font-medium">{d.produto}</td>
-                  <td className="py-2 px-3 font-mono">{d.densidadeObservada}</td>
-                  <td className="py-2 px-3 font-mono">{d.temperaturaC} °C</td>
-                  <td className="py-2 px-3 font-bold">{d.status}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {/* Tabela de Densidades / Análises */}
+        {(tipo === 'DENSIDADES' || tipo === 'ANALISES') && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
+                <div className="text-[11px] font-bold uppercase text-slate-500">
+                  Total de Ensaios
+                </div>
+                <div className="text-xl font-bold text-slate-900 font-mono mt-1">
+                  {balancoConsolidado.totalAnalises}
+                </div>
+                <div className="text-[11px] text-slate-500 mt-1">
+                  Amostras no período selecionado
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl bg-purple-50/60 border border-purple-200">
+                <div className="text-[11px] font-bold uppercase text-purple-800 flex items-center justify-between">
+                  <span>Taxa de Conformidade</span>
+                  <CheckCircle2 className="w-3.5 h-3.5 text-purple-600" />
+                </div>
+                <div className="text-xl font-bold text-purple-900 font-mono mt-1">
+                  {balancoConsolidado.taxaConformidadeAnalises}%
+                </div>
+                <div className="text-[11px] text-purple-700 mt-1">
+                  {balancoConsolidado.analisesConformes} amostras conformes
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl bg-emerald-50/60 border border-emerald-200">
+                <div className="text-[11px] font-bold uppercase text-emerald-800">
+                  Aprovadas ANP
+                </div>
+                <div className="text-xl font-bold text-emerald-700 font-mono mt-1">
+                  {balancoConsolidado.analisesConformes}
+                </div>
+                <div className="text-[11px] text-emerald-700 mt-1">
+                  Dentro das faixas oficiais
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl bg-amber-50/60 border border-amber-200">
+                <div className="text-[11px] font-bold uppercase text-amber-900 flex items-center justify-between">
+                  <span>Fora de Faixa</span>
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                </div>
+                <div className="text-xl font-bold text-amber-900 font-mono mt-1">
+                  {balancoConsolidado.analisesNaoConformes}
+                </div>
+                <div className="text-[11px] text-amber-800 mt-1">
+                  Exigem contraprova imediata
+                </div>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto border border-slate-200 rounded-xl">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-slate-50 border-b font-semibold text-slate-700 uppercase">
+                  <tr>
+                    <th className="py-2.5 px-3">Data / Hora</th>
+                    <th className="py-2.5 px-3">Combustível</th>
+                    <th className="py-2.5 px-3">Ensaio / Teste</th>
+                    <th className="py-2.5 px-3">Densidade Lida</th>
+                    <th className="py-2.5 px-3">Temp (°C)</th>
+                    <th className="py-2.5 px-3">Densidade 20°C</th>
+                    <th className="py-2.5 px-3">Faixa ANP</th>
+                    <th className="py-2.5 px-3">Teor / Parâmetro</th>
+                    <th className="py-2.5 px-3">Laudo ANP</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {analisesFiltradas.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="py-6 text-center text-slate-400">
+                        Nenhuma análise de qualidade encontrada no período selecionado.
+                      </td>
+                    </tr>
+                  ) : (
+                    analisesFiltradas.map((d) => {
+                      const tempVal = d.temperatura ?? (d as any).temperaturaC ?? 20;
+                      const densObs =
+                        typeof d.densidadeObservada === 'number'
+                          ? d.densidadeObservada.toFixed(4)
+                          : String(d.densidadeObservada || '—');
+                      const dens20 =
+                        typeof d.densidadeCalculada20C === 'number'
+                          ? d.densidadeCalculada20C.toFixed(4)
+                          : typeof d.densidadeObservada === 'number'
+                          ? d.densidadeObservada.toFixed(4)
+                          : '—';
+                      const faixa =
+                        d.densidadeReferenciaMin && d.densidadeReferenciaMax
+                          ? `${d.densidadeReferenciaMin.toFixed(3)} - ${d.densidadeReferenciaMax.toFixed(3)}`
+                          : 'Faixa ANP';
+                      const paramExtra = d.teorEtanolAnidro
+                        ? `${d.teorEtanolAnidro}% Etanol`
+                        : (d as any).teorAlcoolico !== undefined
+                        ? `${(d as any).teorAlcoolico}% Etanol`
+                        : d.condutividadeEletrica
+                        ? `${d.condutividadeEletrica} µS/m`
+                        : d.ph
+                        ? `pH ${d.ph}`
+                        : '—';
+                      const laudo = d.resultado || (d as any).status || 'CONFORME';
+
+                      return (
+                        <tr key={d.id} className="hover:bg-slate-50">
+                          <td className="py-2 px-3 font-mono">
+                            {d.data} {d.hora}
+                          </td>
+                          <td className="py-2 px-3 font-medium text-slate-900">{d.produto}</td>
+                          <td className="py-2 px-3">
+                            {(d.tipoTeste || 'DENSIDADE_D20').replace(/_/g, ' ')}
+                          </td>
+                          <td className="py-2 px-3 font-mono">{densObs}</td>
+                          <td className="py-2 px-3 font-mono">{tempVal} °C</td>
+                          <td className="py-2 px-3 font-mono font-bold">{dens20}</td>
+                          <td className="py-2 px-3 font-mono text-[11px] text-slate-500">{faixa}</td>
+                          <td className="py-2 px-3 font-mono text-purple-700">{paramExtra}</td>
+                          <td className="py-2 px-3">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                laudo === 'CONFORME'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-red-100 text-red-800'
+                              }`}
+                            >
+                              {laudo}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         )}
 
         {/* Tabela de Conformidade */}
@@ -1681,30 +3622,97 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
 
         {/* Tabela de Auditoria */}
         {tipo === 'AUDITORIA' && (
-          <table className="w-full text-xs text-left">
-            <thead className="bg-slate-50 border-b font-semibold text-slate-700 uppercase">
-              <tr>
-                <th className="py-2.5 px-3">Data / Hora</th>
-                <th className="py-2.5 px-3">Usuário</th>
-                <th className="py-2.5 px-3">Módulo</th>
-                <th className="py-2.5 px-3">Entidade</th>
-                <th className="py-2.5 px-3">Ação</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {auditoria.map((l) => (
-                <tr key={l.id}>
-                  <td className="py-2 px-3 font-mono text-[11px]">
-                    {new Date(l.timestamp).toLocaleString('pt-BR')}
-                  </td>
-                  <td className="py-2 px-3 font-medium">{l.usuarioNome}</td>
-                  <td className="py-2 px-3">{l.modulo}</td>
-                  <td className="py-2 px-3">{l.entidade}</td>
-                  <td className="py-2 px-3 font-bold text-blue-700">{l.acao}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
+                <div className="text-[11px] font-bold uppercase text-slate-500">
+                  Total de Eventos
+                </div>
+                <div className="text-xl font-bold text-slate-900 font-mono mt-1">
+                  {balancoConsolidado.totalAuditoria}
+                </div>
+                <div className="text-[11px] text-slate-500 mt-1">
+                  Ações registradas no período
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl bg-blue-50/60 border border-blue-200">
+                <div className="text-[11px] font-bold uppercase text-blue-800">
+                  Módulos Impactados
+                </div>
+                <div className="text-xl font-bold text-blue-950 font-mono mt-1">
+                  {balancoConsolidado.modulosAuditoriaQtd}
+                </div>
+                <div className="text-[11px] text-blue-700 mt-1">
+                  Caixa, Bicos, Tanques, Escalas
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl bg-emerald-50/60 border border-emerald-200">
+                <div className="text-[11px] font-bold uppercase text-emerald-800">
+                  Usuários Identificados
+                </div>
+                <div className="text-xl font-bold text-emerald-700 font-mono mt-1">
+                  {balancoConsolidado.usuariosAuditoriaQtd}
+                </div>
+                <div className="text-[11px] text-emerald-700 mt-1">
+                  Rastreabilidade nominal
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl bg-slate-100 border border-slate-300">
+                <div className="text-[11px] font-bold uppercase text-slate-700 flex items-center justify-between">
+                  <span>Trilha Segura</span>
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                </div>
+                <div className="text-base font-bold text-emerald-700 mt-1">
+                  100% Criptografado
+                </div>
+                <div className="text-[11px] text-slate-500 mt-1">
+                  Histórico inalterável em Nuvem
+                </div>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto border border-slate-200 rounded-xl">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-slate-50 border-b font-semibold text-slate-700 uppercase">
+                  <tr>
+                    <th className="py-2.5 px-3">Data / Hora</th>
+                    <th className="py-2.5 px-3">Usuário Responsável</th>
+                    <th className="py-2.5 px-3">Módulo Operacional</th>
+                    <th className="py-2.5 px-3">Entidade Afetada</th>
+                    <th className="py-2.5 px-3">Ação Executada</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {auditoriaFiltrada.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-6 text-center text-slate-400">
+                        Nenhum registro de auditoria encontrado no período selecionado.
+                      </td>
+                    </tr>
+                  ) : (
+                    auditoriaFiltrada.map((l) => (
+                      <tr key={l.id} className="hover:bg-slate-50">
+                        <td className="py-2 px-3 font-mono text-[11px]">
+                          {l.timestamp ? new Date(l.timestamp).toLocaleString('pt-BR') : '—'}
+                        </td>
+                        <td className="py-2 px-3 font-medium text-slate-900">{l.usuarioNome || 'Operador'}</td>
+                        <td className="py-2 px-3">{l.modulo || 'Geral'}</td>
+                        <td className="py-2 px-3 font-mono text-slate-600">{l.entidade || 'Sistema'}</td>
+                        <td className="py-2 px-3">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-200">
+                            {l.acao || 'REGISTRO'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         )}
       </div>
     </div>

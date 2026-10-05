@@ -48,11 +48,11 @@ import {
 const repoEscala = new PostoSubcollectionRepository<Escala>('escalas');
 const repoFunc = new PostoSubcollectionRepository<Funcionario>('funcionarios');
 
-const TURNOS_OFICIAIS = [
+export const TURNOS_OFICIAIS = [
   {
     id: 'Turno 1 - Manhã (06h - 14h)',
     sigla: 'T1',
-    nomeCurto: '1º Turno (Manhã)',
+    nomeCurto: 'Turno 1 (Manhã)',
     inicio: '06:00',
     fim: '14:00',
     corBadge: 'bg-amber-100 text-amber-900 border-amber-300',
@@ -60,18 +60,10 @@ const TURNOS_OFICIAIS = [
   {
     id: 'Turno 2 - Tarde (14h - 22h)',
     sigla: 'T2',
-    nomeCurto: '2º Turno (Tarde)',
+    nomeCurto: 'Turno 2 (Tarde)',
     inicio: '14:00',
     fim: '22:00',
     corBadge: 'bg-blue-100 text-blue-900 border-blue-300',
-  },
-  {
-    id: 'Turno 3 - Noite (22h - 06h)',
-    sigla: 'T3',
-    nomeCurto: '3º Turno (Noite)',
-    inicio: '22:00',
-    fim: '06:00',
-    corBadge: 'bg-purple-100 text-purple-900 border-purple-300',
   },
   {
     id: 'Turno Horista',
@@ -82,12 +74,28 @@ const TURNOS_OFICIAIS = [
     corBadge: 'bg-teal-100 text-teal-900 border-teal-300',
   },
   {
-    id: 'Plantão',
-    sigla: 'PLT',
-    nomeCurto: 'Plantão 12x36',
-    inicio: '06:00',
-    fim: '18:00',
+    id: 'Turno ADM (08h - 17h)',
+    sigla: 'ADM',
+    nomeCurto: 'Turno ADM (Administrativo)',
+    inicio: '08:00',
+    fim: '17:00',
     corBadge: 'bg-indigo-100 text-indigo-900 border-indigo-300',
+  },
+  {
+    id: 'Folga',
+    sigla: 'FOL',
+    nomeCurto: 'Folga (DSR)',
+    inicio: '00:00',
+    fim: '00:00',
+    corBadge: 'bg-emerald-100 text-emerald-900 border-emerald-300',
+  },
+  {
+    id: 'Férias',
+    sigla: 'FER',
+    nomeCurto: 'Férias',
+    inicio: '00:00',
+    fim: '00:00',
+    corBadge: 'bg-orange-100 text-orange-900 border-orange-300',
   },
 ];
 
@@ -150,7 +158,7 @@ export const PlannerView: React.FC<PlannerProps> = ({
   // Modo Edição Rápida vs Abrir Modal de Edição/Exclusão ao clicar na célula
   const [modoRapido, setModoRapido] = useState(false);
   const [pincelStatus, setPincelStatus] = useState<
-    'T1_MANHA' | 'T2_TARDE' | 'T3_NOITE' | 'HORISTA' | 'FOLGA' | 'FERIAS' | 'ATESTADO' | 'AUSENTE'
+    'T1_MANHA' | 'T2_TARDE' | 'HORISTA' | 'ADM' | 'FOLGA' | 'FERIAS' | 'T3_NOITE' | 'ATESTADO' | 'AUSENTE'
   >('FOLGA');
 
   // Modal de edição/exclusão de célula individual da escala
@@ -265,8 +273,11 @@ export const PlannerView: React.FC<PlannerProps> = ({
   const obterSiglaTurno = (turno?: string, horarioInicio?: string) => {
     const t = (turno || '').toLowerCase();
     const h = (horarioInicio || '').trim();
-    if (t.includes('plantão') || t.includes('plantao') || t.includes('12x36') || t === 'plt') return 'PLT';
+    if (t.includes('folga') || t === 'fol' || t === 's' || t === 'dsr') return 'FOL';
+    if (t.includes('férias') || t.includes('ferias') || t === 'fer' || t === 'fe') return 'FER';
+    if (t.includes('adm') || t.includes('admin') || t === 'adm' || (h.startsWith('08:') && (t.includes('17h') || t.includes('18h')))) return 'ADM';
     if (t.includes('horista') || t === 'hor' || t === 'h') return 'HOR';
+    if (t.includes('plantão') || t.includes('plantao') || t.includes('12x36') || t === 'plt') return 'PLT';
     if (t.includes('noite') || t.includes('turno 3') || t === 't3' || h.startsWith('22:') || h.startsWith('23:')) {
       return 'T3';
     }
@@ -287,6 +298,8 @@ export const PlannerView: React.FC<PlannerProps> = ({
   const obterHorarioPorTurno = (turno: string) => {
     const of = TURNOS_OFICIAIS.find((t) => t.id === turno || t.sigla === turno);
     if (of) return { inicio: of.inicio, fim: of.fim };
+    if (turno.includes('ADM') || turno.includes('Administrativo')) return { inicio: '08:00', fim: '17:00' };
+    if (turno.includes('Folga') || turno.includes('Férias')) return { inicio: '00:00', fim: '00:00' };
     if (turno.includes('Plantão') || turno.includes('12x36')) return { inicio: '06:00', fim: '18:00' };
     if (turno.includes('Horista')) return { inicio: '08:00', fim: '14:00' };
     if (turno.includes('Noite') || turno.includes('Turno 3')) return { inicio: '22:00', fim: '06:00' };
@@ -528,15 +541,24 @@ export const PlannerView: React.FC<PlannerProps> = ({
     } else if (pincelStatus === 'T2_TARDE') {
       nextStatus = 'TRABALHO';
       nextTurno = 'Turno 2 - Tarde (14h - 22h)';
-    } else if (pincelStatus === 'T3_NOITE') {
-      nextStatus = 'TRABALHO';
-      nextTurno = 'Turno 3 - Noite (22h - 06h)';
     } else if (pincelStatus === 'HORISTA') {
       nextStatus = 'TRABALHO';
       nextTurno = 'Turno Horista';
+    } else if (pincelStatus === 'ADM') {
+      nextStatus = 'TRABALHO';
+      nextTurno = 'Turno ADM (08h - 17h)';
+    } else if (pincelStatus === 'FOLGA') {
+      nextStatus = 'FOLGA';
+      nextTurno = 'Folga';
+    } else if (pincelStatus === 'FERIAS') {
+      nextStatus = 'FERIAS';
+      nextTurno = 'Férias';
+    } else if (pincelStatus === 'T3_NOITE') {
+      nextStatus = 'TRABALHO';
+      nextTurno = 'Turno 3 - Noite (22h - 06h)';
     } else {
       nextStatus = pincelStatus;
-      nextTurno = pincelStatus === 'FOLGA' ? 'Folga' : func.turnoPreferencial || 'Turno 1 - Manhã (06h - 14h)';
+      nextTurno = func.turnoPreferencial || 'Turno 1 - Manhã (06h - 14h)';
     }
 
     const horarios = nextStatus === 'FOLGA' ? { inicio: '00:00', fim: '00:00' } : obterHorarioPorTurno(nextTurno);
@@ -1353,11 +1375,11 @@ export const PlannerView: React.FC<PlannerProps> = ({
                 [
                   { id: 'T1_MANHA', label: 'T1 — Manhã (06h-14h)', color: 'bg-amber-500 text-white' },
                   { id: 'T2_TARDE', label: 'T2 — Tarde (14h-22h)', color: 'bg-blue-600 text-white' },
-                  { id: 'T3_NOITE', label: 'T3 — Noite (22h-06h)', color: 'bg-purple-600 text-white' },
                   { id: 'HORISTA', label: 'HOR — Horista', color: 'bg-teal-600 text-white' },
-                  { id: 'FOLGA', label: 'S / FOLGA', color: 'bg-emerald-600 text-white' },
-                  { id: 'FERIAS', label: 'FE — Férias', color: 'bg-purple-600 text-white' },
-                  { id: 'ATESTADO', label: 'AT — Atestado', color: 'bg-orange-600 text-white' },
+                  { id: 'ADM', label: 'ADM — Administrativo', color: 'bg-indigo-600 text-white' },
+                  { id: 'FOLGA', label: 'FOL — Folga (DSR)', color: 'bg-emerald-600 text-white' },
+                  { id: 'FERIAS', label: 'FER — Férias', color: 'bg-orange-600 text-white' },
+                  { id: 'ATESTADO', label: 'AT — Atestado', color: 'bg-slate-600 text-white' },
                   { id: 'AUSENTE', label: 'FA — Falta', color: 'bg-red-600 text-white' },
                 ] as const
               ).map((item) => (
@@ -1449,7 +1471,9 @@ export const PlannerView: React.FC<PlannerProps> = ({
                               <span className="text-[10px] text-slate-500">{func.cargo}</span>
                               <span
                                 className={`text-[9px] px-1.5 py-0.2 rounded font-bold border ${
-                                  obterSiglaTurno(func.turnoPreferencial) === 'HOR'
+                                  obterSiglaTurno(func.turnoPreferencial) === 'ADM'
+                                    ? 'bg-indigo-50 text-indigo-800 border-indigo-200'
+                                    : obterSiglaTurno(func.turnoPreferencial) === 'HOR'
                                     ? 'bg-teal-50 text-teal-800 border-teal-200'
                                     : obterSiglaTurno(func.turnoPreferencial) === 'T2'
                                     ? 'bg-blue-50 text-blue-800 border-blue-200'
@@ -1515,21 +1539,25 @@ export const PlannerView: React.FC<PlannerProps> = ({
                             cellStyle = 'bg-amber-100 text-amber-900 font-bold hover:bg-amber-200';
                           } else if (sig === 'T2') {
                             cellStyle = 'bg-blue-100 text-blue-900 font-bold hover:bg-blue-200';
+                          } else if (sig === 'HOR') {
+                            cellStyle = 'bg-teal-100 text-teal-900 font-bold hover:bg-teal-200';
+                          } else if (sig === 'ADM') {
+                            cellStyle = 'bg-indigo-100 text-indigo-900 font-bold hover:bg-indigo-200';
                           } else if (sig === 'T3') {
                             cellStyle = 'bg-purple-100 text-purple-900 font-bold hover:bg-purple-200';
                           } else if (sig === 'PLT') {
-                            cellStyle = 'bg-indigo-100 text-indigo-900 font-bold hover:bg-indigo-200';
+                            cellStyle = 'bg-sky-100 text-sky-900 font-bold hover:bg-sky-200';
                           } else {
                             cellStyle = 'bg-teal-100 text-teal-900 font-bold hover:bg-teal-200';
                           }
                         } else if (status === 'FOLGA') {
                           cellStyle = 'bg-emerald-100 text-emerald-900 font-black hover:bg-emerald-200';
-                          label = 'S';
+                          label = 'FOL';
                         } else if (status === 'FERIAS') {
-                          cellStyle = 'bg-purple-100 text-purple-800 font-bold';
-                          label = 'FE';
+                          cellStyle = 'bg-orange-100 text-orange-900 font-bold hover:bg-orange-200';
+                          label = 'FER';
                         } else if (status === 'ATESTADO' || status === 'AFASTADO') {
-                          cellStyle = 'bg-orange-100 text-orange-800 font-bold';
+                          cellStyle = 'bg-slate-200 text-slate-800 font-bold';
                           label = 'AT';
                         } else if (status === 'AUSENTE') {
                           cellStyle = 'bg-red-100 text-red-800 font-bold';
@@ -1662,40 +1690,46 @@ ${temDescoberto ? `\n🚨 CRÍTICO: Turno(s) ${descobertos.join(', ')} sem nenhu
 
         {/* Legenda Clara */}
         <div className="p-3 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
-          <div className="flex flex-wrap items-center gap-4">
-            <span className="flex items-center gap-1.5">
-              <span className="w-5 h-5 rounded bg-amber-100 text-amber-900 font-mono font-bold flex items-center justify-center text-[10px]">
+          <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+            <span className="flex items-center gap-1.5 font-semibold text-slate-700">
+              <span className="w-5 h-5 rounded bg-amber-100 text-amber-900 border border-amber-300 font-mono font-bold flex items-center justify-center text-[10px]">
                 T1
               </span>
-              Turno 1 — Manhã (06h-14h)
+              T1 — Manhã (06h-14h)
             </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-5 h-5 rounded bg-blue-100 text-blue-900 font-mono font-bold flex items-center justify-center text-[10px]">
+            <span className="flex items-center gap-1.5 font-semibold text-slate-700">
+              <span className="w-5 h-5 rounded bg-blue-100 text-blue-900 border border-blue-300 font-mono font-bold flex items-center justify-center text-[10px]">
                 T2
               </span>
-              Turno 2 — Tarde (14h-22h)
+              T2 — Tarde (14h-22h)
             </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-5 h-5 rounded bg-purple-100 text-purple-900 font-mono font-bold flex items-center justify-center text-[10px]">
-                T3
-              </span>
-              Turno 3 — Noite (22h-06h)
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-5 h-5 rounded bg-teal-100 text-teal-900 font-mono font-bold flex items-center justify-center text-[10px]">
+            <span className="flex items-center gap-1.5 font-semibold text-slate-700">
+              <span className="w-5 h-5 rounded bg-teal-100 text-teal-900 border border-teal-300 font-mono font-bold flex items-center justify-center text-[10px]">
                 HOR
               </span>
-              Turno Horista
+              HOR — Horista
             </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-5 h-5 rounded bg-emerald-100 text-emerald-900 font-mono font-black flex items-center justify-center text-[10px]">
-                S
+            <span className="flex items-center gap-1.5 font-semibold text-slate-700">
+              <span className="w-5 h-5 rounded bg-indigo-100 text-indigo-900 border border-indigo-300 font-mono font-bold flex items-center justify-center text-[10px]">
+                ADM
               </span>
-              Folga / DSR (&quot;S&quot;)
+              ADM — Administrativo
+            </span>
+            <span className="flex items-center gap-1.5 font-semibold text-slate-700">
+              <span className="w-5 h-5 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 font-mono font-black flex items-center justify-center text-[10px]">
+                FOL
+              </span>
+              FOL — Folga (DSR)
+            </span>
+            <span className="flex items-center gap-1.5 font-semibold text-slate-700">
+              <span className="w-5 h-5 rounded bg-orange-100 text-orange-900 border border-orange-300 font-mono font-bold flex items-center justify-center text-[10px]">
+                FER
+              </span>
+              FER — Férias
             </span>
           </div>
           <span className="text-[11px] text-slate-500">
-            Dica: Clique em qualquer célula para alterar o turno, marcar Folga (S) ou excluir o lançamento.
+            Turnos Oficiais: T1, T2, Horista, ADM, Folga e Férias. Clique em qualquer célula para alterar ou usar o Pincel Rápido.
           </span>
         </div>
       </div>

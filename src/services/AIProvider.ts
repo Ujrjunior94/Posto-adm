@@ -236,12 +236,20 @@ export class OpenRouterProvider implements AIProvider {
     const { dataUrl } = normalizarDataUrl(image, options?.mimeType);
 
     const systemPrompt = `Você é um leitor óptico (OCR) puramente visual de tabelas de escalas de trabalho em postos de combustível.
+Os turnos operacionais oficiais deste posto são:
+- T1: Turno 1 Manhã (06:00 às 14:00 ou "06-14")
+- T2: Turno 2 Tarde (14:00 às 22:00 ou "14-22")
+- HORISTA: Turno Horista / Intermediário (08:00 às 14:00 ou "HOR")
+- ADM: Administrativo (08:00 às 17:00 ou "ADM")
+- FOLGA: Folga Semanal / DSR ("FOLGA", "DSR", "S", "F")
+- FÉRIAS: Férias ("FÉRIAS", "FERIAS", "FE", "FER")
+
 Analise a imagem da escala e extraia RIGOROSAMENTE e APENAS o conteúdo visual lido nas células.
 
 REGRAS DE LEITURA DA IMAGEM:
-1. Extraia o texto visual bruto ("rawText") exatamente como está escrito na imagem (ex: "JOAO", "06-14", "FOLGA", "S").
+1. Extraia o texto visual bruto ("rawText") exatamente como está escrito na imagem (ex: "JOAO", "06-14", "T1", "T2", "HOR", "ADM", "FOLGA", "S", "FE").
 2. NÃO crie funcionários, NÃO adivinhe sobrenomes ou matrículas.
-3. NÃO crie turnos nem altere horários escritos.
+3. NÃO altere horários ou siglas escritas nas células.
 4. Retorne EXCLUSIVAMENTE um objeto JSON com a propriedade "cells":
 {
   "cells": [

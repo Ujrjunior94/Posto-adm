@@ -14,7 +14,7 @@ export const TURNOS_PADRAO_POSTO: TurnoCadastrado[] = [
   {
     id: 'Turno 1 - Manhã (06h - 14h)',
     sigla: 'T1',
-    nomeCurto: '1º Turno (Manhã)',
+    nomeCurto: 'Turno 1 (Manhã)',
     inicio: '06:00',
     fim: '14:00',
     corBadge: 'bg-amber-100 text-amber-900 border-amber-300',
@@ -22,18 +22,10 @@ export const TURNOS_PADRAO_POSTO: TurnoCadastrado[] = [
   {
     id: 'Turno 2 - Tarde (14h - 22h)',
     sigla: 'T2',
-    nomeCurto: '2º Turno (Tarde)',
+    nomeCurto: 'Turno 2 (Tarde)',
     inicio: '14:00',
     fim: '22:00',
     corBadge: 'bg-blue-100 text-blue-900 border-blue-300',
-  },
-  {
-    id: 'Turno 3 - Noite (22h - 06h)',
-    sigla: 'T3',
-    nomeCurto: '3º Turno (Noite)',
-    inicio: '22:00',
-    fim: '06:00',
-    corBadge: 'bg-purple-100 text-purple-900 border-purple-300',
   },
   {
     id: 'Turno Horista',
@@ -44,12 +36,28 @@ export const TURNOS_PADRAO_POSTO: TurnoCadastrado[] = [
     corBadge: 'bg-teal-100 text-teal-900 border-teal-300',
   },
   {
-    id: 'Plantão',
-    sigla: 'PLT',
-    nomeCurto: 'Plantão 12x36',
-    inicio: '06:00',
-    fim: '18:00',
+    id: 'Turno ADM (08h - 17h)',
+    sigla: 'ADM',
+    nomeCurto: 'Turno ADM (Administrativo)',
+    inicio: '08:00',
+    fim: '17:00',
     corBadge: 'bg-indigo-100 text-indigo-900 border-indigo-300',
+  },
+  {
+    id: 'Folga',
+    sigla: 'FOL',
+    nomeCurto: 'Folga (DSR)',
+    inicio: '00:00',
+    fim: '00:00',
+    corBadge: 'bg-emerald-100 text-emerald-900 border-emerald-300',
+  },
+  {
+    id: 'Férias',
+    sigla: 'FER',
+    nomeCurto: 'Férias',
+    inicio: '00:00',
+    fim: '00:00',
+    corBadge: 'bg-orange-100 text-orange-900 border-orange-300',
   },
 ];
 
@@ -432,6 +440,27 @@ export function resolveShift(
       horarioFim: t3.fim,
       confidence: 0.92,
       observation: `Horário 22h-06h associado ao ${t3.nomeCurto}.`,
+    };
+  }
+
+  if (norm.includes('adm') || norm.includes('admin') || norm.includes('comercial') || (norm.includes('08') && (norm.includes('17') || norm.includes('18')))) {
+    const tadm = shifts.find((t) => t.sigla === 'ADM') || {
+      id: 'Turno ADM (08h - 17h)',
+      sigla: 'ADM',
+      nomeCurto: 'Turno ADM (Administrativo)',
+      inicio: '08:00',
+      fim: '17:00',
+    };
+    return {
+      status: 'MATCH',
+      shiftId: tadm.id,
+      shiftName: tadm.nomeCurto,
+      shiftSigla: tadm.sigla,
+      isFolga: false,
+      horarioInicio: tadm.inicio,
+      horarioFim: tadm.fim,
+      confidence: 0.94,
+      observation: `Turno Administrativo associado ao ${tadm.nomeCurto}.`,
     };
   }
 

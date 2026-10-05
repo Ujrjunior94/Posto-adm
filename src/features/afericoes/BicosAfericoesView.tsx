@@ -2,7 +2,12 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Bico, Afericao, Funcionario, Tanque } from '../../types';
 import { PostoSubcollectionRepository, registrarAuditoria } from '../../repositories/firestoreRepository';
 import { useAuth } from '../../contexts/AuthContext';
-import { calcularAfericao, TOLERANCIA_DESVIO_PADRAO_L, TOLERANCIA_DESVIO_PADRAO_ML } from '../../utils/calculations';
+import {
+  calcularAfericao,
+  TOLERANCIA_DESVIO_PADRAO_L,
+  TOLERANCIA_DESVIO_PADRAO_ML,
+  formatarMoeda,
+} from '../../utils/calculations';
 import {
   calcularPrecoEfetivoBico,
   formatarPrecoLitro,
@@ -31,6 +36,9 @@ import {
   Camera,
   FileText,
   Save,
+  FlaskConical,
+  Layers,
+  ShieldCheck,
 } from 'lucide-react';
 import { ModalEditarAfericao } from './ModalEditarAfericao';
 import { ModalConfigurarPrecoBico } from './ModalConfigurarPrecoBico';
@@ -169,6 +177,159 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
       maiorDesconto,
     };
   }, [bicos]);
+
+  // Auditoria e Métricas de Aferições: Bicos, Valores e Impacto em 1.000 L
+  const auditoriaAfericoesMetricas = useMemo(() => {
+    const mapaCombustivel = new Map<
+      string,
+      {
+        produto: string;
+        bicosNumeros: Set<number>;
+        qtdTestes: number;
+        volumeTotal: number;
+        valorTotal: number;
+        desvioTotalMl: number;
+        conformes: number;
+      }
+    >();
+
+    const mapaBico = new Map<
+      number,
+      {
+        bicoNumero: number;
+        bicoId: string;
+        bombaNome: string;
+        ladoBomba: string;
+        produto: string;
+        tanqueCodigo: string;
+        encerranteFinal?: number;
+        lacreInmetro?: string;
+        qtdTestes: number;
+        volumeTotal: number;
+        precoLitro: number;
+        valorTotal: number;
+        desvioTotalMl: number;
+        conformes: number;
+        naoConformes: number;
+      }
+    >();
+
+    let valorTotalGeral = 0;
+    let volumeTotalGeral = 0;
+    let desvioTotalMlGeral = 0;
+
+    afericoes.forEach((a) => {
+      const prod = a.produto || 'Combustível';
+      const vol = Number(a.volumeAferido) || 20;
+      const desvioMl = Math.round((Number(a.diferenca) || 0) * 1000);
+      const isConforme = a.resultado === 'CONFORME';
+
+      const bicoNum =
+        a.bicoNumero ??
+        (a.bicoId ? parseInt(a.bicoId.replace(/\D/g, ''), 10) : undefined) ??
+        1;
+      const bicoCad = bicos.find((b) => b.id === a.bicoId || b.numero === bicoNum);
+      const precoLitro = bicoCad
+        ? calcularPrecoEfetivoBico(bicoCad).precoFinal
+        : PRECOS_PADRAO_COMBUSTIVEL[prod] || 5.89;
+      const valorTeste = vol * precoLitro;
+
+      valorTotalGeral += valorTeste;
+      volumeTotalGeral += vol;
+      desvioTotalMlGeral += desvioMl;
+
+      // Mapa por Combustível
+      const comb = mapaCombustivel.get(prod) || {
+        produto: prod,
+        bicosNumeros: new Set<number>(),
+        qtdTestes: 0,
+        volumeTotal: 0,
+        valorTotal: 0,
+        desvioTotalMl: 0,
+        conformes: 0,
+      };
+      comb.bicosNumeros.add(bicoNum);
+      comb.qtdTestes += 1;
+      comb.volumeTotal += vol;
+      comb.valorTotal += valorTeste;
+      comb.desvioTotalMl += desvioMl;
+      if (isConforme) comb.conformes += 1;
+      mapaCombustivel.set(prod, comb);
+
+      // Mapa por Bico
+      const bicoEx = mapaBico.get(bicoNum) || {
+        bicoNumero: bicoNum,
+        bicoId: a.bicoId || `bico-${bicoNum}`,
+        bombaNome: a.bombaNome || bicoCad?.bomba || 'Bomba 01',
+        ladoBomba: a.ladoBomba || bicoCad?.lado || 'A',
+        produto: prod,
+        tanqueCodigo: a.tanqueCodigo || a.tanqueId || bicoCad?.tanqueCodigo || 'TQ',
+        encerranteFinal: a.encerranteFinal ?? (a as any).encerranteLeitura,
+        lacreInmetro: a.lacreInmetro || bicoCad?.lacreBomba,
+        qtdTestes: 0,
+        volumeTotal: 0,
+        precoLitro,
+        valorTotal: 0,
+        desvioTotalMl: 0,
+        conformes: 0,
+        naoConformes: 0,
+      };
+      bicoEx.qtdTestes += 1;
+      bicoEx.volumeTotal += vol;
+      bicoEx.valorTotal += valorTeste;
+      bicoEx.desvioTotalMl += desvioMl;
+      if (isConforme) bicoEx.conformes += 1;
+      else bicoEx.naoConformes += 1;
+      if (a.encerranteFinal) bicoEx.encerranteFinal = a.encerranteFinal;
+      if (a.lacreInmetro) bicoEx.lacreInmetro = a.lacreInmetro;
+      mapaBico.set(bicoNum, bicoEx);
+    });
+
+    const listaCombustivel = Array.from(mapaCombustivel.values()).map((c) => {
+      const desvioMedioMl = c.qtdTestes > 0 ? Math.round(c.desvioTotalMl / c.qtdTestes) : 0;
+      const impactoLitros1000L = Number(((desvioMedioMl * 50) / 1000).toFixed(2));
+      const precoMedio = c.volumeTotal > 0 ? c.valorTotal / c.volumeTotal : 5.89;
+      const impactoFinanceiro1000L = Number((impactoLitros1000L * precoMedio).toFixed(2));
+      return {
+        ...c,
+        desvioMedioMl,
+        precoMedio,
+        impactoLitros1000L,
+        impactoFinanceiro1000L,
+      };
+    });
+
+    const listaBicos = Array.from(mapaBico.values())
+      .map((b) => {
+        const desvioMedioMl = b.qtdTestes > 0 ? Math.round(b.desvioTotalMl / b.qtdTestes) : 0;
+        const impactoLitros1000L = Number(((desvioMedioMl * 50) / 1000).toFixed(2));
+        const impactoFinanceiro1000L = Number((impactoLitros1000L * b.precoLitro).toFixed(2));
+        return {
+          ...b,
+          desvioMedioMl,
+          impactoLitros1000L,
+          impactoFinanceiro1000L,
+        };
+      })
+      .sort((a, b) => a.bicoNumero - b.bicoNumero);
+
+    const totalTestes = afericoes.length;
+    const desvioMedioGeral = totalTestes > 0 ? Math.round(desvioTotalMlGeral / totalTestes) : 0;
+    const impactoGeralLitros1000L = Number(((desvioMedioGeral * 50) / 1000).toFixed(2));
+    const precoMedioGeral = volumeTotalGeral > 0 ? valorTotalGeral / volumeTotalGeral : 5.89;
+    const impactoGeralFinanceiro1000L = Number((impactoGeralLitros1000L * precoMedioGeral).toFixed(2));
+
+    return {
+      totalTestes,
+      volumeTotalGeral,
+      valorTotalGeral,
+      desvioMedioGeral,
+      impactoGeralLitros1000L,
+      impactoGeralFinanceiro1000L,
+      listaCombustivel,
+      listaBicos,
+    };
+  }, [afericoes, bicos]);
 
   // Bicos filtrados para a visão de preços
   const bicosFiltrados = useMemo(() => {
@@ -1235,6 +1396,363 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
             }}
             onGerarPistaPadrao={handleGerarPistaPadrao}
           />
+
+          {/* PAINEL DE AUDITORIA DE AFERIÇÕES: INFORMAÇÕES DE BICOS, VALOR TOTAL E IMPACTO EM 1.000 L */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 pb-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-emerald-600" />
+                  Auditoria de Aferições: Bicos Aferidos, Valores e Impacto em 1.000 L
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Cálculo automático de diferença de litros e projeção financeira para cada 1.000 L abastecidos com base nos ensaios volumétricos da coleção 'afericoes'.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-bold font-mono">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                  {auditoriaAfericoesMetricas.totalTestes} ensaios 20L
+                </span>
+              </div>
+            </div>
+
+            {/* 4 Cards de Indicadores de Auditoria */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
+                <div className="text-[11px] font-bold uppercase text-slate-500">
+                  Total de Aferições 20L
+                </div>
+                <div className="text-2xl font-bold text-slate-900 font-mono mt-1">
+                  {auditoriaAfericoesMetricas.totalTestes} testes
+                </div>
+                <div className="text-[11px] text-slate-500 mt-1">
+                  Volume Aferido: {auditoriaAfericoesMetricas.volumeTotalGeral.toFixed(3)} L
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl bg-emerald-50/70 border border-emerald-200">
+                <div className="text-[11px] font-bold uppercase text-emerald-800 flex items-center justify-between">
+                  <span>Valor Total das Aferições</span>
+                  <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
+                </div>
+                <div className="text-2xl font-bold text-emerald-800 font-mono mt-1">
+                  {formatarMoeda(auditoriaAfericoesMetricas.valorTotalGeral)}
+                </div>
+                <div className="text-[11px] text-emerald-700 mt-1">
+                  Volume total valorado por bico
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl bg-blue-50/70 border border-blue-200">
+                <div className="text-[11px] font-bold uppercase text-blue-800">
+                  Desvio Médio da Pista (20L)
+                </div>
+                <div className="text-2xl font-bold text-blue-950 font-mono mt-1">
+                  {auditoriaAfericoesMetricas.desvioMedioGeral > 0 ? '+' : ''}
+                  {auditoriaAfericoesMetricas.desvioMedioGeral} ml
+                </div>
+                <div className="text-[11px] text-blue-700 mt-1">
+                  Tolerância legal Inmetro: ± 100 ml
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl bg-amber-50/70 border border-amber-200">
+                <div className="text-[11px] font-bold uppercase text-amber-900 flex items-center justify-between">
+                  <span>Impacto Médio / 1.000 L</span>
+                  <Gauge className="w-3.5 h-3.5 text-amber-600" />
+                </div>
+                <div className="text-2xl font-bold font-mono mt-1 text-amber-900">
+                  {auditoriaAfericoesMetricas.impactoGeralLitros1000L > 0 ? '+' : ''}
+                  {auditoriaAfericoesMetricas.impactoGeralLitros1000L.toFixed(2)} L
+                </div>
+                <div className="text-[11px] text-amber-800 mt-1">
+                  Equiv: {formatarMoeda(auditoriaAfericoesMetricas.impactoGeralFinanceiro1000L)} / 1.000 L
+                </div>
+              </div>
+            </div>
+
+            {/* TABELA 1: CÁLCULO TOTAL DE IMPACTO POR CADA TIPO DE COMBUSTÍVEL EM 1.000 L */}
+            <div className="space-y-2.5">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                  <FlaskConical className="w-4 h-4 text-blue-600" />
+                  Cálculo Total de Impacto de Litros por cada Tipo de Combustível em 1.000 L de Abastecimento
+                </h4>
+                <span className="text-[11px] font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                  Fórmula: (Desvio 20L ÷ 20L) × 1.000L = Desvio (ml) × 50 ÷ 1.000
+                </span>
+              </div>
+
+              <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-slate-100 border-b border-slate-200 font-bold text-slate-700 uppercase">
+                    <tr>
+                      <th className="py-2.5 px-3">Tipo de Combustível</th>
+                      <th className="py-2.5 px-3">Bicos Aferidos</th>
+                      <th className="py-2.5 px-3">Testes</th>
+                      <th className="py-2.5 px-3">Volume Total</th>
+                      <th className="py-2.5 px-3">Preço Médio</th>
+                      <th className="py-2.5 px-3 font-bold text-emerald-800">Valor Total da Aferição</th>
+                      <th className="py-2.5 px-3">Desvio Médio</th>
+                      <th className="py-2.5 px-3 bg-blue-50 text-blue-950 font-bold">
+                        Impacto Litros / 1.000 L
+                      </th>
+                      <th className="py-2.5 px-3 bg-blue-50 text-blue-950 font-bold">
+                        Impacto R$ / 1.000 L
+                      </th>
+                      <th className="py-2.5 px-3">Conformidade</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {auditoriaAfericoesMetricas.listaCombustivel.length === 0 ? (
+                      <tr>
+                        <td colSpan={10} className="py-6 text-center text-slate-400">
+                          Nenhum teste de aferição registrado até o momento.
+                        </td>
+                      </tr>
+                    ) : (
+                      auditoriaAfericoesMetricas.listaCombustivel.map((c) => (
+                        <tr key={c.produto} className="hover:bg-slate-50">
+                          <td className="py-2.5 px-3 font-semibold text-slate-900">{c.produto}</td>
+                          <td className="py-2.5 px-3 font-mono text-[11px] text-slate-600">
+                            {Array.from(c.bicosNumeros)
+                              .sort((a: number, b: number) => Number(a) - Number(b))
+                              .map((n) => `Bico ${String(n).padStart(2, '0')}`)
+                              .join(', ')}
+                          </td>
+                          <td className="py-2.5 px-3 font-mono">{c.qtdTestes} teste(s)</td>
+                          <td className="py-2.5 px-3 font-mono font-semibold">{c.volumeTotal.toFixed(3)} L</td>
+                          <td className="py-2.5 px-3 font-mono">{formatarMoeda(c.precoMedio)}</td>
+                          <td className="py-2.5 px-3 font-mono font-bold text-emerald-700">
+                            {formatarMoeda(c.valorTotal)}
+                          </td>
+                          <td className="py-2.5 px-3 font-mono font-bold">
+                            <span
+                              className={
+                                c.desvioMedioMl > 0
+                                  ? 'text-amber-700'
+                                  : c.desvioMedioMl < 0
+                                  ? 'text-blue-700'
+                                  : 'text-slate-700'
+                              }
+                            >
+                              {c.desvioMedioMl > 0 ? '+' : ''}
+                              {c.desvioMedioMl} ml
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 font-mono font-bold bg-blue-50/40">
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold ${
+                                c.impactoLitros1000L > 0
+                                  ? 'bg-amber-100 text-amber-900'
+                                  : c.impactoLitros1000L < 0
+                                  ? 'bg-blue-100 text-blue-900'
+                                  : 'bg-slate-100 text-slate-700'
+                              }`}
+                            >
+                              {c.impactoLitros1000L > 0 ? '+' : ''}
+                              {c.impactoLitros1000L.toFixed(2)} L
+                              <span className="ml-1 text-[9px] font-normal opacity-75">
+                                ({c.impactoLitros1000L > 0 ? 'Sobra' : c.impactoLitros1000L < 0 ? 'Déficit' : 'Exato'})
+                              </span>
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 font-mono font-semibold bg-blue-50/40 text-slate-800">
+                            {c.impactoFinanceiro1000L > 0 ? '+' : ''}
+                            {formatarMoeda(c.impactoFinanceiro1000L)} / 1.000L
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                c.conformes === c.qtdTestes
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-amber-100 text-amber-800'
+                              }`}
+                            >
+                              {c.conformes} de {c.qtdTestes} conf.
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                  {auditoriaAfericoesMetricas.listaCombustivel.length > 0 && (
+                    <tfoot className="bg-slate-50 border-t border-slate-200 font-bold text-slate-900">
+                      <tr>
+                        <td className="py-2.5 px-3 uppercase text-[11px]">Total Pista</td>
+                        <td className="py-2.5 px-3 font-mono text-[11px]">
+                          {auditoriaAfericoesMetricas.listaBicos.length} bicos
+                        </td>
+                        <td className="py-2.5 px-3 font-mono">
+                          {auditoriaAfericoesMetricas.totalTestes} testes
+                        </td>
+                        <td className="py-2.5 px-3 font-mono">
+                          {auditoriaAfericoesMetricas.volumeTotalGeral.toFixed(3)} L
+                        </td>
+                        <td className="py-2.5 px-3">—</td>
+                        <td className="py-2.5 px-3 font-mono text-emerald-800">
+                          {formatarMoeda(auditoriaAfericoesMetricas.valorTotalGeral)}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono">
+                          {auditoriaAfericoesMetricas.desvioMedioGeral > 0 ? '+' : ''}
+                          {auditoriaAfericoesMetricas.desvioMedioGeral} ml
+                        </td>
+                        <td className="py-2.5 px-3 font-mono bg-blue-100/60 text-blue-950 font-bold">
+                          {auditoriaAfericoesMetricas.impactoGeralLitros1000L > 0 ? '+' : ''}
+                          {auditoriaAfericoesMetricas.impactoGeralLitros1000L.toFixed(2)} L / 1.000L
+                        </td>
+                        <td className="py-2.5 px-3 font-mono bg-blue-100/60 text-blue-950 font-bold">
+                          {auditoriaAfericoesMetricas.impactoGeralFinanceiro1000L > 0 ? '+' : ''}
+                          {formatarMoeda(auditoriaAfericoesMetricas.impactoGeralFinanceiro1000L)} / 1.000L
+                        </td>
+                        <td className="py-2.5 px-3 text-emerald-800">
+                          {auditoriaAfericoesMetricas.listaCombustivel.reduce((acc, c) => acc + c.conformes, 0)} conf.
+                        </td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+            </div>
+
+            {/* TABELA 2: INFORMAÇÕES DE BICOS AFERIDOS & VALOR TOTAL POR BICO */}
+            <div className="space-y-2.5">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                  <Layers className="w-4 h-4 text-indigo-600" />
+                  Informações de Bicos Aferidos & Valor Total da Aferição por Bico
+                </h4>
+                <span className="text-[11px] text-slate-500">
+                  Número, bomba, tanque, encerrante atual, lacre e impacto metrológico individual
+                </span>
+              </div>
+
+              <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-slate-100 border-b border-slate-200 font-bold text-slate-700 uppercase">
+                    <tr>
+                      <th className="py-2.5 px-3">Bico / Bomba</th>
+                      <th className="py-2.5 px-3">Combustível</th>
+                      <th className="py-2.5 px-3">Tanque</th>
+                      <th className="py-2.5 px-3">Encerrante Atual</th>
+                      <th className="py-2.5 px-3">Lacre Inmetro</th>
+                      <th className="py-2.5 px-3">Testes</th>
+                      <th className="py-2.5 px-3">Volume Total</th>
+                      <th className="py-2.5 px-3">Preço (R$/L)</th>
+                      <th className="py-2.5 px-3 font-bold text-emerald-900">Valor Total do Bico</th>
+                      <th className="py-2.5 px-3">Desvio Médio</th>
+                      <th className="py-2.5 px-3">Impacto / 1.000 L</th>
+                      <th className="py-2.5 px-3">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {auditoriaAfericoesMetricas.listaBicos.length === 0 ? (
+                      <tr>
+                        <td colSpan={12} className="py-6 text-center text-slate-400">
+                          Nenhum bico com aferição registrada.
+                        </td>
+                      </tr>
+                    ) : (
+                      auditoriaAfericoesMetricas.listaBicos.map((b) => (
+                        <tr key={b.bicoNumero} className="hover:bg-slate-50">
+                          <td className="py-2 px-3 font-bold text-slate-900">
+                            Bico {String(b.bicoNumero).padStart(2, '0')}
+                            <span className="block text-[10px] font-normal text-slate-500">{b.bombaNome}</span>
+                          </td>
+                          <td className="py-2 px-3 font-medium text-slate-800">{b.produto}</td>
+                          <td className="py-2 px-3 font-mono text-[11px] text-slate-600">{b.tanqueCodigo}</td>
+                          <td className="py-2 px-3 font-mono text-[11px]">
+                            {b.encerranteFinal ? b.encerranteFinal.toLocaleString('pt-BR') : '—'}
+                          </td>
+                          <td className="py-2 px-3 font-mono text-[11px] text-slate-600">
+                            {b.lacreInmetro || 'Conferido'}
+                          </td>
+                          <td className="py-2 px-3 font-mono">{b.qtdTestes}x</td>
+                          <td className="py-2 px-3 font-mono font-semibold">{b.volumeTotal.toFixed(3)} L</td>
+                          <td className="py-2 px-3 font-mono">{formatarMoeda(b.precoLitro)}</td>
+                          <td className="py-2 px-3 font-mono font-bold text-emerald-700">
+                            {formatarMoeda(b.valorTotal)}
+                          </td>
+                          <td className="py-2 px-3 font-mono font-bold">
+                            <span
+                              className={
+                                b.desvioMedioMl > 0
+                                  ? 'text-amber-700'
+                                  : b.desvioMedioMl < 0
+                                  ? 'text-blue-700'
+                                  : 'text-slate-700'
+                              }
+                            >
+                              {b.desvioMedioMl > 0 ? '+' : ''}
+                              {b.desvioMedioMl} ml
+                            </span>
+                          </td>
+                          <td className="py-2 px-3 font-mono text-[11px]">
+                            <span
+                              className={
+                                b.impactoLitros1000L > 0
+                                  ? 'text-amber-800 font-bold'
+                                  : b.impactoLitros1000L < 0
+                                  ? 'text-blue-800 font-bold'
+                                  : 'text-slate-600'
+                              }
+                            >
+                              {b.impactoLitros1000L > 0 ? '+' : ''}
+                              {b.impactoLitros1000L.toFixed(2)} L
+                            </span>
+                            <span className="block text-[10px] text-slate-400">
+                              {b.impactoFinanceiro1000L > 0 ? '+' : ''}
+                              {formatarMoeda(b.impactoFinanceiro1000L)}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                b.naoConformes === 0
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-red-100 text-red-800'
+                              }`}
+                            >
+                              {b.naoConformes === 0 ? 'CONFORME' : 'FORA LIMITE'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                  {auditoriaAfericoesMetricas.listaBicos.length > 0 && (
+                    <tfoot className="bg-slate-50 border-t border-slate-200 font-bold text-slate-900">
+                      <tr>
+                        <td className="py-2 px-3 uppercase text-[11px]" colSpan={5}>
+                          Total de {auditoriaAfericoesMetricas.listaBicos.length} bicos aferidos
+                        </td>
+                        <td className="py-2 px-3 font-mono">{auditoriaAfericoesMetricas.totalTestes}</td>
+                        <td className="py-2 px-3 font-mono">
+                          {auditoriaAfericoesMetricas.volumeTotalGeral.toFixed(3)} L
+                        </td>
+                        <td className="py-2 px-3">—</td>
+                        <td className="py-2 px-3 font-mono text-emerald-800">
+                          {formatarMoeda(auditoriaAfericoesMetricas.valorTotalGeral)}
+                        </td>
+                        <td className="py-2 px-3 font-mono">
+                          {auditoriaAfericoesMetricas.desvioMedioGeral > 0 ? '+' : ''}
+                          {auditoriaAfericoesMetricas.desvioMedioGeral} ml
+                        </td>
+                        <td className="py-2 px-3 font-mono text-blue-900">
+                          {auditoriaAfericoesMetricas.impactoGeralLitros1000L > 0 ? '+' : ''}
+                          {auditoriaAfericoesMetricas.impactoGeralLitros1000L.toFixed(2)} L
+                        </td>
+                        <td className="py-2 px-3 text-emerald-800">
+                          {auditoriaAfericoesMetricas.listaBicos.filter((b) => b.naoConformes === 0).length} conf.
+                        </td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+            </div>
+          </div>
 
           {/* Tabela de Histórico de Aferições */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">

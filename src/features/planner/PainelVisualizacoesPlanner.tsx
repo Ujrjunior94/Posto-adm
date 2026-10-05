@@ -234,30 +234,30 @@ export const PainelVisualizacoesPlanner: React.FC<PainelVisualizacoesPlannerProp
           </div>
         </div>
 
-        {/* Legenda Visual de Cores com Alto Contraste (Requisito 6) */}
+        {/* Legenda Visual de Cores dos Turnos Oficiais (Requisito 6) */}
         <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 text-[11px]">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-bold text-slate-500 uppercase text-[10px]">Legenda de Cores:</span>
+            <span className="font-bold text-slate-500 uppercase text-[10px]">Turnos Oficiais:</span>
+            <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 font-bold">
+              T1: Manhã (06:00–14:00)
+            </span>
             <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-900 border border-blue-300 font-bold">
-              Azul: Turno Manhã (06:00–14:00)
+              T2: Tarde (14:00–22:00)
             </span>
-            <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold">
-              Verde: Turno Tarde (14:00–22:00)
-            </span>
-            <span className="px-2 py-0.5 rounded bg-purple-100 text-purple-900 border border-purple-300 font-bold">
-              Roxo: Turno Noite (22:00–06:00)
+            <span className="px-2 py-0.5 rounded bg-teal-100 text-teal-900 border border-teal-300 font-bold">
+              HOR: Horista (08:00–14:00)
             </span>
             <span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-900 border border-indigo-300 font-bold">
-              Índigo: Plantão / 12x36
+              ADM: Administrativo (08:00–17:00)
             </span>
-            <span className="px-2 py-0.5 rounded bg-slate-200 text-slate-800 border border-slate-300 font-bold">
-              Cinza: Folga (S / DSR)
+            <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold">
+              FOL: Folga (DSR)
             </span>
-            <span className="px-2 py-0.5 rounded bg-yellow-100 text-yellow-900 border border-yellow-300 font-bold">
-              Amarelo: Férias
+            <span className="px-2 py-0.5 rounded bg-orange-100 text-orange-900 border border-orange-300 font-bold">
+              FER: Férias
             </span>
             <span className="px-2 py-0.5 rounded bg-red-100 text-red-900 border border-red-300 font-bold">
-              Vermelho: Conflito / Falta
+              FA: Falta / Conflito
             </span>
           </div>
         </div>
@@ -610,24 +610,68 @@ export const PainelVisualizacoesPlanner: React.FC<PainelVisualizacoesPlannerProp
         </div>
       )}
 
-      {/* 5. VISUALIZAÇÃO POR TURNO */}
+      {/* 5. VISUALIZAÇÃO POR TURNO (TURNOS OFICIAIS: T1, T2, HORISTA, ADM, FOLGA, FERIAS) */}
       {modoVisao === 'TURNO' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4">
           {[
-            { titulo: 'Manhã (06:00 — 14:00)', filtro: (e: Escala) => e.status === 'TRABALHO' && (e.turno.includes('Manhã') || e.turno.includes('Turno 1') || e.horarioInicio === '06:00') },
-            { titulo: 'Tarde (14:00 — 22:00)', filtro: (e: Escala) => e.status === 'TRABALHO' && (e.turno.includes('Tarde') || e.turno.includes('Turno 2') || e.horarioInicio === '14:00') },
-            { titulo: 'Noite / Horista / Plantão', filtro: (e: Escala) => (e.status === 'TRABALHO' || e.status === 'PLANTAO') && (e.turno.includes('Noite') || e.turno.includes('Horista') || e.status === 'PLANTAO') },
-            { titulo: 'Folgas & Férias', filtro: (e: Escala) => e.status === 'FOLGA' || e.status === 'FERIAS' },
+            {
+              titulo: 'T1 — Manhã (06h–14h)',
+              badge: 'bg-amber-100 text-amber-900 border-amber-300',
+              filtro: (e: Escala) =>
+                e.status === 'TRABALHO' &&
+                (e.turno.includes('Turno 1') ||
+                  e.turno.includes('Manhã') ||
+                  e.horarioInicio === '06:00' ||
+                  e.turno.toUpperCase().startsWith('T1')),
+            },
+            {
+              titulo: 'T2 — Tarde (14h–22h)',
+              badge: 'bg-blue-100 text-blue-900 border-blue-300',
+              filtro: (e: Escala) =>
+                e.status === 'TRABALHO' &&
+                (e.turno.includes('Turno 2') ||
+                  e.turno.includes('Tarde') ||
+                  e.horarioInicio === '14:00' ||
+                  e.turno.toUpperCase().startsWith('T2')),
+            },
+            {
+              titulo: 'HOR — Horista (08h–14h)',
+              badge: 'bg-teal-100 text-teal-900 border-teal-300',
+              filtro: (e: Escala) =>
+                e.status === 'TRABALHO' &&
+                (e.turno.toLowerCase().includes('horista') ||
+                  e.turno.toUpperCase() === 'HOR' ||
+                  (e.horarioInicio === '08:00' && e.horarioFim === '14:00')),
+            },
+            {
+              titulo: 'ADM — Administrativo',
+              badge: 'bg-indigo-100 text-indigo-900 border-indigo-300',
+              filtro: (e: Escala) =>
+                e.status === 'TRABALHO' &&
+                (e.turno.toLowerCase().includes('adm') ||
+                  e.turno.toLowerCase().includes('admin') ||
+                  (e.horarioInicio === '08:00' && e.horarioFim === '17:00')),
+            },
+            {
+              titulo: 'FOL — Folga (DSR)',
+              badge: 'bg-emerald-100 text-emerald-900 border-emerald-300',
+              filtro: (e: Escala) => e.status === 'FOLGA',
+            },
+            {
+              titulo: 'FER — Férias',
+              badge: 'bg-orange-100 text-orange-900 border-orange-300',
+              filtro: (e: Escala) => e.status === 'FERIAS',
+            },
           ].map((grupo) => {
             const lista = escalasMes.filter(grupo.filtro);
             return (
               <div
                 key={grupo.titulo}
-                className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3"
+                className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs space-y-2.5"
               >
                 <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                  <span className="font-bold text-xs text-slate-900">{grupo.titulo}</span>
-                  <span className="font-mono text-xs font-bold text-purple-700">{lista.length}</span>
+                  <span className="font-bold text-xs text-slate-900 truncate" title={grupo.titulo}>{grupo.titulo}</span>
+                  <span className={`font-mono text-xs font-bold px-1.5 py-0.5 rounded border ${grupo.badge}`}>{lista.length}</span>
                 </div>
                 <div className="space-y-1.5 max-h-64 overflow-y-auto">
                   {lista.slice(0, 35).map((esc) => (

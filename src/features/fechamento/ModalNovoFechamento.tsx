@@ -483,7 +483,8 @@ export const ModalNovoFechamento: React.FC<ModalNovoFechamentoProps> = ({
               >
                 <option value="Turno 1 - Manhã (06h - 14h)">Turno 1 — Manhã (06h - 14h)</option>
                 <option value="Turno 2 - Tarde (14h - 22h)">Turno 2 — Tarde (14h - 22h)</option>
-                <option value="Turno Horista">Turno Horista</option>
+                <option value="Turno Horista">Turno Horista (08h - 14h)</option>
+                <option value="Turno ADM (08h - 17h)">Turno ADM — Administrativo (08h - 17h)</option>
               </select>
             </div>
             <div>

@@ -66,6 +66,14 @@ const TURNOS_OFICIAIS = [
     badgeClass: 'bg-teal-100 text-teal-900 border-teal-300',
     iconColor: 'text-teal-600',
   },
+  {
+    id: 'Turno ADM (08h - 17h)',
+    nome: 'Turno ADM',
+    horario: '08:00 às 17:00',
+    descricao: 'Administrativo',
+    badgeClass: 'bg-indigo-100 text-indigo-900 border-indigo-300',
+    iconColor: 'text-indigo-600',
+  },
 ];
 
 interface SobrasFaltasViewProps {

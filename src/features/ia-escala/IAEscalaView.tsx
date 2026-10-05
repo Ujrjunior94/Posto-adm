@@ -206,6 +206,25 @@ export const normalizarTurno = (
     };
   }
 
+  // Turno ADM / Administrativo
+  if (
+    t === 'adm' ||
+    t === 'ad' ||
+    t === 'com' ||
+    t.includes('adm') ||
+    t.includes('admin') ||
+    t.includes('administrativo') ||
+    (inicioLimpo.startsWith('08:') && (fimLimpo.startsWith('17:') || fimLimpo.startsWith('18:')))
+  ) {
+    const hIni = inicioLimpo || '08:00';
+    const hFim = fimLimpo || '17:00';
+    return {
+      turno: 'Turno ADM (08h - 17h)',
+      horarioInicio: hIni,
+      horarioFim: hFim,
+    };
+  }
+
   // Turno Horista / Intermediário
   if (
     t === 'h' ||
@@ -396,6 +415,9 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
 
   // Estados de Processamento e Resultados
   const [processando, setProcessando] = useState(false);
+  const [tempoDecorrido, setTempoDecorrido] = useState<number>(0);
+  const [rawJsonResponse, setRawJsonResponse] = useState<any | null>(null);
+  const [mostrarRawJson, setMostrarRawJson] = useState<boolean>(false);
   const [tituloDocumento, setTituloDocumento] = useState('');
   const [colaboradoresDetectados, setColaboradoresDetectados] = useState<ColaboradorReconhecido[]>([]);
   const [itensEscala, setItensEscala] = useState<ItemEscalaExtraido[]>([]);
@@ -406,7 +428,21 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
   const [sucessoSalvo, setSucessoSalvo] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [motorIA, setMotorIA] = useState<'gemini'>('gemini');
-  const [motorUtilizadoResposta, setMotorUtilizadoResposta] = useState<string>('Google Gemini 3.8 Flash');
+  const [motorUtilizadoResposta, setMotorUtilizadoResposta] = useState<string>('OpenRouter API');
+
+  // Timer para feedback em tempo real durante processamento do endpoint /api/analyze-schedule-image
+  useEffect(() => {
+    let timer: any;
+    if (processando) {
+      setTempoDecorrido(0);
+      timer = setInterval(() => {
+        setTempoDecorrido((t) => t + 1);
+      }, 1000);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [processando]);
 
   // Filtros e Modo de Visualização da Escala
   const [modoVisualizacao, setModoVisualizacao] = useState<'GRADE' | 'TABELA'>('GRADE');
@@ -657,18 +693,19 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
     setSucessoSalvo(false);
   };
 
-  // Processamento com a IA Gemini Multimodal através do backend (1. Carregar e enviar imagem -> 2. Processar e validar JSON -> 3. Formatar campos para integração)
+  // Processamento com a IA através do endpoint /api/analyze-schedule-image com OpenRouter multimodal
   const handleProcessarComIA = async () => {
     const baseImg = imagemPreview || imagemOriginal;
     if (!baseImg) return;
 
     setProcessando(true);
     setMensagemStatus(
-      '1/3 Otimizando nitidez e enviando imagem da escala para leitura visual com OpenRouter API...'
+      '1/3 Enviando imagem Base64 para o endpoint /api/analyze-schedule-image (OpenRouter multimodal)...'
     );
     setErroProcessamento('');
     setSucessoSalvo(false);
     setMotorUtilizadoResposta('');
+    setRawJsonResponse(null);
 
     try {
       const imagemParaEnviar =
@@ -693,7 +730,11 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
         setMotorUtilizadoResposta(data.motorUtilizado);
       }
 
-      setMensagemStatus('2/3 Processando resposta estruturada e validando campos do JSON...');
+      if (data.rawJson || data.raw || data.cells) {
+        setRawJsonResponse(data.rawJson || data.raw || data);
+      }
+
+      setMensagemStatus('2/3 JSON bruto recebido! Conciliando turnos oficiais (T1, T2, Horista, ADM, Folga, Férias)...');
       setTituloDocumento(String(data.tituloEscala || 'Escala Operacional de Trabalho').trim());
 
       setDiagnostico({
@@ -1929,41 +1970,79 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
               )}
             </div>
 
-            {/* Seletor de Motor de IA */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-100/90 p-3 rounded-xl border border-slate-200">
+            {/* Seletor e Indicador do Endpoint de IA */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-gradient-to-r from-purple-50 to-indigo-50/70 p-3.5 rounded-xl border border-purple-200 shadow-2xs">
               <div className="text-xs">
-                <span className="font-bold text-slate-800">Motor de Leitura OCR:</span>
-                <p className="text-[11px] text-slate-500">Google Gemini 3.8 Flash Vision configurado para leitura visual de alta precisão.</p>
+                <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                  Endpoint de Leitura Visual:
+                </span>
+                <p className="text-[11px] text-slate-600 font-mono mt-0.5">
+                  POST /api/analyze-schedule-image (OpenRouter multimodal)
+                </p>
               </div>
-              <div className="flex items-center gap-1 bg-blue-600 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold shadow-xs">
-                <Sparkles className="w-3.5 h-3.5 text-blue-200" />
-                <span>Google Gemini 3.8 Flash</span>
+              <div className="flex items-center gap-1.5 bg-purple-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>OpenRouter Multimodal API</span>
               </div>
             </div>
+
+            {/* Estado de Carregamento em Tempo Real do Endpoint /api/analyze-schedule-image */}
+            {processando && (
+              <div className="bg-gradient-to-br from-indigo-50 via-purple-50 to-blue-50 border-2 border-purple-300 rounded-xl p-5 text-center space-y-3.5 shadow-sm">
+                <div className="relative inline-flex items-center justify-center">
+                  <div className="w-12 h-12 border-3 border-purple-200 border-t-purple-600 rounded-full animate-spin"></div>
+                  <Sparkles className="w-5 h-5 text-purple-600 absolute animate-pulse" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900 flex items-center justify-center gap-2">
+                    <span>Processando Imagem da Escala</span>
+                    <span className="text-[11px] font-mono bg-purple-100 text-purple-800 px-2 py-0.5 rounded border border-purple-200">
+                      /api/analyze-schedule-image
+                    </span>
+                  </h4>
+                  <p className="text-xs text-slate-600 mt-1 max-w-sm mx-auto font-medium">
+                    {mensagemStatus || 'Enviando imagem Base64 e aguardando resposta da API do OpenRouter...'}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center justify-center gap-2 text-xs font-mono text-slate-600">
+                  <span className="bg-white px-2.5 py-1 rounded-full border border-purple-200 shadow-2xs font-semibold text-purple-900">
+                    ⏱️ Tempo decorrido: {tempoDecorrido}s
+                  </span>
+                  <span className="bg-white px-2.5 py-1 rounded-full border border-purple-200 shadow-2xs font-semibold text-purple-900">
+                    📡 Status: HTTP 200 OK em andamento
+                  </span>
+                </div>
+                {/* Barra de progresso animada */}
+                <div className="w-full bg-purple-200/70 h-2 rounded-full overflow-hidden">
+                  <div className="bg-purple-600 h-full w-2/3 rounded-full animate-pulse"></div>
+                </div>
+              </div>
+            )}
 
             {/* Botão de Ação Primária de Reconhecimento */}
             {imagemPreview && !sucessoSalvo && (
               <button
                 onClick={handleProcessarComIA}
                 disabled={processando}
-                className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-sm transition flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer"
+                className="w-full py-3.5 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl text-sm transition flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer"
               >
                 {processando ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    Processando com Google Gemini 3.8 Flash Vision...
+                    Processando via /api/analyze-schedule-image ({tempoDecorrido}s)...
                   </>
                 ) : (
                   <>
                     <Sparkles className="w-4 h-4 text-emerald-300" />
-                    Reconhecer Escala com Google Gemini
+                    Analisar Escala via /api/analyze-schedule-image
                   </>
                 )}
               </button>
             )}
 
             {/* Feedback e Alertas */}
-            {mensagemStatus && (
+            {mensagemStatus && !processando && (
               <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg text-xs text-purple-900 flex items-start gap-2">
                 <AlertCircle className="w-4 h-4 flex-shrink-0 text-purple-700 mt-0.5" />
                 <span>{mensagemStatus}</span>
@@ -1983,35 +2062,74 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
                     className="self-start inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded text-xs transition shadow-xs cursor-pointer"
                   >
                     <RefreshCw className="w-3.5 h-3.5" />
-                    Tentar Novamente com IA
+                    Tentar Novamente via /api/analyze-schedule-image
                   </button>
+                )}
+              </div>
+            )}
+
+            {/* Visualizador de JSON Cru Retornado pelo Backend (OpenRouter) */}
+            {rawJsonResponse && (
+              <div className="bg-slate-900 text-slate-100 p-3.5 rounded-xl border border-slate-800 space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+                    <span className="font-bold font-mono text-[11px] text-emerald-300">
+                      JSON Cru (/api/analyze-schedule-image)
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setMostrarRawJson(!mostrarRawJson)}
+                    className="text-slate-300 hover:text-white text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 transition cursor-pointer"
+                  >
+                    {mostrarRawJson ? '▲ Ocultar JSON' : '▼ Ver JSON Cru'}
+                  </button>
+                </div>
+                {mostrarRawJson && (
+                  <pre className="p-2.5 bg-slate-950 rounded border border-slate-800 font-mono text-[10px] overflow-auto max-h-60 leading-relaxed text-emerald-400">
+                    {JSON.stringify(rawJsonResponse, null, 2)}
+                  </pre>
                 )}
               </div>
             )}
           </div>
 
-          {/* Dica Operacional e Padrão de Turnos */}
+          {/* Dica Operacional e Padrão de Turnos Oficiais do Posto */}
           <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-2 text-xs">
-            <div className="font-bold text-slate-800 flex items-center gap-1.5">
-              <Clock className="w-4 h-4 text-purple-600" />
-              Padrão de Turnos Reconhecidos:
+            <div className="font-bold text-slate-800 flex items-center justify-between gap-1.5">
+              <span className="flex items-center gap-1.5">
+                <Clock className="w-4 h-4 text-purple-600" />
+                Turnos Oficiais Reconhecidos:
+              </span>
+              <span className="text-[10px] text-purple-700 font-mono font-semibold bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
+                6 Turnos Oficiais
+              </span>
             </div>
             <div className="grid grid-cols-1 gap-1 text-[11px] text-slate-600">
               <div className="flex items-center justify-between p-1.5 bg-amber-50/70 rounded border border-amber-100">
-                <span className="font-bold text-amber-900">Turno 1 (Manhã):</span>
-                <span className="font-mono font-semibold">06:00 às 14:00 (T1, 1, M)</span>
+                <span className="font-bold text-amber-900">T1 — Manhã:</span>
+                <span className="font-mono font-semibold">06:00 às 14:00 (T1, 06-14, 1, M)</span>
               </div>
               <div className="flex items-center justify-between p-1.5 bg-blue-50/70 rounded border border-blue-100">
-                <span className="font-bold text-blue-900">Turno 2 (Tarde):</span>
-                <span className="font-mono font-semibold">14:00 às 22:00 (T2, 2, T)</span>
+                <span className="font-bold text-blue-900">T2 — Tarde:</span>
+                <span className="font-mono font-semibold">14:00 às 22:00 (T2, 14-22, 2, T)</span>
               </div>
               <div className="flex items-center justify-between p-1.5 bg-teal-50/70 rounded border border-teal-100">
-                <span className="font-bold text-teal-900">Turno Horista:</span>
-                <span className="font-mono font-semibold">Flexível / Por Hora (HOR, H)</span>
+                <span className="font-bold text-teal-900">HORISTA:</span>
+                <span className="font-mono font-semibold">08:00 às 14:00 (HOR, HORISTA, H)</span>
+              </div>
+              <div className="flex items-center justify-between p-1.5 bg-indigo-50/70 rounded border border-indigo-100">
+                <span className="font-bold text-indigo-900">ADM — Administrativo:</span>
+                <span className="font-mono font-semibold">08:00 às 17:00 (ADM, COM, ADMIN)</span>
               </div>
               <div className="flex items-center justify-between p-1.5 bg-slate-100 rounded border border-slate-200">
-                <span className="font-bold text-slate-800">Folga / DSR:</span>
-                <span className="font-mono font-semibold">00:00 (F, FOL, OFF, X)</span>
+                <span className="font-bold text-slate-800">FOLGA / DSR:</span>
+                <span className="font-mono font-semibold">00:00 (FOL, DSR, S, F, Folga)</span>
+              </div>
+              <div className="flex items-center justify-between p-1.5 bg-orange-50/70 rounded border border-orange-100">
+                <span className="font-bold text-orange-900">FÉRIAS:</span>
+                <span className="font-mono font-semibold">00:00 (FER, FE, FÉRIAS, Ferias)</span>
               </div>
             </div>
           </div>
@@ -2682,15 +2800,21 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
                           T2: Tarde (14h às 22h)
                         </span>
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-teal-100 border border-teal-300 text-teal-900 rounded text-[10px] font-bold">
-                          HOR: Turno Horista
+                          HOR: Horista (08h às 14h)
+                        </span>
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-100 border border-indigo-300 text-indigo-900 rounded text-[10px] font-bold">
+                          ADM: Administrativo (08h às 17h)
                         </span>
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 border border-slate-300 text-slate-700 rounded text-[10px] font-bold">
                           FOLGA: Descanso
                         </span>
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-orange-100 border border-orange-300 text-orange-900 rounded text-[10px] font-bold">
+                          FÉRIAS: Férias
+                        </span>
                       </div>
 
                       <div className="text-[11px] text-slate-400 italic">
-                        💡 Dica: Clique sobre qualquer célula para alternar instantaneamente entre T1 ➔ T2 ➔ Horista ➔ Folga.
+                        💡 Dica: Clique sobre qualquer célula para alternar instantaneamente entre T1 ➔ T2 ➔ Horista ➔ ADM ➔ Folga ➔ Férias.
                       </div>
                     </div>
                   </div>
@@ -2739,8 +2863,9 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
                                   {![
                                     'Turno 1 - Manhã (06h - 14h)',
                                     'Turno 2 - Tarde (14h - 22h)',
-                                    'Turno 3 - Noite (22h - 06h)',
                                     'Turno Horista',
+                                    'Turno ADM (08h - 17h)',
+                                    'Turno 3 - Noite (22h - 06h)',
                                     'Plantão',
                                     'Folga',
                                     'Férias',
@@ -2750,10 +2875,11 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
                                   )}
                                   <option value="Turno 1 - Manhã (06h - 14h)">Turno 1 — Manhã (06h - 14h)</option>
                                   <option value="Turno 2 - Tarde (14h - 22h)">Turno 2 — Tarde (14h - 22h)</option>
+                                  <option value="Turno Horista">Turno Horista (08h - 14h)</option>
+                                  <option value="Turno ADM (08h - 17h)">Turno ADM — Administrativo (08h - 17h)</option>
                                   <option value="Turno 3 - Noite (22h - 06h)">Turno 3 — Noite (22h - 06h)</option>
-                                  <option value="Turno Horista">Turno Horista (Flexível / Por Hora)</option>
                                   <option value="Plantão">Plantão / 12x36</option>
-                                  <option value="Folga">Folga</option>
+                                  <option value="Folga">Folga / DSR</option>
                                   <option value="Férias">Férias</option>
                                   <option value="Afastado">Afastado / Atestado</option>
                                 </select>

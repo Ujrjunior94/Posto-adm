@@ -56,6 +56,9 @@ async function startServer() {
   /**
    * Endpoint de Análise de Imagem de Escala via OpenRouter (Modelo Multimodal)
    * POST /api/analyze-schedule-image
+   * 
+   * Recebe imagem em base64, valida o envio, invoca a API do OpenRouter
+   * de forma segura usando OPENROUTER_API_KEY e OPENROUTER_MODEL, e retorna os dados crus em JSON.
    */
   const handleAnalyzeScheduleImage = async (req: express.Request, res: express.Response) => {
     try {
@@ -63,46 +66,57 @@ async function startServer() {
       if (!req.body || typeof req.body !== 'object') {
         return res.status(400).json({
           success: false,
-          error: 'Corpo da requisição inválido. Envie um JSON com o campo "image" ou "imageBase64".',
+          error: 'Corpo da requisição inválido. Envie um JSON contendo a imagem em base64.',
         });
       }
 
-      const { image, imageBase64, mimeType = 'image/jpeg' } = req.body;
-      const rawImage = String(image || imageBase64 || '').trim();
+      // Suporte aos campos: image, imageBase64, image_base64, data
+      const { image, imageBase64, image_base64, data, mimeType = 'image/jpeg' } = req.body;
+      const rawImage = String(image || imageBase64 || image_base64 || data || '').trim();
 
       // 2. Validação da presença da imagem
       if (!rawImage) {
         return res.status(400).json({
           success: false,
-          error: 'Nenhuma imagem da escala foi enviada para leitura.',
+          error: 'Nenhuma imagem em base64 foi enviada para análise.',
         });
       }
 
       // 3. Validação do formato e conteúdo da imagem em Base64
       const isDataUrl = rawImage.startsWith('data:image/');
-      const base64Content = isDataUrl
-        ? rawImage.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, '').trim()
-        : rawImage;
+      let cleanBase64 = rawImage;
+      let detectedMime = mimeType;
 
-      if (base64Content.length < 60) {
+      if (isDataUrl) {
+        const mimeMatch = rawImage.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/);
+        if (mimeMatch) {
+          detectedMime = mimeMatch[1];
+        }
+        cleanBase64 = rawImage.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, '').trim();
+      }
+
+      // Remove quebras de linha e espaços em branco acidentais
+      cleanBase64 = cleanBase64.replace(/\s+/g, '');
+
+      // Verificação de tamanho mínimo de uma imagem válida
+      if (cleanBase64.length < 50) {
         return res.status(400).json({
           success: false,
-          error: 'Dados da imagem corrompidos ou insuficientes.',
+          error: 'Conteúdo da imagem em base64 corrompido ou insuficiente.',
         });
       }
 
-      // Validação de tipo MIME
-      const normalizedMime = isDataUrl
-        ? (rawImage.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/)?.[1] || mimeType)
-        : mimeType;
-
+      // Validação do tipo MIME
       const allowedMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg', 'image/gif'];
-      if (!allowedMimes.includes(normalizedMime.toLowerCase())) {
+      const normalizedMime = detectedMime.toLowerCase();
+      if (!allowedMimes.includes(normalizedMime)) {
         return res.status(400).json({
           success: false,
-          error: 'Formato de imagem não suportado. Utilize JPEG, PNG ou WebP.',
+          error: `Formato de imagem não suportado (${detectedMime}). Utilize JPEG, PNG ou WebP.`,
         });
       }
+
+      const formattedDataUrl = `data:${normalizedMime};base64,${cleanBase64}`;
 
       // 4. Obtenção segura das credenciais no servidor
       const openRouterKey =
@@ -113,64 +127,393 @@ async function startServer() {
         'google/gemini-2.0-flash-lite-preview-02-05:free';
 
       if (!openRouterKey) {
-        console.warn('[OpenRouter OCR] Chave OPENROUTER_API_KEY não configurada no ambiente.');
-        return res.status(401).json({
+        console.warn('[OpenRouter Backend] OPENROUTER_API_KEY não configurada no ambiente.');
+        return res.status(500).json({
           success: false,
-          error: 'Não foi possível conectar ao serviço de IA.',
+          error: 'A variável de ambiente OPENROUTER_API_KEY não está configurada no servidor.',
         });
       }
 
-      // 5. Invocação segura do serviço OpenRouter
-      const result = await OpenRouterProvider.callOpenRouterDirect(
-        rawImage,
-        openRouterKey,
-        openRouterModel,
-        { mimeType: normalizedMime }
-      );
+      // 5. Invocação segura da API do OpenRouter
+      const systemPrompt = `Você é um leitor óptico (OCR) puramente visual de tabelas de escalas de trabalho em postos de combustível.
+Os turnos operacionais oficiais deste posto são:
+- T1: Turno 1 Manhã (06:00 às 14:00 ou "06-14")
+- T2: Turno 2 Tarde (14:00 às 22:00 ou "14-22")
+- HORISTA: Turno Horista / Intermediário (08:00 às 14:00 ou "HOR")
+- ADM: Administrativo (08:00 às 17:00 ou "ADM")
+- FOLGA: Folga Semanal / DSR ("FOLGA", "DSR", "S", "F")
+- FÉRIAS: Férias ("FÉRIAS", "FERIAS", "FE", "FER")
 
-      // 6. Resposta estruturada consistente com a interface AIProvider
-      return res.json({
-        success: true,
-        data: result.data,
-        cells: result.cells || [],
-        grid: result.data?.grid,
-        colaboradoresEscala: result.data?.colaboradoresEscala,
-        motorUtilizado: result.motorUtilizado || `OpenRouter (${openRouterModel})`,
-      });
-    } catch (error: any) {
-      console.error('[OpenRouter OCR Endpoint] Erro de execução:', error);
-      const msg = error instanceof Error ? error.message : String(error || '');
+Analise a imagem da escala e extraia RIGOROSAMENTE e APENAS o conteúdo visual lido nas células.
 
-      if (msg.includes('429') || msg.includes('rate limit')) {
-        return res.status(429).json({
+REGRAS DE LEITURA DA IMAGEM:
+1. Extraia o texto visual bruto ("rawText") exatamente como está escrito na imagem (ex: "JOAO", "06-14", "T1", "T2", "HOR", "ADM", "FOLGA", "S", "FE").
+2. NÃO crie funcionários, NÃO adivinhe sobrenomes ou matrículas.
+3. NÃO altere horários ou siglas escritas nas células.
+4. Retorne EXCLUSIVAMENTE um objeto JSON válido com a propriedade "cells":
+{
+  "cells": [
+    {
+      "rowIndex": 1,
+      "columnIndex": 0,
+      "rawText": "JOAO",
+      "confidence": 0.95,
+      "role": "EMPLOYEE"
+    },
+    {
+      "rowIndex": 1,
+      "columnIndex": 1,
+      "rawText": "06-14",
+      "confidence": 0.98,
+      "role": "SHIFT_VALUE"
+    }
+  ]
+}`;
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 45000);
+
+      let openRouterRes: Response;
+      try {
+        openRouterRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${openRouterKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://posto-adm.local',
+            'X-Title': 'Posto ADM Backend',
+          },
+          body: JSON.stringify({
+            model: openRouterModel,
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  { type: 'text', text: systemPrompt },
+                  {
+                    type: 'image_url',
+                    image_url: { url: formattedDataUrl },
+                  },
+                ],
+              },
+            ],
+            temperature: 0.1,
+            response_format: { type: 'json_object' },
+          }),
+          signal: controller.signal,
+        });
+      } catch (fetchErr: any) {
+        clearTimeout(timeout);
+        if (fetchErr?.name === 'AbortError') {
+          return res.status(504).json({
+            success: false,
+            error: 'Tempo limite excedido na resposta do OpenRouter (timeout 45s).',
+          });
+        }
+        throw fetchErr;
+      } finally {
+        clearTimeout(timeout);
+      }
+
+      if (!openRouterRes.ok) {
+        const errorBody = await openRouterRes.text().catch(() => '');
+        console.error('[OpenRouter API Error]', openRouterRes.status, errorBody);
+
+        if (openRouterRes.status === 401 || openRouterRes.status === 403) {
+          return res.status(openRouterRes.status).json({
+            success: false,
+            error: 'Não foi possível autenticar no OpenRouter. Verifique a OPENROUTER_API_KEY.',
+          });
+        }
+
+        if (openRouterRes.status === 429) {
+          return res.status(429).json({
+            success: false,
+            error: 'Limite de taxa/créditos atingido no OpenRouter (429 Rate Limit).',
+          });
+        }
+
+        return res.status(openRouterRes.status).json({
           success: false,
-          error: 'Limite temporário de utilização atingido.',
+          error: `Erro retornado pelo OpenRouter: ${openRouterRes.statusText || openRouterRes.status}`,
+          details: errorBody,
         });
       }
 
-      if (msg.includes('401') || msg.includes('403') || msg.includes('unauthorized')) {
-        return res.status(401).json({
-          success: false,
-          error: 'Não foi possível conectar ao serviço de IA.',
-        });
-      }
+      const responseJson: any = await openRouterRes.json().catch(() => null);
+      const content = responseJson?.choices?.[0]?.message?.content || '{}';
 
-      if (msg.includes('A imagem não pôde ser analisada')) {
+      // 6. Extração e validação do JSON cru retornado pelo modelo
+      let parsedRawData: any = null;
+      try {
+        const cleaned = content.replace(/^```json/i, '').replace(/```$/i, '').trim();
+        parsedRawData = JSON.parse(cleaned);
+      } catch {
         return res.status(422).json({
           success: false,
-          error: 'A imagem não pôde ser analisada.',
+          error: 'A imagem não pôde ser analisada em formato JSON válido.',
+          rawContent: content,
         });
       }
 
+      if (!parsedRawData || typeof parsedRawData !== 'object') {
+        return res.status(422).json({
+          success: false,
+          error: 'A resposta do modelo não contém dados estruturados.',
+          rawContent: content,
+        });
+      }
+
+      const cells = Array.isArray(parsedRawData.cells) ? parsedRawData.cells : [];
+
+      // Reconstrói colaboradoresEscala a partir de cells caso o modelo retorne apenas células planas
+      if (
+        cells.length > 0 &&
+        (!parsedRawData.colaboradoresEscala ||
+          !Array.isArray(parsedRawData.colaboradoresEscala) ||
+          parsedRawData.colaboradoresEscala.length === 0)
+      ) {
+        const rowsMap = new Map<number, any[]>();
+        cells.forEach((c: any) => {
+          const r = typeof c.rowIndex === 'number' ? c.rowIndex : 0;
+          if (!rowsMap.has(r)) rowsMap.set(r, []);
+          rowsMap.get(r)!.push(c);
+        });
+
+        const reconstructedColabs: any[] = [];
+        rowsMap.forEach((rowCells) => {
+          rowCells.sort((a: any, b: any) => (a.columnIndex || 0) - (b.columnIndex || 0));
+          const empCell = rowCells.find((c: any) => c.role === 'EMPLOYEE') || rowCells[0];
+          const shiftCells = rowCells.filter((c: any) => c !== empCell);
+
+          if (empCell && empCell.rawText) {
+            reconstructedColabs.push({
+              nomeOriginal: empCell.rawText,
+              dias: shiftCells.map((sc: any, idx: number) => ({
+                dia: String(sc.columnIndex || idx + 1).padStart(2, '0'),
+                codigoOriginal: sc.rawText || '',
+                turno: sc.rawText || '',
+              })),
+            });
+          }
+        });
+        if (reconstructedColabs.length > 0) {
+          parsedRawData.colaboradoresEscala = reconstructedColabs;
+        }
+      }
+
+      // 7. Retorno dos dados crus em JSON para o frontend
+      return res.json({
+        success: true,
+        data: parsedRawData,
+        raw: parsedRawData,
+        cells,
+        grid: parsedRawData.grid,
+        colaboradoresEscala: parsedRawData.colaboradoresEscala || [],
+        motorUtilizado: `OpenRouter (${openRouterModel})`,
+        model: openRouterModel,
+      });
+    } catch (error: any) {
+      console.error('[OpenRouter OCR Endpoint] Erro inesperado:', error);
       return res.status(500).json({
         success: false,
-        error: 'Modelo de IA temporariamente indisponível.',
+        error: error instanceof Error ? error.message : 'Erro interno ao processar a imagem da escala.',
       });
     }
   };
 
   app.post('/api/analyze-schedule-image', handleAnalyzeScheduleImage);
   app.post('/api/gemini/escala-ocr', handleAnalyzeScheduleImage);
+
+  /**
+   * Endpoint de Status do OpenRouter (sem expor a chave de API ao cliente)
+   * GET /api/openrouter/status
+   */
+  app.get('/api/openrouter/status', (req, res) => {
+    const key = process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_API_KEY || '';
+    const model =
+      process.env.OPENROUTER_MODEL ||
+      process.env.VITE_OPENROUTER_MODEL ||
+      'google/gemini-2.0-flash-lite-preview-02-05:free';
+
+    const configured = Boolean(key && key.trim().length > 0);
+    const maskedKey = configured
+      ? `${key.slice(0, 7)}...${key.slice(-4)}`
+      : 'Não configurada';
+
+    res.json({
+      status: configured ? 'configured' : 'missing_key',
+      configured,
+      model,
+      maskedKey: configured ? maskedKey : undefined,
+      serverTime: new Date().toISOString(),
+    });
+  });
+
+  /**
+   * Endpoint de Teste de Conexão com o OpenRouter
+   * POST /api/openrouter/test
+   */
+  app.post('/api/openrouter/test', async (req, res) => {
+    try {
+      const openRouterKey =
+        process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_API_KEY || '';
+      const openRouterModel =
+        process.env.OPENROUTER_MODEL ||
+        process.env.VITE_OPENROUTER_MODEL ||
+        'google/gemini-2.0-flash-lite-preview-02-05:free';
+
+      if (!openRouterKey) {
+        return res.status(400).json({
+          success: false,
+          error: 'OPENROUTER_API_KEY não configurada no servidor (.env).',
+        });
+      }
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+
+      try {
+        const testRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${openRouterKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://posto-adm.local',
+            'X-Title': 'Posto ADM Backend Test',
+          },
+          body: JSON.stringify({
+            model: openRouterModel,
+            messages: [{ role: 'user', content: 'Responda apenas: PONG' }],
+            max_tokens: 10,
+          }),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeout);
+
+        if (!testRes.ok) {
+          const errText = await testRes.text().catch(() => '');
+          return res.status(testRes.status).json({
+            success: false,
+            status: testRes.status,
+            error: `Erro ao comunicar com OpenRouter: ${testRes.statusText}`,
+            details: errText,
+          });
+        }
+
+        const data: any = await testRes.json().catch(() => null);
+        const reply = data?.choices?.[0]?.message?.content || '';
+
+        return res.json({
+          success: true,
+          message: 'Conexão com OpenRouter estabelecida com sucesso!',
+          model: openRouterModel,
+          reply: reply.trim(),
+        });
+      } catch (fErr: any) {
+        clearTimeout(timeout);
+        return res.status(500).json({
+          success: false,
+          error: fErr?.name === 'AbortError' ? 'Timeout de 15s atingido.' : fErr?.message,
+        });
+      }
+    } catch (error: any) {
+      return res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Erro ao testar OpenRouter.',
+      });
+    }
+  });
+
+  /**
+   * Endpoint Proxy Geral para Chat / Completions via OpenRouter
+   * POST /api/openrouter/chat
+   */
+  app.post('/api/openrouter/chat', async (req, res) => {
+    try {
+      const openRouterKey =
+        process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_API_KEY || '';
+      const defaultModel =
+        process.env.OPENROUTER_MODEL ||
+        process.env.VITE_OPENROUTER_MODEL ||
+        'google/gemini-2.0-flash-lite-preview-02-05:free';
+
+      if (!openRouterKey) {
+        return res.status(500).json({
+          success: false,
+          error: 'OPENROUTER_API_KEY não configurada no servidor (.env).',
+        });
+      }
+
+      const {
+        messages,
+        model = defaultModel,
+        temperature = 0.2,
+        max_tokens,
+        response_format,
+      } = req.body || {};
+
+      if (!messages || !Array.isArray(messages) || messages.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Formato inválido. O campo "messages" deve ser um array com ao menos uma mensagem.',
+        });
+      }
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 60000);
+
+      try {
+        const openRouterRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${openRouterKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://posto-adm.local',
+            'X-Title': 'Posto ADM Backend Proxy',
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            temperature,
+            ...(max_tokens ? { max_tokens } : {}),
+            ...(response_format ? { response_format } : {}),
+          }),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeout);
+
+        if (!openRouterRes.ok) {
+          const errText = await openRouterRes.text().catch(() => '');
+          return res.status(openRouterRes.status).json({
+            success: false,
+            error: `Erro OpenRouter (${openRouterRes.status}): ${openRouterRes.statusText}`,
+            details: errText,
+          });
+        }
+
+        const data = await openRouterRes.json();
+        return res.json({
+          success: true,
+          data,
+          model,
+        });
+      } catch (fetchErr: any) {
+        clearTimeout(timeout);
+        return res.status(504).json({
+          success: false,
+          error: fetchErr?.name === 'AbortError' ? 'Tempo limite de resposta excedido (60s).' : fetchErr?.message,
+        });
+      }
+    } catch (error: any) {
+      return res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Erro interno ao processar chat no OpenRouter.',
+      });
+    }
+  });
 
   /**
    * Motor Google Gemini 3.8 Flash para Auditoria e Parecer de Conformidade ANP (Padrões Agosto de 2026)

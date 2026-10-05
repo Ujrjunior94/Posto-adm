@@ -35,10 +35,13 @@ export const FuncionariosView: React.FC<FuncionariosViewProps> = ({ funcionarios
 
   const normalizarTurnoFuncionario = (t?: string) => {
     const val = (t || '').toLowerCase();
-    if (val.includes('horista') || val === 'hor') return 'Turno Horista';
-    if (val.includes('tarde') || val.includes('14h') || val.includes('turno 2 - tarde') || val === 'turno 2') {
+    if (val.includes('adm') || val.includes('admin') || val === 'adm') return 'Turno ADM (08h - 17h)';
+    if (val.includes('horista') || val === 'hor' || val === 'h') return 'Turno Horista';
+    if (val.includes('tarde') || val.includes('14h') || val.includes('turno 2') || val === 't2') {
       return 'Turno 2 - Tarde (14h - 22h)';
     }
+    if (val.includes('folga') || val === 's' || val === 'dsr' || val === 'fol') return 'Folga';
+    if (val.includes('ferias') || val.includes('férias') || val === 'fe' || val === 'fer') return 'Férias';
     return 'Turno 1 - Manhã (06h - 14h)';
   };
 
@@ -246,10 +249,16 @@ export const FuncionariosView: React.FC<FuncionariosViewProps> = ({ funcionarios
                   </div>
                   <span
                     className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
-                      normalizarTurnoFuncionario(f.turnoPreferencial).includes('Horista')
+                      normalizarTurnoFuncionario(f.turnoPreferencial).includes('ADM')
+                        ? 'bg-indigo-50 text-indigo-800 border-indigo-200'
+                        : normalizarTurnoFuncionario(f.turnoPreferencial).includes('Horista')
                         ? 'bg-teal-50 text-teal-800 border-teal-200'
                         : normalizarTurnoFuncionario(f.turnoPreferencial).includes('Turno 2')
                         ? 'bg-blue-50 text-blue-800 border-blue-200'
+                        : normalizarTurnoFuncionario(f.turnoPreferencial).includes('Folga')
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                        : normalizarTurnoFuncionario(f.turnoPreferencial).includes('Férias')
+                        ? 'bg-orange-50 text-orange-800 border-orange-200'
                         : 'bg-amber-50 text-amber-800 border-amber-200'
                     }`}
                   >
@@ -330,10 +339,16 @@ export const FuncionariosView: React.FC<FuncionariosViewProps> = ({ funcionarios
                     <td className="px-6 py-4 text-xs text-slate-600">
                       <span
                         className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold border ${
-                          normalizarTurnoFuncionario(f.turnoPreferencial).includes('Horista')
+                          normalizarTurnoFuncionario(f.turnoPreferencial).includes('ADM')
+                            ? 'bg-indigo-50 text-indigo-800 border-indigo-200'
+                            : normalizarTurnoFuncionario(f.turnoPreferencial).includes('Horista')
                             ? 'bg-teal-50 text-teal-800 border-teal-200'
                             : normalizarTurnoFuncionario(f.turnoPreferencial).includes('Turno 2')
                             ? 'bg-blue-50 text-blue-800 border-blue-200'
+                            : normalizarTurnoFuncionario(f.turnoPreferencial).includes('Folga')
+                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                            : normalizarTurnoFuncionario(f.turnoPreferencial).includes('Férias')
+                            ? 'bg-orange-50 text-orange-800 border-orange-200'
                             : 'bg-amber-50 text-amber-800 border-amber-200'
                         }`}
                       >
@@ -472,9 +487,12 @@ export const FuncionariosView: React.FC<FuncionariosViewProps> = ({ funcionarios
                   onChange={(e) => setTurnoPreferencial(e.target.value)}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
                 >
-                  <option value="Turno 1 - Manhã (06h - 14h)">Turno 1 — Manhã (06h às 14h)</option>
-                  <option value="Turno 2 - Tarde (14h - 22h)">Turno 2 — Tarde (14h às 22h)</option>
-                  <option value="Turno Horista">Turno Horista (Flexível / Por Hora)</option>
+                  <option value="Turno 1 - Manhã (06h - 14h)">T1 — Turno 1 Manhã (06h às 14h)</option>
+                  <option value="Turno 2 - Tarde (14h - 22h)">T2 — Turno 2 Tarde (14h às 22h)</option>
+                  <option value="Turno Horista">HOR — Turno Horista (08h às 14h / Flexível)</option>
+                  <option value="Turno ADM (08h - 17h)">ADM — Administrativo (08h às 17h)</option>
+                  <option value="Folga">FOL — Folga (DSR Semanal)</option>
+                  <option value="Férias">FER — Férias</option>
                 </select>
               </div>
 
