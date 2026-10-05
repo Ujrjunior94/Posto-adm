@@ -220,6 +220,7 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
 
     afericoes.forEach((a) => {
       const prod = a.produto || 'Combustível';
+      const volNominal = Number(a.volumeNominal) || 20;
       const vol = Number(a.volumeAferido) || 20;
       const desvioMl = Math.round((Number(a.diferenca) || 0) * 1000);
       const isConforme = a.resultado === 'CONFORME';
@@ -232,7 +233,7 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
       const precoLitro = bicoCad
         ? calcularPrecoEfetivoBico(bicoCad).precoFinal
         : PRECOS_PADRAO_COMBUSTIVEL[prod] || 5.89;
-      const valorTeste = vol * precoLitro;
+      const valorTeste = volNominal * precoLitro;
 
       valorTotalGeral += valorTeste;
       volumeTotalGeral += vol;

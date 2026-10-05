@@ -30,6 +30,7 @@ import {
   FileCheck,
   Receipt,
   ChevronLeft,
+  Fuel,
 } from 'lucide-react';
 import { formatarMoeda } from '../../utils/calculations';
 import { PRECOS_PADRAO_COMBUSTIVEL, calcularPrecoEfetivoBico } from '../../utils/pricing';
@@ -52,6 +53,7 @@ interface RelatoriosProps {
 
 type TipoRelatorio =
   | 'BALANCO_CONSOLIDADO'
+  | 'AGRUPADO_COMBUSTIVEL'
   | 'FECHAMENTOS'
   | 'AFERICOES'
   | 'ANALISES'
@@ -82,6 +84,8 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
   >('MENSAL');
   const [filtroFuncRelatorio, setFiltroFuncRelatorio] = useState<string>('TODOS');
   const [filtroSetorRelatorio, setFiltroSetorRelatorio] = useState<string>('TODOS');
+  const [filtroCombustivel, setFiltroCombustivel] = useState<string>('TODOS');
+  const [combustivelAberto, setCombustivelAberto] = useState<string | null>(null);
   const [busca, setBusca] = useState('');
   const [dataInicio, setDataInicio] = useState(new Date().toISOString().slice(0, 7) + '-01');
   const [dataFim, setDataFim] = useState(new Date().toISOString().slice(0, 7) + '-31');
@@ -119,6 +123,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
       .filter((a) => {
         if (dataInicio && a.data < dataInicio) return false;
         if (dataFim && a.data > dataFim) return false;
+        if (filtroCombustivel !== 'TODOS' && a.produto !== filtroCombustivel) return false;
         if (busca.trim()) {
           const q = busca.toLowerCase();
           if (
@@ -133,7 +138,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
         return true;
       })
       .sort((a, b) => b.data.localeCompare(a.data) || (b.hora || '').localeCompare(a.hora || ''));
-  }, [afericoes, dataInicio, dataFim, busca]);
+  }, [afericoes, dataInicio, dataFim, filtroCombustivel, busca]);
 
   const escalasFiltradas = useMemo(() => {
     return escalas
@@ -163,6 +168,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
       .filter((d) => {
         if (dataInicio && d.data < dataInicio) return false;
         if (dataFim && d.data > dataFim) return false;
+        if (filtroCombustivel !== 'TODOS' && d.produto !== filtroCombustivel) return false;
         if (busca.trim()) {
           const q = busca.toLowerCase();
           if (
@@ -177,7 +183,38 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
         return true;
       })
       .sort((a, b) => b.data.localeCompare(a.data) || (b.hora || '').localeCompare(a.hora || ''));
-  }, [densidades, dataInicio, dataFim, busca]);
+  }, [densidades, dataInicio, dataFim, filtroCombustivel, busca]);
+
+  const tanquesFiltrados = useMemo(() => {
+    return (tanques || []).filter((t) => {
+      if (filtroCombustivel !== 'TODOS' && t.produto !== filtroCombustivel) return false;
+      if (busca.trim()) {
+        const q = busca.toLowerCase();
+        if (!t.codigo.toLowerCase().includes(q) && !(t.produto || '').toLowerCase().includes(q)) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [tanques, filtroCombustivel, busca]);
+
+  const bicosFiltrados = useMemo(() => {
+    return (bicos || []).filter((b) => {
+      if (filtroCombustivel !== 'TODOS' && b.produto !== filtroCombustivel) return false;
+      if (busca.trim()) {
+        const q = busca.toLowerCase();
+        if (
+          !String(b.numero).includes(q) &&
+          !b.bomba.toLowerCase().includes(q) &&
+          !(b.produto || '').toLowerCase().includes(q) &&
+          !(b.tanqueCodigo || '').toLowerCase().includes(q)
+        ) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [bicos, filtroCombustivel, busca]);
 
   const auditoriaFiltrada = useMemo(() => {
     return (auditoria || [])
@@ -311,7 +348,8 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
 
     afericoesFiltradas.forEach((a) => {
       const prod = a.produto || 'Combustível';
-      const vol = Number(a.volumeAferido) || 20;
+      const volNominal = Number(a.volumeNominal) || 20;
+      const volAferido = Number(a.volumeAferido) || 20;
       const desvioMl = Math.round((Number(a.diferenca) || 0) * 1000);
       const isConforme = a.resultado === 'CONFORME';
 
@@ -321,7 +359,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
         1;
       const bicoCad = bicos.find((b) => b.id === a.bicoId || b.numero === bicoNum);
       const precoLitro = resolverPrecoBico(a.bicoId, bicoNum, prod);
-      const valorTeste = vol * precoLitro;
+      const valorTeste = volNominal * precoLitro;
 
       valorTotalAfericoesGeral += valorTeste;
 
@@ -338,7 +376,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
       };
       comb.bicosNumeros.add(bicoNum);
       comb.qtdTestes += 1;
-      comb.volumeAferidoTotal += vol;
+      comb.volumeAferidoTotal += volAferido;
       comb.valorTotalAfericao += valorTeste;
       comb.desvioTotalMl += desvioMl;
       if (isConforme) comb.conformes += 1;
@@ -367,7 +405,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
         listaAfericoes: [],
       };
       bicoExistente.qtdTestes += 1;
-      bicoExistente.volumeAferidoTotal += vol;
+      bicoExistente.volumeAferidoTotal += volAferido;
       bicoExistente.valorTotalAfericao += valorTeste;
       bicoExistente.desvioTotalMl += desvioMl;
       if (isConforme) bicoExistente.conformes += 1;
@@ -457,6 +495,75 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
     const modulosAuditoriaQtd = new Set(auditoriaFiltrada.map((l) => l.modulo)).size;
     const usuariosAuditoriaQtd = new Set(auditoriaFiltrada.map((l) => l.usuarioNome)).size;
 
+    // 3. Agrupamento Unificado Geral por Combustível
+    const PRODUTOS_PADRAO_LS = [
+      'Gasolina Comum',
+      'Gasolina Aditivada',
+      'Etanol Hidratado',
+      'Diesel S10',
+      'Diesel S500',
+    ];
+    const conjuntoProdutosUnico = new Set<string>(
+      filtroCombustivel !== 'TODOS' ? [filtroCombustivel] : PRODUTOS_PADRAO_LS
+    );
+    tanquesFiltrados.forEach((t) => { if (t.produto) conjuntoProdutosUnico.add(t.produto); });
+    bicosFiltrados.forEach((b) => { if (b.produto) conjuntoProdutosUnico.add(b.produto); });
+    afericoesFiltradas.forEach((a) => { if (a.produto) conjuntoProdutosUnico.add(a.produto); });
+    analisesFiltradas.forEach((d) => { if (d.produto) conjuntoProdutosUnico.add(d.produto); });
+
+    const agrupadoPorCombustivel = Array.from(conjuntoProdutosUnico).map((prod) => {
+      const tanquesProd = tanquesFiltrados.filter((t) => t.produto === prod);
+      const bicosProd = bicosFiltrados.filter((b) => b.produto === prod);
+      const afericoesProd = afericoesFiltradas.filter((a) => a.produto === prod);
+      const analisesProd = analisesFiltradas.filter((d) => d.produto === prod);
+
+      const capNominalTotal = tanquesProd.reduce((acc, t) => acc + (Number(t.capacidadeNominal) || 0), 0);
+      const volAtualTotal = tanquesProd.reduce((acc, t) => acc + (Number(t.volumeAtual) || 0), 0);
+      const ocupacaoPorcentagem = capNominalTotal > 0 ? (volAtualTotal / capNominalTotal) * 100 : 0;
+
+      const totalAfericoes = afericoesProd.length;
+      const afericoesConformes = afericoesProd.filter((a) => a.resultado === 'CONFORME').length;
+      const afericoesNaoConformes = totalAfericoes - afericoesConformes;
+      const taxaInmetro = totalAfericoes > 0 ? ((afericoesConformes / totalAfericoes) * 100).toFixed(1) : '100.0';
+
+      const volAferidoTotal = afericoesProd.reduce((acc, a) => acc + (Number(a.volumeAferido) || 20), 0);
+      const desvioTotalMl = afericoesProd.reduce((acc, a) => acc + Math.round((Number(a.diferenca) || 0) * 1000), 0);
+      const desvioMedioMl = totalAfericoes > 0 ? Math.round(desvioTotalMl / totalAfericoes) : 0;
+      const impactoLitros1000L = Number(((desvioMedioMl * 50) / 1000).toFixed(2));
+
+      const precoMedio = PRECOS_PADRAO_COMBUSTIVEL[prod] || 5.89;
+      const valorTotalAfericao = volAferidoTotal * precoMedio;
+      const impactoFinanceiro1000L = Number((impactoLitros1000L * precoMedio).toFixed(2));
+
+      const totalAnalises = analisesProd.length;
+      const analisesConformes = analisesProd.filter((d) => (d.resultado || (d as any).status) === 'CONFORME').length;
+      const taxaAnp = totalAnalises > 0 ? ((analisesConformes / totalAnalises) * 100).toFixed(1) : '100.0';
+
+      return {
+        produto: prod,
+        tanques: tanquesProd,
+        bicos: bicosProd,
+        afericoes: afericoesProd,
+        densidades: analisesProd,
+        capNominalTotal,
+        volAtualTotal,
+        ocupacaoPorcentagem,
+        totalAfericoes,
+        afericoesConformes,
+        afericoesNaoConformes,
+        taxaInmetro,
+        volAferidoTotal,
+        desvioMedioMl,
+        impactoLitros1000L,
+        impactoFinanceiro1000L,
+        valorTotalAfericao,
+        precoMedio,
+        totalAnalises,
+        analisesConformes,
+        taxaAnp,
+      };
+    });
+
     return {
       totalFechamentos: fechamentosFiltrados.length,
       totalConferido,
@@ -479,6 +586,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
       resumoPorCombustivel,
       resumoPorProduto: resumoPorCombustivel, // compatibilidade
       resumoPorBico,
+      agrupadoPorCombustivel,
       totalAnalises,
       analisesConformes,
       analisesNaoConformes,
@@ -487,7 +595,16 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
       modulosAuditoriaQtd,
       usuariosAuditoriaQtd,
     };
-  }, [fechamentosFiltrados, afericoesFiltradas, analisesFiltradas, auditoriaFiltrada, bicos]);
+  }, [
+    fechamentosFiltrados,
+    afericoesFiltradas,
+    analisesFiltradas,
+    auditoriaFiltrada,
+    tanquesFiltrados,
+    bicosFiltrados,
+    filtroCombustivel,
+    bicos,
+  ]);
 
   const handleImprimir = () => {
     window.print();
@@ -922,7 +1039,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                   const lacreInfo = a.lacreInmetro ? `Lacre: ${a.lacreInmetro}` : '';
                   const bicoNum = a.bicoNumero ?? (a.bicoId ? parseInt(a.bicoId.replace(/\D/g, ''), 10) : 1);
                   const preco = resolverPrecoBico(a.bicoId, bicoNum, a.produto);
-                  const valTeste = (Number(a.volumeAferido) || 20) * preco;
+                  const valTeste = (Number(a.volumeNominal) || 20) * preco;
 
                   return [
                     `${a.data} ${a.hora || ''}`.trim(),
@@ -2528,7 +2645,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                     const desvioMl = Math.round((Number(a.diferenca) || 0) * 1000);
                     const bicoNum = a.bicoNumero ?? (a.bicoId ? parseInt(a.bicoId.replace(/\D/g, ''), 10) : 1);
                     const preco = resolverPrecoBico(a.bicoId, bicoNum, a.produto);
-                    const valTeste = (Number(a.volumeAferido) || 20) * preco;
+                    const valTeste = (Number(a.volumeNominal) || 20) * preco;
 
                     return (
                       <tr key={a.id} className="hover:bg-slate-50">
@@ -2579,6 +2696,334 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
             </table>
           </div>
         </div>
+      </div>
+    );
+  };
+
+  /**
+   * Renderização do Painel Exclusivo de Agrupamento por Combustível
+   * Exibe visão consolidada e detalhada de Tanques, Bicos, Aferições Inmetro e Qualidade ANP
+   * organizados individualmente por tipo de combustível.
+   */
+  const renderPainelAgrupadoPorCombustivel = () => {
+    return (
+      <div className="space-y-8 pt-2">
+        {/* Cabeçalho do Painel por Combustível */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-200 pb-3">
+          <div>
+            <h4 className="text-base font-bold text-slate-900 uppercase flex items-center gap-2">
+              <Fuel className="w-5 h-5 text-blue-600" />
+              Relatório Consolidado & Agrupado por Combustível
+            </h4>
+            <p className="text-xs text-slate-500 mt-1">
+              Visão técnica unificada: Estoque em Tanques, Encerrantes de Bicos, Ensaios de Aferição Volumétrica (20L / 1.000L) e Laudos Físico-Químicos ANP agrupados por produto.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="px-3 py-1 bg-blue-50 text-blue-900 border border-blue-200 rounded-lg text-xs font-bold font-mono">
+              {balancoConsolidado.agrupadoPorCombustivel.length} produtos mapeados
+            </span>
+          </div>
+        </div>
+
+        {/* Grade de Cards Executivos de Combustíveis */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          {balancoConsolidado.agrupadoPorCombustivel.map((comb: any) => {
+            const isAberto = combustivelAberto === comb.produto;
+            return (
+              <div
+                key={comb.produto}
+                className={`rounded-xl border transition-all shadow-xs overflow-hidden ${
+                  isAberto
+                    ? 'border-blue-500 ring-2 ring-blue-500/20 bg-white'
+                    : 'border-slate-200 bg-white hover:border-slate-300'
+                }`}
+              >
+                {/* Header do Card de Combustível */}
+                <div className="p-4 bg-gradient-to-r from-slate-900 to-slate-800 text-white flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 bg-blue-500/20 text-blue-300 rounded-lg border border-blue-400/30">
+                      <Fuel className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h5 className="font-bold text-sm tracking-wide">{comb.produto}</h5>
+                      <span className="text-[10px] text-slate-300">
+                        {comb.tanques.length} Tanque(s) • {comb.bicos.length} Bico(s)
+                      </span>
+                    </div>
+                  </div>
+                  <span className="text-xs font-mono font-bold px-2.5 py-1 bg-white/10 rounded-md border border-white/20">
+                    {formatarMoeda(comb.precoMedio)}/L
+                  </span>
+                </div>
+
+                {/* Resumo de Indicadores */}
+                <div className="p-4 space-y-3.5 text-xs">
+                  {/* Tanques & Armazenamento */}
+                  <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 space-y-1">
+                    <div className="flex justify-between font-semibold text-slate-700 text-[11px]">
+                      <span>Estoque em Tanque:</span>
+                      <span className="font-mono font-bold text-slate-900">
+                        {comb.volAtualTotal.toLocaleString('pt-BR')} L / {comb.capNominalTotal.toLocaleString('pt-BR')} L
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full transition-all ${
+                          comb.ocupacaoPorcentagem > 85
+                            ? 'bg-emerald-500'
+                            : comb.ocupacaoPorcentagem > 30
+                            ? 'bg-blue-500'
+                            : 'bg-amber-500'
+                        }`}
+                        style={{ width: `${Math.min(100, comb.ocupacaoPorcentagem)}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between text-[10px] text-slate-500">
+                      <span>Ocupação de Estoque: {comb.ocupacaoPorcentagem.toFixed(1)}%</span>
+                      <span>{comb.tanques.map((t: any) => t.codigo).join(', ') || 'Nenhum tanque'}</span>
+                    </div>
+                  </div>
+
+                  {/* Metrologia Inmetro (Aferições 20L & Impacto 1.000L) */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="p-2 bg-blue-50/60 border border-blue-200 rounded-lg">
+                      <span className="text-[10px] font-bold uppercase text-blue-900 block">Desvio Médio 20L</span>
+                      <strong className={`text-sm font-mono font-bold ${comb.desvioMedioMl > 0 ? 'text-amber-800' : comb.desvioMedioMl < 0 ? 'text-blue-900' : 'text-slate-800'}`}>
+                        {comb.desvioMedioMl > 0 ? '+' : ''}{comb.desvioMedioMl} ml
+                      </strong>
+                      <span className="text-[9.5px] text-blue-800 block mt-0.5">
+                        {comb.totalAfericoes} teste(s) de pista
+                      </span>
+                    </div>
+
+                    <div className="p-2 bg-emerald-50/60 border border-emerald-200 rounded-lg">
+                      <span className="text-[10px] font-bold uppercase text-emerald-900 block">Impacto / 1.000 L</span>
+                      <strong className={`text-sm font-mono font-bold ${comb.impactoLitros1000L > 0 ? 'text-amber-800' : comb.impactoLitros1000L < 0 ? 'text-blue-900' : 'text-emerald-900'}`}>
+                        {comb.impactoLitros1000L > 0 ? '+' : ''}{comb.impactoLitros1000L.toFixed(2)} L
+                      </strong>
+                      <span className="text-[9.5px] text-emerald-800 block mt-0.5">
+                        {comb.impactoFinanceiro1000L > 0 ? '+' : ''}{formatarMoeda(comb.impactoFinanceiro1000L)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Qualidade e Conformidade */}
+                  <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-[11px]">
+                    <div className="flex items-center gap-1.5">
+                      <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                      <span className="font-semibold text-slate-700">Inmetro: {comb.taxaInmetro}%</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <FlaskConical className="w-4 h-4 text-purple-600" />
+                      <span className="font-semibold text-slate-700">ANP: {comb.taxaAnp}%</span>
+                    </div>
+                  </div>
+
+                  {/* Botão de Expansão Detalhada */}
+                  <button
+                    onClick={() => setCombustivelAberto(isAberto ? null : comb.produto)}
+                    className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-1 mt-2 cursor-pointer"
+                  >
+                    <span>{isAberto ? 'Recolher Detalhes' : 'Ver Detalhes do Produto'}</span>
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Detalhamento Aberto do Produto Selecionado */}
+        {balancoConsolidado.agrupadoPorCombustivel.map((comb: any) => {
+          if (combustivelAberto && combustivelAberto !== comb.produto) return null;
+          return (
+            <div key={`detalhes-${comb.produto}`} className="bg-slate-50/80 p-5 rounded-2xl border border-slate-300 space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-slate-200 pb-3">
+                <h5 className="text-base font-bold text-slate-900 uppercase flex items-center gap-2">
+                  <Fuel className="w-5 h-5 text-blue-600" />
+                  Detalhamento Metrológico & Operacional: {comb.produto}
+                </h5>
+                <span className="text-xs font-mono bg-white px-3 py-1 rounded-lg border border-slate-200 text-slate-700 font-bold">
+                  Preço Praticado: {formatarMoeda(comb.precoMedio)} / Litro
+                </span>
+              </div>
+
+              {/* Tabela 1: Tanques Vinculados */}
+              <div className="space-y-2">
+                <h6 className="text-xs font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                  🛢️ Tanques de Armazenamento Vinculados ({comb.tanques.length})
+                </h6>
+                <div className="overflow-x-auto bg-white border border-slate-200 rounded-xl">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-slate-100 font-bold text-slate-700 uppercase border-b border-slate-200">
+                      <tr>
+                        <th className="py-2 px-3">Código Tanque</th>
+                        <th className="py-2 px-3">Capacidade Nominal</th>
+                        <th className="py-2 px-3">Estoque Atual</th>
+                        <th className="py-2 px-3">Ocupação %</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {comb.tanques.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="py-3 px-3 text-slate-400 text-center">Nenhum tanque registrado para este combustível.</td>
+                        </tr>
+                      ) : (
+                        comb.tanques.map((t: any) => (
+                          <tr key={t.id || t.codigo}>
+                            <td className="py-2 px-3 font-bold text-slate-900">{t.codigo}</td>
+                            <td className="py-2 px-3 font-mono">{(t.capacidadeNominal || 0).toLocaleString('pt-BR')} L</td>
+                            <td className="py-2 px-3 font-mono font-bold text-blue-900">{(t.volumeAtual || 0).toLocaleString('pt-BR')} L</td>
+                            <td className="py-2 px-3 font-mono font-semibold">
+                              {((t.volumeAtual / Math.max(1, t.capacidadeNominal)) * 100).toFixed(1)}%
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Tabela 2: Bicos & Bombas Vinculados */}
+              <div className="space-y-2">
+                <h6 className="text-xs font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                  ⛽ Bicos de Abastecimento Ativos ({comb.bicos.length})
+                </h6>
+                <div className="overflow-x-auto bg-white border border-slate-200 rounded-xl">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-slate-100 font-bold text-slate-700 uppercase border-b border-slate-200">
+                      <tr>
+                        <th className="py-2 px-3">Bico Nº</th>
+                        <th className="py-2 px-3">Bomba / Lado</th>
+                        <th className="py-2 px-3">Tanque Vinculado</th>
+                        <th className="py-2 px-3">Encerrante Atual</th>
+                        <th className="py-2 px-3">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {comb.bicos.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="py-3 px-3 text-slate-400 text-center">Nenhum bico vinculado a este combustível.</td>
+                        </tr>
+                      ) : (
+                        comb.bicos.map((b: any) => (
+                          <tr key={b.id || b.numero}>
+                            <td className="py-2 px-3 font-bold text-slate-900">Bico {String(b.numero).padStart(2, '0')}</td>
+                            <td className="py-2 px-3 font-medium text-slate-700">{b.bomba} (Lado {b.lado})</td>
+                            <td className="py-2 px-3 font-mono">{b.tanqueCodigo || b.tanqueId || '—'}</td>
+                            <td className="py-2 px-3 font-mono font-bold text-emerald-800">
+                              {(b.encerranteAtual || 0).toLocaleString('pt-BR')} L
+                            </td>
+                            <td className="py-2 px-3 font-semibold text-emerald-700">{b.status || 'Ativo'}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Tabela 3: Aferições de Pista */}
+              <div className="space-y-2">
+                <h6 className="text-xs font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                  📐 Histórico de Ensaios Metrológicos Inmetro ({comb.afericoes.length})
+                </h6>
+                <div className="overflow-x-auto bg-white border border-slate-200 rounded-xl">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-slate-100 font-bold text-slate-700 uppercase border-b border-slate-200">
+                      <tr>
+                        <th className="py-2 px-3">Data / Hora</th>
+                        <th className="py-2 px-3">Bico</th>
+                        <th className="py-2 px-3">Vol. Aferido (20L)</th>
+                        <th className="py-2 px-3">Desvio ml (20L)</th>
+                        <th className="py-2 px-3">Impacto / 1.000 L</th>
+                        <th className="py-2 px-3">Resultado</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {comb.afericoes.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="py-3 px-3 text-slate-400 text-center">Nenhum ensaio metrológico registrado no período.</td>
+                        </tr>
+                      ) : (
+                        comb.afericoes.map((a: any, idx: number) => {
+                          const desvMl = Math.round((Number(a.diferenca) || 0) * 1000);
+                          const imp1k = Number(((desvMl * 50) / 1000).toFixed(2));
+                          return (
+                            <tr key={a.id || idx}>
+                              <td className="py-2 px-3 font-mono">{a.data} {a.hora || ''}</td>
+                              <td className="py-2 px-3 font-bold text-slate-800">
+                                Bico {String(a.bicoNumero || a.bicoId).padStart(2, '0')}
+                              </td>
+                              <td className="py-2 px-3 font-mono font-semibold">{(Number(a.volumeAferido) || 20).toFixed(3)} L</td>
+                              <td className="py-2 px-3 font-mono font-bold">
+                                <span className={desvMl > 0 ? 'text-amber-700' : desvMl < 0 ? 'text-blue-700' : 'text-slate-700'}>
+                                  {desvMl > 0 ? '+' : ''}{desvMl} ml
+                                </span>
+                              </td>
+                              <td className="py-2 px-3 font-mono font-bold text-blue-900">
+                                {imp1k > 0 ? '+' : ''}{imp1k.toFixed(2)} L
+                              </td>
+                              <td className="py-2 px-3">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${a.resultado === 'CONFORME' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
+                                  {a.resultado || 'CONFORME'}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Tabela 4: Laudos Físico-Químicos e Densidade ANP */}
+              <div className="space-y-2">
+                <h6 className="text-xs font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                  🔬 Ensaios de Qualidade & Densidade ANP ({comb.densidades.length})
+                </h6>
+                <div className="overflow-x-auto bg-white border border-slate-200 rounded-xl">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-slate-100 font-bold text-slate-700 uppercase border-b border-slate-200">
+                      <tr>
+                        <th className="py-2 px-3">Data / Hora</th>
+                        <th className="py-2 px-3">Ensaio / Teste</th>
+                        <th className="py-2 px-3">Densidade Lida</th>
+                        <th className="py-2 px-3">Temperatura (°C)</th>
+                        <th className="py-2 px-3">Densidade 20°C</th>
+                        <th className="py-2 px-3">Status ANP</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {comb.densidades.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="py-3 px-3 text-slate-400 text-center">Nenhum laudo de qualidade ANP registrado no período.</td>
+                        </tr>
+                      ) : (
+                        comb.densidades.map((d: any, idx: number) => (
+                          <tr key={d.id || idx}>
+                            <td className="py-2 px-3 font-mono">{d.data} {d.hora || ''}</td>
+                            <td className="py-2 px-3 font-medium text-slate-800">{d.tipoTeste || 'Densidade & Proveta'}</td>
+                            <td className="py-2 px-3 font-mono font-bold text-slate-900">{d.densidadeObservada ? Number(d.densidadeObservada).toFixed(4) : '—'} g/cm³</td>
+                            <td className="py-2 px-3 font-mono">{d.temperatura ? `${Number(d.temperatura).toFixed(1)} °C` : '20.0 °C'}</td>
+                            <td className="py-2 px-3 font-mono font-bold text-purple-900">{d.densidade20C ? Number(d.densidade20C).toFixed(4) : '—'} g/cm³</td>
+                            <td className="py-2 px-3">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${(d.resultado || d.status) === 'CONFORME' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
+                                {d.resultado || d.status || 'CONFORME'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
     );
   };
@@ -2669,7 +3114,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
       </div>
 
       {/* Barra de Filtros e Seleção do Tipo */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-4 gap-4 print:hidden">
+      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 print:hidden">
         <div>
           <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
             Módulo / Tipo de Relatório
@@ -2682,6 +3127,9 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
             <option value="BALANCO_CONSOLIDADO">
               ★ Relatório Geral (Fechamento, Auditoria, Análise & Aferições)
             </option>
+            <option value="AGRUPADO_COMBUSTIVEL">
+              ★ Agrupamento por Combustível (Tanques, Bicos, Aferições & ANP)
+            </option>
             <option value="FECHAMENTOS">1. Fechamentos de Caixa (Individual)</option>
             <option value="AFERICOES">
               2. Auditoria de Aferições & Impacto Metrológico (1.000 L / Bicos / Valores)
@@ -2693,6 +3141,24 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
             <option value="FALTAS">Sobras, Faltas e Ocorrências de Caixa</option>
             <option value="CONFORMIDADE">Conformidade e Checklists Operacionais</option>
             <option value="FUNCIONARIOS">Quadro de Funcionários</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
+            Filtro por Combustível
+          </label>
+          <select
+            value={filtroCombustivel}
+            onChange={(e) => setFiltroCombustivel(e.target.value)}
+            className="w-full px-3 py-2 border border-blue-300 bg-blue-50/50 rounded-lg text-sm font-bold text-blue-900"
+          >
+            <option value="TODOS">⛽ Todos os Combustíveis</option>
+            <option value="Gasolina Comum">Gasolina Comum</option>
+            <option value="Gasolina Aditivada">Gasolina Aditivada</option>
+            <option value="Etanol Hidratado">Etanol Hidratado</option>
+            <option value="Diesel S10">Diesel S10</option>
+            <option value="Diesel S500">Diesel S500</option>
           </select>
         </div>
 
@@ -2739,6 +3205,8 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
               MEU POSTO 2.0 —{' '}
               {tipo === 'BALANCO_CONSOLIDADO'
                 ? 'Balanço Consolidado de Fechamentos & Aferições'
+                : tipo === 'AGRUPADO_COMBUSTIVEL'
+                ? 'Relatório Consolidado Agrupado por Combustível'
                 : `Relatório Operacional: ${tipo}`}
             </h3>
             <p className="text-xs text-slate-500 mt-1">
@@ -2750,6 +3218,9 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
             Documento Auditável • Nuvem 24h
           </div>
         </div>
+
+        {/* MODO AGRUPADO POR COMBUSTÍVEL */}
+        {tipo === 'AGRUPADO_COMBUSTIVEL' && renderPainelAgrupadoPorCombustivel()}
 
         {/* MODO 1: BALANÇO CONSOLIDADO (FECHAMENTOS + AFERIÇÕES) */}
         {tipo === 'BALANCO_CONSOLIDADO' && (
