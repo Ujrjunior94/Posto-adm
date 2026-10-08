@@ -519,23 +519,25 @@ export function classificarTurnoEHorario(
     };
   }
 
-  // Turno 2 - Tarde
+  // Turno 2 - Tarde (14h - 22h)
   if (
     codigoUpper === 'T2' ||
     codigoUpper === '2' ||
-    codigoUpper === 'T' ||
+    codigoUpper === '2T' ||
     codigoUpper === 'TAR' ||
     turnoLower === 't2' ||
     turnoLower === '2' ||
-    turnoLower === 't' ||
+    turnoLower === '2t' ||
     combinadoLower.includes('turno 2') ||
     combinadoLower.includes('2 turno') ||
     combinadoLower.includes('tarde') ||
     combinadoLower.includes('vespertino') ||
     combinadoLower.includes('14 22') ||
+    hIni.startsWith('12:') ||
     hIni.startsWith('13:') ||
     hIni.startsWith('14:') ||
-    hIni.startsWith('15:')
+    hIni.startsWith('15:') ||
+    hIni.startsWith('16:')
   ) {
     if (!hIni) hIni = '14:00';
     if (!hFim) hFim = '22:00';

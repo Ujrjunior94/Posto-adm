@@ -54,31 +54,115 @@ const formatarDataBr = (iso: string) => {
   return `${d}/${m}/${y}`;
 };
 
-export const obterCorEventoPlanner = (esc: Partial<Escala>) => {
+export const obterMetaTurnoCompleta = (esc: Partial<Escala>) => {
   if (esc.statusConferencia === 'CONFLITO') {
-    return 'bg-red-100 text-red-900 border-red-300';
+    return {
+      cor: 'bg-red-100 text-red-900 border-red-300',
+      icone: AlertTriangle,
+      nome: 'Conflito',
+      sigla: 'FA',
+    };
   }
   if (esc.status === 'FOLGA' || esc.turno === 'Folga') {
-    return 'bg-slate-200 text-slate-800 border-slate-300';
+    return {
+      cor: 'bg-slate-200 text-slate-800 border-slate-300',
+      icone: Clock,
+      nome: 'Folga (DSR)',
+      sigla: 'FOL',
+    };
   }
   if (esc.status === 'FERIAS' || esc.turno?.includes('Férias')) {
-    return 'bg-yellow-100 text-yellow-900 border-yellow-300';
+    return {
+      cor: 'bg-orange-100 text-orange-900 border-orange-300',
+      icone: Clock,
+      nome: 'Férias',
+      sigla: 'FER',
+    };
   }
   if (esc.status === 'PLANTAO' || esc.turno?.toLowerCase().includes('plant')) {
-    return 'bg-indigo-100 text-indigo-900 border-indigo-300';
+    return {
+      cor: 'bg-indigo-100 text-indigo-900 border-indigo-300',
+      icone: Clock,
+      nome: 'Plantão',
+      sigla: 'PLT',
+    };
   }
+
   const t = (esc.turno || '').toLowerCase();
-  if (t.includes('noite') || t.includes('22h') || t.includes('turno 3')) {
-    return 'bg-purple-100 text-purple-900 border-purple-300';
+  const hIni = esc.horarioInicio || '';
+
+  // Turno 3 - Noite (22h - 06h)
+  if (
+    t.includes('noite') ||
+    t.includes('noturno') ||
+    t.includes('22h') ||
+    t.includes('turno 3') ||
+    t.includes('3t') ||
+    t === 't3' ||
+    hIni.startsWith('22:') ||
+    hIni.startsWith('23:')
+  ) {
+    return {
+      cor: 'bg-purple-100 text-purple-900 border-purple-300',
+      icone: Moon,
+      nome: 'Turno 3 — Noite (22h–06h)',
+      sigla: 'T3',
+    };
   }
-  if (t.includes('tarde') || t.includes('14h') || t.includes('turno 2')) {
-    return 'bg-emerald-100 text-emerald-900 border-emerald-300';
+
+  // Turno 2 - Tarde (14h - 22h)
+  if (
+    t.includes('tarde') ||
+    t.includes('vespertino') ||
+    t.includes('14h') ||
+    t.includes('turno 2') ||
+    t.includes('2t') ||
+    t === 't2' ||
+    hIni.startsWith('12:') ||
+    hIni.startsWith('13:') ||
+    hIni.startsWith('14:') ||
+    hIni.startsWith('15:') ||
+    hIni.startsWith('16:')
+  ) {
+    return {
+      cor: 'bg-blue-100 text-blue-900 border-blue-300',
+      icone: Sun,
+      nome: 'Turno 2 — Tarde (14h–22h)',
+      sigla: 'T2',
+    };
   }
-  if (t.includes('horista')) {
-    return 'bg-teal-100 text-teal-900 border-teal-300';
+
+  // Turno Horista (08h - 14h)
+  if (t.includes('horista') || t === 'hor' || (hIni === '08:00' && esc.horarioFim === '14:00')) {
+    return {
+      cor: 'bg-teal-100 text-teal-900 border-teal-300',
+      icone: Clock,
+      nome: 'Horista (08h–14h)',
+      sigla: 'HOR',
+    };
   }
-  // Manhã (Padrão: Azul de alto contraste)
-  return 'bg-blue-100 text-blue-900 border-blue-300';
+
+  // Turno ADM (08h - 17h)
+  if (t.includes('adm') || t.includes('admin') || (hIni === '08:00' && esc.horarioFim === '17:00')) {
+    return {
+      cor: 'bg-indigo-100 text-indigo-900 border-indigo-300',
+      icone: Building2,
+      nome: 'Administrativo (08h–17h)',
+      sigla: 'ADM',
+    };
+  }
+
+  // Turno 1 - Manhã (06h - 14h)
+  return {
+    cor: 'bg-amber-100 text-amber-900 border-amber-300',
+    icone: Sunrise,
+    nome: 'Turno 1 — Manhã (06h–14h)',
+    sigla: 'T1',
+  };
+};
+
+export const obterCorEventoPlanner = (esc: Partial<Escala>) => {
+  return obterMetaTurnoCompleta(esc).cor;
 };
 
 export const PainelVisualizacoesPlanner: React.FC<PainelVisualizacoesPlannerProps> = ({
@@ -338,13 +422,18 @@ export const PainelVisualizacoesPlanner: React.FC<PainelVisualizacoesPlannerProp
                           {esc.funcao || 'Frentista'}
                         </td>
                         <td className="py-2.5 px-3">
-                          <span
-                            className={`inline-block px-2.5 py-0.5 rounded border text-[11px] font-bold ${obterCorEventoPlanner(
-                              esc
-                            )}`}
-                          >
-                            {esc.status === 'FOLGA' ? 'Folga (S)' : esc.turno}
-                          </span>
+                          {(() => {
+                            const meta = obterMetaTurnoCompleta(esc);
+                            const IconeT = meta.icone;
+                            return (
+                              <span
+                                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded border text-[11px] font-bold ${meta.cor}`}
+                              >
+                                <IconeT className="w-3.5 h-3.5 shrink-0" />
+                                <span>{esc.status === 'FOLGA' ? 'Folga (S)' : esc.turno}</span>
+                              </span>
+                            );
+                          })()}
                         </td>
                         <td className="py-2.5 px-3 font-mono font-bold text-slate-800">
                           {esc.status === 'FOLGA' ? 'Folga' : `${esc.horarioInicio} às ${esc.horarioFim}`}
@@ -622,7 +711,11 @@ export const PainelVisualizacoesPlanner: React.FC<PainelVisualizacoesPlannerProp
                 (e.turno.includes('Turno 1') ||
                   e.turno.includes('Manhã') ||
                   e.horarioInicio === '06:00' ||
-                  e.turno.toUpperCase().startsWith('T1')),
+                  e.horarioInicio.startsWith('05:') ||
+                  e.horarioInicio.startsWith('06:') ||
+                  e.horarioInicio.startsWith('07:') ||
+                  e.turno.toUpperCase().startsWith('T1') ||
+                  e.turno.toUpperCase().startsWith('1T')),
             },
             {
               titulo: 'T2 — Tarde (14h–22h)',
@@ -632,7 +725,13 @@ export const PainelVisualizacoesPlanner: React.FC<PainelVisualizacoesPlannerProp
                 (e.turno.includes('Turno 2') ||
                   e.turno.includes('Tarde') ||
                   e.horarioInicio === '14:00' ||
-                  e.turno.toUpperCase().startsWith('T2')),
+                  e.horarioInicio.startsWith('12:') ||
+                  e.horarioInicio.startsWith('13:') ||
+                  e.horarioInicio.startsWith('14:') ||
+                  e.horarioInicio.startsWith('15:') ||
+                  e.horarioInicio.startsWith('16:') ||
+                  e.turno.toUpperCase().startsWith('T2') ||
+                  e.turno.toUpperCase().startsWith('2T')),
             },
             {
               titulo: 'HOR — Horista (08h–14h)',

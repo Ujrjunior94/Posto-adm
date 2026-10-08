@@ -241,9 +241,10 @@ export const normalizarTurno = (
     };
   }
 
-  // Turno 2: Tarde
+  // Turno 2: Tarde (14h - 22h)
   if (
     t === '2' ||
+    t === '2t' ||
     t === 't2' ||
     t === 't02' ||
     t.includes('turno 2') ||
@@ -252,11 +253,12 @@ export const normalizarTurno = (
     t.includes('14h') ||
     t.includes('14:00') ||
     t.includes('tarde') ||
-    t === 't' ||
     t === 'tar' ||
+    inicioLimpo.startsWith('12:') ||
     inicioLimpo.startsWith('13:') ||
     inicioLimpo.startsWith('14:') ||
-    inicioLimpo.startsWith('15:')
+    inicioLimpo.startsWith('15:') ||
+    inicioLimpo.startsWith('16:')
   ) {
     const hIni = inicioLimpo || '14:00';
     const hFim = fimLimpo || '22:00';

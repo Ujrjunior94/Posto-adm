@@ -2256,8 +2256,8 @@ ${temDescoberto ? `\n🚨 CRÍTICO: Turno(s) ${descobertos.join(', ')} sem nenhu
                                 onChange={(e) => handleAlterarTurnoLinhaEscaneada(linha.idTemp, e.target.value)}
                                 className="w-full px-2 py-1 border border-purple-300 rounded text-xs font-bold bg-purple-50 text-purple-950"
                               >
-                                <option value="T1">T1 — Manhã (06h-14h)</option>
-                                <option value="T2">T2 — Tarde (14h-22h)</option>
+                                <option value="T1">1T / T1 — Manhã (06h-14h)</option>
+                                <option value="T2">2T / T2 — Tarde (14h-22h)</option>
                                 <option value="T3">T3 — Noite (22h-06h)</option>
                                 <option value="HOR">HOR — Horista (08h-14h)</option>
                                 <option value="PLT">PLT — Plantão 12x36</option>
@@ -2297,16 +2297,16 @@ ${temDescoberto ? `\n🚨 CRÍTICO: Turno(s) ${descobertos.join(', ')} sem nenhu
                               };
                               const isFolga = cell.status === 'FOLGA' || cell.sigla === 'S';
                               const badgeColor = isFolga
-                                ? 'bg-emerald-100 text-emerald-900 font-black'
-                                : cell.sigla === 'T2'
-                                ? 'bg-blue-100 text-blue-900 font-bold'
-                                : cell.sigla === 'T3'
-                                ? 'bg-purple-100 text-purple-900 font-bold'
+                                ? 'bg-slate-200 text-slate-800 font-bold border border-slate-300'
+                                : cell.sigla === 'T2' || cell.sigla === '2T'
+                                ? 'bg-blue-100 text-blue-900 border border-blue-300 font-bold'
+                                : cell.sigla === 'T3' || cell.sigla === '3T'
+                                ? 'bg-purple-100 text-purple-900 border border-purple-300 font-bold'
                                 : cell.sigla === 'HOR'
-                                ? 'bg-teal-100 text-teal-900 font-bold'
+                                ? 'bg-teal-100 text-teal-900 border border-teal-300 font-bold'
                                 : cell.sigla === 'PLT'
-                                ? 'bg-indigo-100 text-indigo-900 font-bold'
-                                : 'bg-amber-100 text-amber-900 font-bold';
+                                ? 'bg-indigo-100 text-indigo-900 border border-indigo-300 font-bold'
+                                : 'bg-amber-100 text-amber-900 border border-amber-300 font-bold';
 
                               return (
                                 <td

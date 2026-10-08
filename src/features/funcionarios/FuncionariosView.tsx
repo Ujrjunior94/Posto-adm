@@ -48,11 +48,11 @@ export const FuncionariosView: React.FC<FuncionariosViewProps> = ({ funcionarios
   const abrirNovo = () => {
     setEditingFuncionario(null);
     setNome('');
-    setCpf('');
-    setMatricula(`MAT-${Math.floor(1000 + Math.random() * 9000)}`);
-    setTelefone('');
+    setFuncao('Frentista');
     setCargo('Frentista');
-    setFuncao('Abastecimento');
+    setCpf('');
+    setMatricula('');
+    setTelefone('');
     setStatus('ATIVO');
     setTurnoPreferencial('Turno 1 - Manhã (06h - 14h)');
     setObservacoes('');
@@ -62,13 +62,13 @@ export const FuncionariosView: React.FC<FuncionariosViewProps> = ({ funcionarios
 
   const abrirEdicao = (f: Funcionario) => {
     setEditingFuncionario(f);
-    setNome(f.nome);
-    setCpf(f.cpf);
-    setMatricula(f.matricula);
-    setTelefone(f.telefone);
-    setCargo(f.cargo);
-    setFuncao(f.funcao);
-    setStatus(f.status);
+    setNome(f.nome || '');
+    setFuncao(f.funcao || f.cargo || 'Frentista');
+    setCargo(f.cargo || f.funcao || 'Frentista');
+    setCpf(f.cpf === '000.000.000-00' ? '' : f.cpf || '');
+    setMatricula(f.matricula || '');
+    setTelefone(f.telefone || '');
+    setStatus(f.status || 'ATIVO');
     setTurnoPreferencial(normalizarTurnoFuncionario(f.turnoPreferencial));
     setObservacoes(f.observacoes || '');
     setErroMsg('');
@@ -80,12 +80,17 @@ export const FuncionariosView: React.FC<FuncionariosViewProps> = ({ funcionarios
     setErroMsg('');
 
     if (!nome.trim()) {
-      setErroMsg('O nome é obrigatório.');
+      setErroMsg('O Nome Completo é obrigatório.');
+      return;
+    }
+
+    if (!funcao.trim()) {
+      setErroMsg('A Função é obrigatória.');
       return;
     }
 
     if (cpf.trim() && !validarCPF(cpf)) {
-      setErroMsg('CPF inválido. Verifique os números digitados.');
+      setErroMsg('CPF informado é inválido. Se não possuir o CPF no momento, deixe o campo em branco (opcional).');
       return;
     }
 
@@ -95,16 +100,16 @@ export const FuncionariosView: React.FC<FuncionariosViewProps> = ({ funcionarios
     const novoFuncionario: Funcionario = {
       id,
       postoId,
-      nome,
-      cpf: cpf || '000.000.000-00',
-      matricula,
-      telefone,
-      cargo,
-      funcao,
-      status,
+      nome: nome.trim(),
+      funcao: funcao.trim(),
+      cargo: cargo.trim() || funcao.trim() || 'Frentista',
+      cpf: cpf.trim() || '—',
+      matricula: matricula.trim() || `MAT-${Math.floor(1000 + Math.random() * 9000)}`,
+      telefone: telefone.trim() || '—',
+      status: status || 'ATIVO',
       dataAdmissao: editingFuncionario ? editingFuncionario.dataAdmissao : agora.slice(0, 10),
-      turnoPreferencial,
-      observacoes,
+      turnoPreferencial: turnoPreferencial || 'Turno 1 - Manhã (06h - 14h)',
+      observacoes: observacoes.trim() || '',
       criadoEm: editingFuncionario ? editingFuncionario.criadoEm : agora,
       atualizadoEm: agora,
     };
@@ -416,61 +421,100 @@ export const FuncionariosView: React.FC<FuncionariosViewProps> = ({ funcionarios
             )}
 
             <form onSubmit={handleSalvar} className="space-y-4">
+              {/* OBRIGATÓRIO: NOME */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Nome Completo *</label>
+                <label className="block text-xs font-bold text-slate-800 uppercase mb-1">
+                  Nome Completo <span className="text-red-600 font-bold">* (Obrigatório)</span>
+                </label>
                 <input
                   type="text"
                   required
                   value={nome}
                   onChange={(e) => setNome(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none"
                   placeholder="Ex: Carlos Oliveira"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              {/* OBRIGATÓRIO: FUNÇÃO / ATIVIDADE */}
+              <div>
+                <label className="block text-xs font-bold text-slate-800 uppercase mb-1">
+                  Função / Atividade <span className="text-red-600 font-bold">* (Obrigatório)</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={funcao}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setFuncao(val);
+                    if (!cargo || cargo === 'Frentista') setCargo(val);
+                  }}
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  placeholder="Ex: Frentista, Caixa, Lubrificador, Gerente..."
+                />
+              </div>
+
+              {/* DIVISOR DE CAMPOS OPCIONAIS */}
+              <div className="pt-2 border-t border-slate-200">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-2">
+                  Demais Informações (Opcionais)
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">CPF</label>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">CPF (Opcional)</label>
                   <input
                     type="text"
                     value={cpf}
                     onChange={(e) => setCpf(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                    placeholder="000.000.000-00"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50/50 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    placeholder="Opcional"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Matrícula</label>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Matrícula (Opcional)</label>
                   <input
                     type="text"
                     value={matricula}
                     onChange={(e) => setMatricula(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50/50 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    placeholder="Gerado auto."
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Cargo</label>
-                  <select
+                  <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Cargo (Opcional)</label>
+                  <input
+                    type="text"
                     value={cargo}
                     onChange={(e) => setCargo(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                  >
-                    <option value="Frentista">Frentista</option>
-                    <option value="Operador de Caixa">Operador de Caixa</option>
-                    <option value="Lubrificador">Lubrificador</option>
-                    <option value="Supervisor de Pista">Supervisor de Pista</option>
-                    <option value="Gerente">Gerente</option>
-                  </select>
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50/50 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    placeholder="Cargo contratual"
+                  />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Status</label>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Telefone (Opcional)</label>
+                  <input
+                    type="text"
+                    value={telefone}
+                    onChange={(e) => setTelefone(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50/50 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    placeholder="(00) 00000-0000"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Status (Opcional)</label>
                   <select
                     value={status}
                     onChange={(e) => setStatus(e.target.value as FuncionarioStatus)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50/50 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
                   >
                     <option value="ATIVO">Ativo</option>
                     <option value="INATIVO">Inativo</option>
@@ -478,22 +522,21 @@ export const FuncionariosView: React.FC<FuncionariosViewProps> = ({ funcionarios
                     <option value="AFASTADO">Afastado</option>
                   </select>
                 </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Turno Preferencial</label>
-                <select
-                  value={turnoPreferencial}
-                  onChange={(e) => setTurnoPreferencial(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                >
-                  <option value="Turno 1 - Manhã (06h - 14h)">T1 — Turno 1 Manhã (06h às 14h)</option>
-                  <option value="Turno 2 - Tarde (14h - 22h)">T2 — Turno 2 Tarde (14h às 22h)</option>
-                  <option value="Turno Horista">HOR — Turno Horista (08h às 14h / Flexível)</option>
-                  <option value="Turno ADM (08h - 17h)">ADM — Administrativo (08h às 17h)</option>
-                  <option value="Folga">FOL — Folga (DSR Semanal)</option>
-                  <option value="Férias">FER — Férias</option>
-                </select>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Turno (Opcional)</label>
+                  <select
+                    value={turnoPreferencial}
+                    onChange={(e) => setTurnoPreferencial(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50/50 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  >
+                    <option value="Turno 1 - Manhã (06h - 14h)">T1 — Manhã (06h-14h)</option>
+                    <option value="Turno 2 - Tarde (14h - 22h)">T2 — Tarde (14h-22h)</option>
+                    <option value="Turno Horista">HOR — Horista</option>
+                    <option value="Turno ADM (08h - 17h)">ADM — Administrativo</option>
+                    <option value="Folga">FOL — Folga</option>
+                    <option value="Férias">FER — Férias</option>
+                  </select>
+                </div>
               </div>
 
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
