@@ -71,8 +71,9 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
   const [rotacaoGraus, setRotacaoGraus] = useState<number>(0);
   const [isDragOver, setIsDragOver] = useState(false);
 
-  // Configuração da IA (OpenRouter API)
-  const [motorUtilizado, setMotorUtilizado] = useState<string>('OpenRouter Multimodal');
+  // Configuração da IA (DeepSeek / OpenRouter / Gemini)
+  const [motorSelecionado, setMotorSelecionado] = useState<'deepseek' | 'openrouter' | 'gemini'>('deepseek');
+  const [motorUtilizado, setMotorUtilizado] = useState<string>('DeepSeek AI');
   const [mensagemProgresso, setMensagemProgresso] = useState<string>('');
   const [erroProcessamento, setErroProcessamento] = useState<string>('');
 
@@ -231,21 +232,26 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
     setEtapa('PROCESSANDO');
     setErroProcessamento('');
     setMensagemProgresso(
-      'OpenRouter API extraindo elementos visuais brutos da imagem...'
+      motorSelecionado === 'deepseek'
+        ? 'DeepSeek AI extraindo elementos visuais brutos e estruturando turnos...'
+        : 'IA extraindo elementos visuais brutos da imagem...'
     );
 
     try {
-      // Processamento através do ScheduleImageImporter -> AIProvider -> OpenRouterProvider -> Validador Posto ADM
+      // Processamento através do ScheduleImageImporter -> AIProvider -> Validador Posto ADM
       const resultadoValidador: ResultadoImportacaoEscala = await scheduleImageImporter.processImage(
         imgParaEnviar,
         funcionariosCadastrados,
         TURNOS_PADRAO_POSTO,
         month,
         year,
-        { mimeType: 'image/jpeg' }
+        { mimeType: 'image/jpeg', motor: motorSelecionado }
       );
 
-      setMotorUtilizado(resultadoValidador.motorUtilizado || 'OpenRouter Multimodal');
+      setMotorUtilizado(
+        resultadoValidador.motorUtilizado ||
+        (motorSelecionado === 'deepseek' ? 'DeepSeek AI' : 'OpenRouter Multimodal')
+      );
 
       if (resultadoValidador.records.length === 0) {
         setErroProcessamento('Nenhuma célula ou texto legível foi extraído da imagem. Tente uma foto mais aproximada ou ajuste a rotação.');
@@ -638,6 +644,60 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
                 )}
               </div>
 
+              {/* Seletor de Motor de IA */}
+              <div className="bg-blue-50/70 border border-blue-200 p-3.5 rounded-xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <span>🐋</span> Motor de Reconhecimento da Escala:
+                  </span>
+                  <span className="text-[11px] font-mono font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded">
+                    {motorSelecionado === 'deepseek'
+                      ? 'DeepSeek AI (Ativo)'
+                      : motorSelecionado === 'openrouter'
+                      ? 'OpenRouter'
+                      : 'Gemini Vision'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setMotorSelecionado('deepseek')}
+                    className={`py-1.5 px-2.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
+                      motorSelecionado === 'deepseek'
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+                    }`}
+                  >
+                    <span>🐋</span>
+                    <span>DeepSeek AI</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMotorSelecionado('openrouter')}
+                    className={`py-1.5 px-2.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
+                      motorSelecionado === 'openrouter'
+                        ? 'bg-purple-600 text-white shadow-xs'
+                        : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+                    }`}
+                  >
+                    <span>⚡</span>
+                    <span>OpenRouter</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMotorSelecionado('gemini')}
+                    className={`py-1.5 px-2.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
+                      motorSelecionado === 'gemini'
+                        ? 'bg-amber-600 text-white shadow-xs'
+                        : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+                    }`}
+                  >
+                    <span>✨</span>
+                    <span>Gemini</span>
+                  </button>
+                </div>
+              </div>
+
               {/* Informações dos Cadastros Válidos */}
               <div className="bg-slate-100 border border-slate-300 p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-slate-800">
                 <div className="space-y-1">
@@ -655,10 +715,12 @@ export const ModalImportarEscalaImagem: React.FC<ModalImportarEscalaImagemProps>
                   <button
                     type="button"
                     onClick={handleIniciarLeituraIA}
-                    className="inline-flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-md transition cursor-pointer shrink-0"
+                    className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-md transition cursor-pointer shrink-0"
                   >
-                    <Sparkles className="w-4 h-4 text-emerald-200" />
-                    Iniciar Leitura da Escala
+                    <Sparkles className="w-4 h-4 text-blue-200" />
+                    {motorSelecionado === 'deepseek'
+                      ? '🐋 Iniciar Leitura com DeepSeek'
+                      : 'Iniciar Leitura da Escala'}
                   </button>
                 )}
               </div>

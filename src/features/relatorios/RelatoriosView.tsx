@@ -31,6 +31,12 @@ import {
   Receipt,
   ChevronLeft,
   Fuel,
+  Filter,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  RotateCcw,
+  XCircle,
 } from 'lucide-react';
 import { formatarMoeda } from '../../utils/calculations';
 import { PRECOS_PADRAO_COMBUSTIVEL, calcularPrecoEfetivoBico } from '../../utils/pricing';
@@ -96,6 +102,34 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
   >('TODOS');
   const [tamanhoFonteTermica, setTamanhoFonteTermica] = useState<'NORMAL' | 'CONDENSADA'>('NORMAL');
 
+  // Estados exclusivos de Agrupamento e Filtragem de Aferições
+  const [agrupamentoAfericoes, setAgrupamentoAfericoes] = useState<
+    'COMBUSTIVEL' | 'CRONOLOGICO' | 'BICO'
+  >('COMBUSTIVEL');
+  const [filtroStatusAfericao, setFiltroStatusAfericao] = useState<
+    'TODOS' | 'CONFORME' | 'FORA_LIMITE'
+  >('TODOS');
+  const [filtroBicoAfericao, setFiltroBicoAfericao] = useState<string>('TODOS');
+  const [combustiveisExpandidos, setCombustiveisExpandidos] = useState<Record<string, boolean>>({});
+
+  // Lista dinâmica e unificada de combustíveis do posto
+  const listaCombustiveisDisponiveis = useMemo(() => {
+    const set = new Set<string>();
+    ['Gasolina Comum', 'Gasolina Aditivada', 'Etanol Hidratado', 'Diesel S10', 'Diesel S500'].forEach(
+      (p) => set.add(p)
+    );
+    afericoes.forEach((a) => {
+      if (a.produto) set.add(a.produto);
+    });
+    bicos.forEach((b) => {
+      if (b.produto) set.add(b.produto);
+    });
+    tanques.forEach((t) => {
+      if (t.produto) set.add(t.produto);
+    });
+    return Array.from(set);
+  }, [afericoes, bicos, tanques]);
+
   // Filtros reativos por período e busca
   const fechamentosFiltrados = useMemo(() => {
     return fechamentos
@@ -124,13 +158,21 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
         if (dataInicio && a.data < dataInicio) return false;
         if (dataFim && a.data > dataFim) return false;
         if (filtroCombustivel !== 'TODOS' && a.produto !== filtroCombustivel) return false;
+        if (filtroStatusAfericao === 'CONFORME' && a.resultado !== 'CONFORME') return false;
+        if (filtroStatusAfericao === 'FORA_LIMITE' && a.resultado === 'CONFORME') return false;
+        if (filtroBicoAfericao !== 'TODOS') {
+          const num = a.bicoNumero ?? (a.bicoId ? parseInt(a.bicoId.replace(/\D/g, ''), 10) : undefined);
+          if (String(num) !== filtroBicoAfericao && a.bicoId !== filtroBicoAfericao) return false;
+        }
         if (busca.trim()) {
           const q = busca.toLowerCase();
           if (
             !(a.produto || '').toLowerCase().includes(q) &&
             !(a.responsavelNome || '').toLowerCase().includes(q) &&
             !String(a.bicoNumero || a.bicoId).toLowerCase().includes(q) &&
-            !(a.resultado || '').toLowerCase().includes(q)
+            !(a.resultado || '').toLowerCase().includes(q) &&
+            !(a.bombaNome || '').toLowerCase().includes(q) &&
+            !(a.lacreInmetro || '').toLowerCase().includes(q)
           ) {
             return false;
           }
@@ -138,7 +180,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
         return true;
       })
       .sort((a, b) => b.data.localeCompare(a.data) || (b.hora || '').localeCompare(a.hora || ''));
-  }, [afericoes, dataInicio, dataFim, filtroCombustivel, busca]);
+  }, [afericoes, dataInicio, dataFim, filtroCombustivel, filtroStatusAfericao, filtroBicoAfericao, busca]);
 
   const escalasFiltradas = useMemo(() => {
     return escalas
@@ -304,7 +346,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
     );
     const desvioMedioMl = totalAfericoes > 0 ? Math.round(desvioTotalMl / totalAfericoes) : 0;
 
-    // 1. Agrupamento por tipo de combustível (com Valor Total e Impacto em 1.000 L)
+    // 1. Agrupamento por tipo de combustível (com Valor Total, Impacto em 1.000 L e lista de ensaios)
     const mapaPorCombustivel = new Map<
       string,
       {
@@ -316,6 +358,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
         desvioTotalMl: number;
         conformes: number;
         naoConformes: number;
+        listaAfericoes: (Afericao & { desvioMl: number; valorTeste: number })[];
       }
     >();
 
@@ -373,6 +416,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
         desvioTotalMl: 0,
         conformes: 0,
         naoConformes: 0,
+        listaAfericoes: [],
       };
       comb.bicosNumeros.add(bicoNum);
       comb.qtdTestes += 1;
@@ -381,6 +425,11 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
       comb.desvioTotalMl += desvioMl;
       if (isConforme) comb.conformes += 1;
       else comb.naoConformes += 1;
+      comb.listaAfericoes.push({
+        ...a,
+        desvioMl,
+        valorTeste,
+      });
       mapaPorCombustivel.set(prod, comb);
 
       // Atualiza mapa de bico
@@ -446,6 +495,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
         conformes: c.conformes,
         naoConformes: c.naoConformes,
         taxaConformidade,
+        listaAfericoes: c.listaAfericoes,
       };
     });
 
@@ -1003,65 +1053,162 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
 
         currentY = (doc as any).lastAutoTable.finalY + 6;
 
-        // 2.3 DETALHAMENTO DE CADA ENSAIO INDIVIDUAL DE AFERIÇÃO
+        // 2.3 DETALHAMENTO DE CADA ENSAIO INDIVIDUAL DE AFERIÇÃO (AGRUPADO OU CRONOLÓGICO)
         if (currentY > 200) {
           doc.addPage();
           currentY = 20;
         }
 
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(9.5);
-        doc.setTextColor(51, 65, 85);
-        doc.text(`2.3. Detalhamento Técnico de Ensaios Volumétricos Individuais (${afericoesFiltradas.length} testes)`, 14, currentY);
-        currentY += 3;
+        if (agrupamentoAfericoes === 'COMBUSTIVEL' && balancoConsolidado.resumoPorCombustivel.length > 0) {
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(9.5);
+          doc.setTextColor(51, 65, 85);
+          doc.text(
+            `2.3. Detalhamento de Ensaios Volumétricos Agrupados por Combustível (${afericoesFiltradas.length} testes)`,
+            14,
+            currentY
+          );
+          currentY += 4;
 
-        autoTable(doc, {
-          startY: currentY,
-          head: [
-            [
-              'Data / Hora',
-              'Bico',
-              'Combustível',
-              'Vol. Nominal',
-              'Vol. Aferido',
-              'Desvio (ml)',
-              'Valor Teste (R$)',
-              'Encerrante / Lacre',
-              'Responsável',
-              'Status Inmetro',
+          balancoConsolidado.resumoPorCombustivel.forEach((comb: any) => {
+            const testes = comb.listaAfericoes || [];
+            if (testes.length === 0) return;
+
+            if (currentY > 210) {
+              doc.addPage();
+              currentY = 20;
+            }
+
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(8);
+            doc.setTextColor(30, 41, 59);
+            doc.text(
+              `• ${comb.produto} (${comb.qtdTestes} testes • Vol: ${comb.volumeAferidoTotal.toFixed(3)} L • Desvio: ${comb.desvioMedioMl > 0 ? '+' : ''}${comb.desvioMedioMl} ml • ${comb.taxaConformidade}% conf. • Total: ${formatarMoeda(comb.valorTotalAfericao)})`,
+              14,
+              currentY
+            );
+            currentY += 2;
+
+            autoTable(doc, {
+              startY: currentY,
+              head: [
+                [
+                  'Data / Hora',
+                  'Bico',
+                  'Vol. Nominal',
+                  'Vol. Aferido',
+                  'Desvio (ml)',
+                  'Valor Teste (R$)',
+                  'Encerrante / Lacre',
+                  'Responsável',
+                  'Status Inmetro',
+                ],
+              ],
+              body: testes.map((a: any) => {
+                const bicoNum =
+                  a.bicoNumero ?? (a.bicoId ? parseInt(a.bicoId.replace(/\D/g, ''), 10) : 1);
+                const encInfo = a.encerranteFinal ?? a.encerranteLeitura;
+                const lacreInfo = a.lacreInmetro ? `Lacre: ${a.lacreInmetro}` : '';
+                return [
+                  `${a.data} ${a.hora || ''}`.trim(),
+                  `Bico ${String(bicoNum).padStart(2, '0')}`,
+                  `${Number(a.volumeNominal || 20).toFixed(3)} L`,
+                  `${Number(a.volumeAferido || 20).toFixed(3)} L`,
+                  `${a.desvioMl > 0 ? '+' : ''}${a.desvioMl} ml`,
+                  formatarMoeda(a.valorTeste),
+                  [encInfo ? `Enc: ${encInfo}` : '', lacreInfo].filter(Boolean).join(' | ') || '—',
+                  a.responsavelNome || 'Operador',
+                  a.resultado,
+                ];
+              }),
+              foot: [
+                [
+                  `Subtotal ${comb.produto}`,
+                  '—',
+                  `${(testes.length * 20).toFixed(3)} L`,
+                  `${comb.volumeAferidoTotal.toFixed(3)} L`,
+                  `${comb.desvioMedioMl > 0 ? '+' : ''}${comb.desvioMedioMl} ml méd.`,
+                  formatarMoeda(comb.valorTotalAfericao),
+                  '—',
+                  '—',
+                  `${comb.conformes} de ${testes.length} conf.`,
+                ],
+              ],
+              theme: 'grid',
+              headStyles: { fillColor: [51, 65, 85], textColor: 255, fontSize: 6.5 },
+              bodyStyles: { fontSize: 6.5 },
+              footStyles: {
+                fillColor: [241, 245, 249],
+                textColor: [15, 23, 42],
+                fontSize: 6.5,
+                fontStyle: 'bold',
+              },
+              margin: { left: 14, right: 14 },
+            });
+
+            currentY = (doc as any).lastAutoTable.finalY + 5;
+          });
+          currentY += 4;
+        } else {
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(9.5);
+          doc.setTextColor(51, 65, 85);
+          doc.text(
+            `2.3. Detalhamento Técnico de Ensaios Volumétricos Individuais (${afericoesFiltradas.length} testes)`,
+            14,
+            currentY
+          );
+          currentY += 3;
+
+          autoTable(doc, {
+            startY: currentY,
+            head: [
+              [
+                'Data / Hora',
+                'Bico',
+                'Combustível',
+                'Vol. Nominal',
+                'Vol. Aferido',
+                'Desvio (ml)',
+                'Valor Teste (R$)',
+                'Encerrante / Lacre',
+                'Responsável',
+                'Status Inmetro',
+              ],
             ],
-          ],
-          body:
-            afericoesFiltradas.length > 0
-              ? afericoesFiltradas.map((a) => {
-                  const desvioMl = Math.round((Number(a.diferenca) || 0) * 1000);
-                  const encInfo = a.encerranteFinal ?? a.encerranteLeitura;
-                  const lacreInfo = a.lacreInmetro ? `Lacre: ${a.lacreInmetro}` : '';
-                  const bicoNum = a.bicoNumero ?? (a.bicoId ? parseInt(a.bicoId.replace(/\D/g, ''), 10) : 1);
-                  const preco = resolverPrecoBico(a.bicoId, bicoNum, a.produto);
-                  const valTeste = (Number(a.volumeNominal) || 20) * preco;
+            body:
+              afericoesFiltradas.length > 0
+                ? afericoesFiltradas.map((a) => {
+                    const desvioMl = Math.round((Number(a.diferenca) || 0) * 1000);
+                    const encInfo = a.encerranteFinal ?? a.encerranteLeitura;
+                    const lacreInfo = a.lacreInmetro ? `Lacre: ${a.lacreInmetro}` : '';
+                    const bicoNum =
+                      a.bicoNumero ?? (a.bicoId ? parseInt(a.bicoId.replace(/\D/g, ''), 10) : 1);
+                    const preco = resolverPrecoBico(a.bicoId, bicoNum, a.produto);
+                    const valTeste = (Number(a.volumeNominal) || 20) * preco;
 
-                  return [
-                    `${a.data} ${a.hora || ''}`.trim(),
-                    `Bico ${String(bicoNum).padStart(2, '0')}`,
-                    a.produto,
-                    `${Number(a.volumeNominal || 20).toFixed(3)} L`,
-                    `${Number(a.volumeAferido || 20).toFixed(3)} L`,
-                    `${desvioMl > 0 ? '+' : ''}${desvioMl} ml`,
-                    formatarMoeda(valTeste),
-                    [encInfo ? `Enc: ${encInfo}` : '', lacreInfo].filter(Boolean).join(' | ') || '—',
-                    a.responsavelNome || 'Operador',
-                    a.resultado,
-                  ];
-                })
-              : [['—', '—', '—', '20.000 L', '20.000 L', '0 ml', 'R$ 0,00', '—', '—', '—']],
-          theme: 'grid',
-          headStyles: { fillColor: [15, 23, 42], textColor: 255, fontSize: 6.5 },
-          bodyStyles: { fontSize: 6.5 },
-          margin: { left: 14, right: 14 },
-        });
+                    return [
+                      `${a.data} ${a.hora || ''}`.trim(),
+                      `Bico ${String(bicoNum).padStart(2, '0')}`,
+                      a.produto,
+                      `${Number(a.volumeNominal || 20).toFixed(3)} L`,
+                      `${Number(a.volumeAferido || 20).toFixed(3)} L`,
+                      `${desvioMl > 0 ? '+' : ''}${desvioMl} ml`,
+                      formatarMoeda(valTeste),
+                      [encInfo ? `Enc: ${encInfo}` : '', lacreInfo].filter(Boolean).join(' | ') || '—',
+                      a.responsavelNome || 'Operador',
+                      a.resultado,
+                    ];
+                  })
+                : [['—', '—', '—', '20.000 L', '20.000 L', '0 ml', 'R$ 0,00', '—', '—', '—']],
+            theme: 'grid',
+            headStyles: { fillColor: [15, 23, 42], textColor: 255, fontSize: 6.5 },
+            bodyStyles: { fontSize: 6.5 },
+            margin: { left: 14, right: 14 },
+          });
 
-        currentY = (doc as any).lastAutoTable.finalY + 10;
+          currentY = (doc as any).lastAutoTable.finalY + 10;
+        }
       }
 
       // 3. SEÇÃO DE ANÁLISES FÍSICO-QUÍMICAS & CONFORMIDADE REGULATÓRIA ANP
@@ -2368,6 +2515,195 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
           </div>
         </div>
 
+        {/* BARRA DE CONTROLE: AGRUPAMENTO & FILTRAGEM DO RELATÓRIO DE AFERIÇÕES */}
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3.5 print:hidden">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+            {/* Seletor de Modo de Agrupamento */}
+            <div className="flex flex-wrap items-center gap-1.5 bg-white p-1 rounded-lg border border-slate-200 shadow-2xs">
+              <span className="text-[11px] font-bold uppercase text-slate-500 px-2 flex items-center gap-1">
+                <Layers className="w-3.5 h-3.5 text-slate-400" />
+                Agrupar Relatório por:
+              </span>
+              <button
+                type="button"
+                onClick={() => setAgrupamentoAfericoes('COMBUSTIVEL')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition cursor-pointer ${
+                  agrupamentoAfericoes === 'COMBUSTIVEL'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <Fuel className="w-3.5 h-3.5" />
+                Tipo de Combustível
+                <span
+                  className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                    agrupamentoAfericoes === 'COMBUSTIVEL'
+                      ? 'bg-blue-700 text-white'
+                      : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  {balancoConsolidado.resumoPorCombustivel.length}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAgrupamentoAfericoes('CRONOLOGICO')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition cursor-pointer ${
+                  agrupamentoAfericoes === 'CRONOLOGICO'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <Clock className="w-3.5 h-3.5" />
+                Lista Cronológica
+              </button>
+              <button
+                type="button"
+                onClick={() => setAgrupamentoAfericoes('BICO')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition cursor-pointer ${
+                  agrupamentoAfericoes === 'BICO'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <Gauge className="w-3.5 h-3.5" />
+                Por Bico
+                <span
+                  className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                    agrupamentoAfericoes === 'BICO'
+                      ? 'bg-blue-700 text-white'
+                      : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  {balancoConsolidado.resumoPorBico.length}
+                </span>
+              </button>
+            </div>
+
+            {/* Filtros de Status Inmetro e Bico */}
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Filtro Status Inmetro */}
+              <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-slate-200 text-xs">
+                <span className="text-[10px] font-bold uppercase text-slate-400 px-1.5">Status:</span>
+                <button
+                  type="button"
+                  onClick={() => setFiltroStatusAfericao('TODOS')}
+                  className={`px-2 py-1 rounded text-xs font-semibold cursor-pointer ${
+                    filtroStatusAfericao === 'TODOS'
+                      ? 'bg-slate-800 text-white'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  Todos
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFiltroStatusAfericao('CONFORME')}
+                  className={`px-2 py-1 rounded text-xs font-semibold cursor-pointer ${
+                    filtroStatusAfericao === 'CONFORME'
+                      ? 'bg-emerald-600 text-white'
+                      : 'text-emerald-700 hover:bg-emerald-50'
+                  }`}
+                >
+                  ✓ Conformes
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFiltroStatusAfericao('FORA_LIMITE')}
+                  className={`px-2 py-1 rounded text-xs font-semibold cursor-pointer ${
+                    filtroStatusAfericao === 'FORA_LIMITE'
+                      ? 'bg-red-600 text-white'
+                      : 'text-red-700 hover:bg-red-50'
+                  }`}
+                >
+                  ⚠ Fora Faixa
+                </button>
+              </div>
+
+              {/* Filtro por Bico */}
+              <select
+                value={filtroBicoAfericao}
+                onChange={(e) => setFiltroBicoAfericao(e.target.value)}
+                className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 cursor-pointer"
+              >
+                <option value="TODOS">⛽ Todos os Bicos</option>
+                {Array.from(new Set(bicos.map((b) => Number(b.numero))))
+                  .sort((a, b) => Number(a) - Number(b))
+                  .map((num) => (
+                    <option key={num} value={String(num)}>
+                      Bico {String(num).padStart(2, '0')}
+                    </option>
+                  ))}
+              </select>
+
+              {/* Botão Limpar Filtros */}
+              {(filtroCombustivel !== 'TODOS' ||
+                filtroStatusAfericao !== 'TODOS' ||
+                filtroBicoAfericao !== 'TODOS' ||
+                busca.trim() !== '') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFiltroCombustivel('TODOS');
+                    setFiltroStatusAfericao('TODOS');
+                    setFiltroBicoAfericao('TODOS');
+                    setBusca('');
+                  }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-slate-600 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg transition cursor-pointer"
+                  title="Limpar todos os filtros da seção de aferições"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  Limpar Filtros
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Chips rápidos de Combustível */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 pt-0.5">
+            <span className="text-[11px] font-bold uppercase text-slate-500 shrink-0 flex items-center gap-1">
+              <Filter className="w-3 h-3 text-slate-400" />
+              Filtrar Combustível:
+            </span>
+            <button
+              type="button"
+              onClick={() => setFiltroCombustivel('TODOS')}
+              className={`shrink-0 px-2.5 py-1 rounded-full text-xs font-semibold transition cursor-pointer ${
+                filtroCombustivel === 'TODOS'
+                  ? 'bg-blue-600 text-white font-bold shadow-2xs'
+                  : 'bg-white text-slate-700 hover:bg-slate-200 border border-slate-200'
+              }`}
+            >
+              ⛽ Todos ({afericoes.length})
+            </button>
+            {listaCombustiveisDisponiveis.map((prod) => {
+              const qtd = afericoes.filter((a) => a.produto === prod).length;
+              const isSelected = filtroCombustivel === prod;
+              return (
+                <button
+                  key={prod}
+                  type="button"
+                  onClick={() => setFiltroCombustivel(isSelected ? 'TODOS' : prod)}
+                  className={`shrink-0 px-2.5 py-1 rounded-full text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer ${
+                    isSelected
+                      ? 'bg-blue-600 text-white font-bold shadow-2xs'
+                      : 'bg-white text-slate-700 hover:bg-slate-200 border border-slate-200'
+                  }`}
+                >
+                  <span>{prod}</span>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                      isSelected ? 'bg-blue-700 text-white' : 'bg-slate-100 text-slate-500'
+                    }`}
+                  >
+                    {qtd}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* PAINEL 1: CÁLCULO TOTAL DE IMPACTO POR TIPO DE COMBUSTÍVEL EM 1.000 L DE ABASTECIMENTO */}
         <div className="space-y-2.5">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
@@ -2404,7 +2740,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                 {balancoConsolidado.resumoPorCombustivel.length === 0 ? (
                   <tr>
                     <td colSpan={10} className="py-6 text-center text-slate-400">
-                      Nenhum ensaio metrológico encontrado no período selecionado.
+                      Nenhum ensaio metrológico encontrado com os filtros atuais.
                     </td>
                   </tr>
                 ) : (
@@ -2493,209 +2829,456 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
           </div>
         </div>
 
-        {/* PAINEL 2: INFORMAÇÕES DE BICOS AFERIDOS & VALOR TOTAL POR BICO */}
-        <div className="space-y-2.5">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
-            <h5 className="text-xs font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
-              <Layers className="w-3.5 h-3.5 text-indigo-600" />
-              Informações de Bicos Aferidos & Valor Total por Bico
-            </h5>
-            <span className="text-[11px] text-slate-500">
-              Controle de bico, bomba, tanque, encerrante, lacre e desvio individual
-            </span>
-          </div>
+        {/* VISUALIZAÇÃO AGRUPADA POR COMBUSTÍVEL */}
+        {agrupamentoAfericoes === 'COMBUSTIVEL' && (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-slate-200 pb-2">
+              <h5 className="text-sm font-bold text-slate-800 uppercase tracking-wide flex items-center gap-2">
+                <Fuel className="w-4 h-4 text-blue-600" />
+                Detalhamento dos Ensaios Volumétricos Agrupados por Tipo de Combustível
+              </h5>
+              <span className="text-xs text-slate-500 font-mono">
+                {balancoConsolidado.resumoPorCombustivel.length} combustível(is) exibido(s)
+              </span>
+            </div>
 
-          <div className="overflow-x-auto border border-slate-200 rounded-xl">
-            <table className="w-full text-xs text-left">
-              <thead className="bg-slate-100 border-b border-slate-200 font-bold text-slate-700 uppercase">
-                <tr>
-                  <th className="py-2.5 px-3">Bico / Bomba</th>
-                  <th className="py-2.5 px-3">Combustível</th>
-                  <th className="py-2.5 px-3">Tanque</th>
-                  <th className="py-2.5 px-3">Encerrante Atual</th>
-                  <th className="py-2.5 px-3">Lacre Inmetro</th>
-                  <th className="py-2.5 px-3">Testes</th>
-                  <th className="py-2.5 px-3">Volume Total</th>
-                  <th className="py-2.5 px-3">Preço (R$/L)</th>
-                  <th className="py-2.5 px-3 font-bold text-emerald-900">Valor Total do Bico</th>
-                  <th className="py-2.5 px-3">Desvio Médio</th>
-                  <th className="py-2.5 px-3">Impacto / 1.000 L</th>
-                  <th className="py-2.5 px-3">Status Inmetro</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {balancoConsolidado.resumoPorBico.length === 0 ? (
-                  <tr>
-                    <td colSpan={12} className="py-6 text-center text-slate-400">
-                      Nenhum bico aferido no período selecionado.
-                    </td>
-                  </tr>
-                ) : (
-                  balancoConsolidado.resumoPorBico.map((b: any) => (
-                    <tr key={b.bicoNumero} className="hover:bg-slate-50">
-                      <td className="py-2 px-3 font-bold text-slate-900">
-                        Bico {String(b.bicoNumero).padStart(2, '0')}
-                        <span className="block text-[10px] font-normal text-slate-500">{b.bombaNome}</span>
-                      </td>
-                      <td className="py-2 px-3 font-medium text-slate-800">{b.produto}</td>
-                      <td className="py-2 px-3 font-mono text-[11px] text-slate-600">{b.tanqueCodigo}</td>
-                      <td className="py-2 px-3 font-mono text-[11px]">
-                        {b.encerranteFinal ? b.encerranteFinal.toLocaleString('pt-BR') : '—'}
-                      </td>
-                      <td className="py-2 px-3 font-mono text-[11px] text-slate-600">
-                        {b.lacreInmetro || 'Conferido'}
-                      </td>
-                      <td className="py-2 px-3 font-mono">{b.qtdTestes}x</td>
-                      <td className="py-2 px-3 font-mono font-semibold">{b.volumeAferidoTotal.toFixed(3)} L</td>
-                      <td className="py-2 px-3 font-mono">{formatarMoeda(b.precoLitro)}</td>
-                      <td className="py-2 px-3 font-mono font-bold text-emerald-700">
-                        {formatarMoeda(b.valorTotalAfericao)}
-                      </td>
-                      <td className="py-2 px-3 font-mono font-bold">
-                        <span className={b.desvioMedioMl > 0 ? 'text-amber-700' : b.desvioMedioMl < 0 ? 'text-blue-700' : 'text-slate-700'}>
-                          {b.desvioMedioMl > 0 ? '+' : ''}{b.desvioMedioMl} ml
-                        </span>
-                      </td>
-                      <td className="py-2 px-3 font-mono text-[11px]">
-                        <span className={b.impactoLitrosPor1000L > 0 ? 'text-amber-800 font-bold' : b.impactoLitrosPor1000L < 0 ? 'text-blue-800 font-bold' : 'text-slate-600'}>
-                          {b.impactoLitrosPor1000L > 0 ? '+' : ''}{b.impactoLitrosPor1000L.toFixed(2)} L
-                        </span>
-                        <span className="block text-[10px] text-slate-400">
-                          {b.impactoFinanceiroPor1000L > 0 ? '+' : ''}{formatarMoeda(b.impactoFinanceiroPor1000L)}
-                        </span>
-                      </td>
-                      <td className="py-2 px-3">
-                        <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            b.statusGeral === 'CONFORME'
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : 'bg-red-100 text-red-800'
+            {balancoConsolidado.resumoPorCombustivel.length === 0 ? (
+              <div className="p-8 text-center text-slate-400 bg-slate-50 rounded-xl border border-slate-200">
+                Nenhum ensaio metrológico para os filtros selecionados.
+              </div>
+            ) : (
+              balancoConsolidado.resumoPorCombustivel.map((comb: any) => {
+                const isExpandido = combustiveisExpandidos[comb.produto] !== false;
+                const testes = comb.listaAfericoes || [];
+
+                return (
+                  <div
+                    key={`grupo-comb-${comb.produto}`}
+                    className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden transition-all"
+                  >
+                    {/* Header do Grupo de Combustível */}
+                    <div
+                      onClick={() =>
+                        setCombustiveisExpandidos((prev) => ({
+                          ...prev,
+                          [comb.produto]: !isExpandido,
+                        }))
+                      }
+                      className="p-4 bg-gradient-to-r from-slate-900 to-slate-800 text-white flex flex-col md:flex-row md:items-center justify-between gap-3 cursor-pointer hover:from-slate-800 hover:to-slate-700 transition"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-blue-500/20 text-blue-300 rounded-lg border border-blue-400/30">
+                          <Fuel className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h5 className="font-bold text-sm tracking-wide text-white">{comb.produto}</h5>
+                            <span className="text-xs font-mono font-bold px-2 py-0.5 bg-white/10 rounded border border-white/20 text-emerald-300">
+                              {formatarMoeda(comb.precoMedioLitro)}/L
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-300 mt-0.5">
+                            {comb.bicosQtd} bico(s) cadastrado(s) ({comb.bicosNumeros.map((n: number) => `Bico ${String(n).padStart(2, '0')}`).join(', ')}) • {comb.qtdTestes} teste(s) de 20L
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
+                            {comb.conformes} conf. ({comb.taxaConformidade}%)
+                          </span>
+                          {comb.naoConformes > 0 && (
+                            <span className="px-2 py-0.5 rounded bg-red-500/20 text-red-300 border border-red-500/30 font-bold">
+                              {comb.naoConformes} fora de faixa
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          className="p-1 rounded bg-white/10 hover:bg-white/20 text-white transition"
+                        >
+                          {isExpandido ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Resumo Rápido das Métricas do Combustível */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-3 bg-slate-50 border-b border-slate-200 text-xs">
+                      <div className="p-2 bg-white rounded-lg border border-slate-200">
+                        <span className="text-[10px] font-bold uppercase text-slate-400 block">Volume Total Aferido</span>
+                        <strong className="font-mono text-slate-900 text-sm">
+                          {comb.volumeAferidoTotal.toFixed(3)} L
+                        </strong>
+                      </div>
+                      <div className="p-2 bg-white rounded-lg border border-slate-200">
+                        <span className="text-[10px] font-bold uppercase text-slate-400 block">Valor Total Aferido</span>
+                        <strong className="font-mono text-emerald-700 text-sm">
+                          {formatarMoeda(comb.valorTotalAfericao)}
+                        </strong>
+                      </div>
+                      <div className="p-2 bg-white rounded-lg border border-slate-200">
+                        <span className="text-[10px] font-bold uppercase text-slate-400 block">Desvio Médio 20L</span>
+                        <strong
+                          className={`font-mono text-sm font-bold ${
+                            comb.desvioMedioMl > 0
+                              ? 'text-amber-700'
+                              : comb.desvioMedioMl < 0
+                              ? 'text-blue-700'
+                              : 'text-slate-800'
                           }`}
                         >
-                          {b.statusGeral}
+                          {comb.desvioMedioMl > 0 ? '+' : ''}
+                          {comb.desvioMedioMl} ml
+                        </strong>
+                      </div>
+                      <div className="p-2 bg-white rounded-lg border border-slate-200">
+                        <span className="text-[10px] font-bold uppercase text-slate-400 block">Impacto / 1.000 L</span>
+                        <strong
+                          className={`font-mono text-sm font-bold ${
+                            comb.impactoLitrosPor1000L > 0
+                              ? 'text-amber-700'
+                              : comb.impactoLitrosPor1000L < 0
+                              ? 'text-blue-700'
+                              : 'text-slate-800'
+                          }`}
+                        >
+                          {comb.impactoLitrosPor1000L > 0 ? '+' : ''}
+                          {comb.impactoLitrosPor1000L.toFixed(2)} L
+                        </strong>
+                        <span className="text-[10px] text-slate-500 block">
+                          {comb.impactoFinanceiroPor1000L > 0 ? '+' : ''}
+                          {formatarMoeda(comb.impactoFinanceiroPor1000L)}
                         </span>
+                      </div>
+                    </div>
+
+                    {/* Tabela dos Ensaios Volumétricos daquele Combustível */}
+                    {isExpandido && (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs text-left">
+                          <thead className="bg-slate-100 border-b border-slate-200 font-bold text-slate-700 uppercase text-[11px]">
+                            <tr>
+                              <th className="py-2.5 px-3">Data / Hora</th>
+                              <th className="py-2.5 px-3">Bico / Bomba</th>
+                              <th className="py-2.5 px-3">Nominal</th>
+                              <th className="py-2.5 px-3">Vol. Aferido</th>
+                              <th className="py-2.5 px-3">Desvio (ml)</th>
+                              <th className="py-2.5 px-3 font-bold text-emerald-900">Valor Teste (R$)</th>
+                              <th className="py-2.5 px-3">Encerrante / Lacre</th>
+                              <th className="py-2.5 px-3">Responsável</th>
+                              <th className="py-2.5 px-3">Status Inmetro</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {testes.length === 0 ? (
+                              <tr>
+                                <td colSpan={9} className="py-5 text-center text-slate-400">
+                                  Nenhum ensaio individual registrado para este combustível.
+                                </td>
+                              </tr>
+                            ) : (
+                              testes.map((a: any) => {
+                                const bicoNum =
+                                  a.bicoNumero ?? (a.bicoId ? parseInt(a.bicoId.replace(/\D/g, ''), 10) : 1);
+                                const isOk = a.resultado === 'CONFORME';
+
+                                return (
+                                  <tr key={a.id} className="hover:bg-slate-50">
+                                    <td className="py-2 px-3 font-mono text-slate-700">
+                                      {a.data} {a.hora || ''}
+                                    </td>
+                                    <td className="py-2 px-3 font-bold text-slate-900">
+                                      Bico {String(bicoNum).padStart(2, '0')}
+                                      <span className="block text-[10px] font-normal text-slate-500">
+                                        {a.bombaNome || 'Bomba'}
+                                      </span>
+                                    </td>
+                                    <td className="py-2 px-3 font-mono">
+                                      {Number(a.volumeNominal || 20).toFixed(3)} L
+                                    </td>
+                                    <td className="py-2 px-3 font-mono font-bold text-slate-900">
+                                      {Number(a.volumeAferido || 20).toFixed(3)} L
+                                    </td>
+                                    <td className="py-2 px-3 font-mono font-bold">
+                                      <span
+                                        className={
+                                          Math.abs(a.desvioMl) > 100 ? 'text-red-600' : 'text-emerald-700'
+                                        }
+                                      >
+                                        {a.desvioMl > 0 ? '+' : ''}
+                                        {a.desvioMl} ml
+                                      </span>
+                                    </td>
+                                    <td className="py-2 px-3 font-mono font-bold text-emerald-700">
+                                      {formatarMoeda(a.valorTeste)}
+                                    </td>
+                                    <td className="py-2 px-3 font-mono text-[11px] text-slate-600">
+                                      {a.encerranteFinal ?? (a as any).encerranteLeitura ?? '—'}{' '}
+                                      {a.lacreInmetro ? `• Lacre ${a.lacreInmetro}` : ''}
+                                    </td>
+                                    <td className="py-2 px-3">{a.responsavelNome || 'Operador'}</td>
+                                    <td className="py-2 px-3">
+                                      <span
+                                        className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                          isOk
+                                            ? 'bg-emerald-100 text-emerald-800'
+                                            : 'bg-red-100 text-red-800'
+                                        }`}
+                                      >
+                                        {a.resultado}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            )}
+                          </tbody>
+                          {testes.length > 0 && (
+                            <tfoot className="bg-slate-50 border-t border-slate-200 font-bold text-slate-900">
+                              <tr>
+                                <td className="py-2 px-3 uppercase text-[10px]" colSpan={2}>
+                                  Subtotal {comb.produto} ({testes.length} ensaios)
+                                </td>
+                                <td className="py-2 px-3 font-mono">
+                                  {(testes.length * 20).toFixed(3)} L
+                                </td>
+                                <td className="py-2 px-3 font-mono">
+                                  {comb.volumeAferidoTotal.toFixed(3)} L
+                                </td>
+                                <td className="py-2 px-3 font-mono">
+                                  {comb.desvioMedioMl > 0 ? '+' : ''}
+                                  {comb.desvioMedioMl} ml méd.
+                                </td>
+                                <td className="py-2 px-3 font-mono text-emerald-800">
+                                  {formatarMoeda(comb.valorTotalAfericao)}
+                                </td>
+                                <td className="py-2 px-3" colSpan={2}>
+                                  —
+                                </td>
+                                <td className="py-2 px-3 text-emerald-800">
+                                  {comb.conformes} de {testes.length} conf.
+                                </td>
+                              </tr>
+                            </tfoot>
+                          )}
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+
+        {/* VISUALIZAÇÃO POR BICO */}
+        {(agrupamentoAfericoes === 'BICO' || agrupamentoAfericoes === 'CRONOLOGICO') && (
+          <div className="space-y-2.5">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+              <h5 className="text-xs font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-indigo-600" />
+                Informações de Bicos Aferidos & Valor Total por Bico
+              </h5>
+              <span className="text-[11px] text-slate-500">
+                Controle de bico, bomba, tanque, encerrante, lacre e desvio individual
+              </span>
+            </div>
+
+            <div className="overflow-x-auto border border-slate-200 rounded-xl">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-slate-100 border-b border-slate-200 font-bold text-slate-700 uppercase">
+                  <tr>
+                    <th className="py-2.5 px-3">Bico / Bomba</th>
+                    <th className="py-2.5 px-3">Combustível</th>
+                    <th className="py-2.5 px-3">Tanque</th>
+                    <th className="py-2.5 px-3">Encerrante Atual</th>
+                    <th className="py-2.5 px-3">Lacre Inmetro</th>
+                    <th className="py-2.5 px-3">Testes</th>
+                    <th className="py-2.5 px-3">Volume Total</th>
+                    <th className="py-2.5 px-3">Preço (R$/L)</th>
+                    <th className="py-2.5 px-3 font-bold text-emerald-900">Valor Total do Bico</th>
+                    <th className="py-2.5 px-3">Desvio Médio</th>
+                    <th className="py-2.5 px-3">Impacto / 1.000 L</th>
+                    <th className="py-2.5 px-3">Status Inmetro</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {balancoConsolidado.resumoPorBico.length === 0 ? (
+                    <tr>
+                      <td colSpan={12} className="py-6 text-center text-slate-400">
+                        Nenhum bico aferido no período selecionado.
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-              {balancoConsolidado.resumoPorBico.length > 0 && (
-                <tfoot className="bg-slate-50 border-t border-slate-200 font-bold text-slate-900">
-                  <tr>
-                    <td className="py-2 px-3 uppercase text-[11px]" colSpan={5}>
-                      Total de {balancoConsolidado.resumoPorBico.length} bicos aferidos
-                    </td>
-                    <td className="py-2 px-3 font-mono">{balancoConsolidado.totalAfericoes}</td>
-                    <td className="py-2 px-3 font-mono">{balancoConsolidado.volumeTotalAferido.toFixed(3)} L</td>
-                    <td className="py-2 px-3">—</td>
-                    <td className="py-2 px-3 font-mono text-emerald-800">
-                      {formatarMoeda(balancoConsolidado.valorTotalAfericoesGeral)}
-                    </td>
-                    <td className="py-2 px-3 font-mono">
-                      {balancoConsolidado.desvioMedioMl > 0 ? '+' : ''}{balancoConsolidado.desvioMedioMl} ml
-                    </td>
-                    <td className="py-2 px-3 font-mono text-blue-900">
-                      {balancoConsolidado.impactoMedioGeralLitros1000L > 0 ? '+' : ''}
-                      {balancoConsolidado.impactoMedioGeralLitros1000L.toFixed(2)} L
-                    </td>
-                    <td className="py-2 px-3 text-emerald-800">{balancoConsolidado.afericoesConformes} conf.</td>
-                  </tr>
-                </tfoot>
-              )}
-            </table>
-          </div>
-        </div>
-
-        {/* PAINEL 3: DETALHAMENTO DE CADA ENSAIO INDIVIDUAL DE AFERIÇÃO */}
-        <div className="space-y-2.5">
-          <div className="flex items-center justify-between">
-            <h5 className="text-xs font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
-              <FileCheck className="w-3.5 h-3.5 text-slate-600" />
-              Histórico Cronológico de Ensaios Volumétricos ({afericoesFiltradas.length} registros)
-            </h5>
-            <span className="text-[11px] text-slate-500">
-              Registros individuais de 20 Litros no período
-            </span>
-          </div>
-
-          <div className="overflow-x-auto border border-slate-200 rounded-xl">
-            <table className="w-full text-xs text-left">
-              <thead className="bg-slate-100 border-b border-slate-200 font-bold text-slate-700 uppercase">
-                <tr>
-                  <th className="py-2.5 px-3">Data / Hora</th>
-                  <th className="py-2.5 px-3">Bico / Combustível</th>
-                  <th className="py-2.5 px-3">Nominal</th>
-                  <th className="py-2.5 px-3">Volume Aferido</th>
-                  <th className="py-2.5 px-3">Desvio (ml)</th>
-                  <th className="py-2.5 px-3">Valor do Teste (R$)</th>
-                  <th className="py-2.5 px-3">Encerrante / Lacre</th>
-                  <th className="py-2.5 px-3">Responsável</th>
-                  <th className="py-2.5 px-3">Resultado</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {afericoesFiltradas.length === 0 ? (
-                  <tr>
-                    <td colSpan={9} className="py-6 text-center text-slate-400">
-                      Nenhuma aferição registrada no período selecionado.
-                    </td>
-                  </tr>
-                ) : (
-                  afericoesFiltradas.map((a) => {
-                    const desvioMl = Math.round((Number(a.diferenca) || 0) * 1000);
-                    const bicoNum = a.bicoNumero ?? (a.bicoId ? parseInt(a.bicoId.replace(/\D/g, ''), 10) : 1);
-                    const preco = resolverPrecoBico(a.bicoId, bicoNum, a.produto);
-                    const valTeste = (Number(a.volumeNominal) || 20) * preco;
-
-                    return (
-                      <tr key={a.id} className="hover:bg-slate-50">
-                        <td className="py-2 px-3 font-mono">
-                          {a.data} {a.hora}
+                  ) : (
+                    balancoConsolidado.resumoPorBico.map((b: any) => (
+                      <tr key={b.bicoNumero} className="hover:bg-slate-50">
+                        <td className="py-2 px-3 font-bold text-slate-900">
+                          Bico {String(b.bicoNumero).padStart(2, '0')}
+                          <span className="block text-[10px] font-normal text-slate-500">{b.bombaNome}</span>
                         </td>
-                        <td className="py-2 px-3 font-medium text-slate-900">
-                          Bico {String(bicoNum).padStart(2, '0')} • {a.produto}
-                        </td>
-                        <td className="py-2 px-3 font-mono">{a.volumeNominal ? a.volumeNominal.toFixed(3) : '20.000'} L</td>
-                        <td className="py-2 px-3 font-mono font-bold">
-                          {a.volumeAferido ? a.volumeAferido.toFixed(3) : '20.000'} L
-                        </td>
-                        <td className="py-2 px-3 font-mono font-bold">
-                          <span
-                            className={
-                              Math.abs(desvioMl) > 100 ? 'text-red-600' : 'text-emerald-700'
-                            }
-                          >
-                            {desvioMl > 0 ? '+' : ''}
-                            {desvioMl} ml
-                          </span>
-                        </td>
-                        <td className="py-2 px-3 font-mono font-bold text-emerald-700">
-                          {formatarMoeda(valTeste)}
+                        <td className="py-2 px-3 font-medium text-slate-800">{b.produto}</td>
+                        <td className="py-2 px-3 font-mono text-[11px] text-slate-600">{b.tanqueCodigo}</td>
+                        <td className="py-2 px-3 font-mono text-[11px]">
+                          {b.encerranteFinal ? b.encerranteFinal.toLocaleString('pt-BR') : '—'}
                         </td>
                         <td className="py-2 px-3 font-mono text-[11px] text-slate-600">
-                          {a.encerranteFinal ?? (a as any).encerranteLeitura ?? '—'}{' '}
-                          {a.lacreInmetro ? `• Lacre ${a.lacreInmetro}` : ''}
+                          {b.lacreInmetro || 'Conferido'}
                         </td>
-                        <td className="py-2 px-3">{a.responsavelNome || 'Operador'}</td>
+                        <td className="py-2 px-3 font-mono">{b.qtdTestes}x</td>
+                        <td className="py-2 px-3 font-mono font-semibold">{b.volumeAferidoTotal.toFixed(3)} L</td>
+                        <td className="py-2 px-3 font-mono">{formatarMoeda(b.precoLitro)}</td>
+                        <td className="py-2 px-3 font-mono font-bold text-emerald-700">
+                          {formatarMoeda(b.valorTotalAfericao)}
+                        </td>
+                        <td className="py-2 px-3 font-mono font-bold">
+                          <span className={b.desvioMedioMl > 0 ? 'text-amber-700' : b.desvioMedioMl < 0 ? 'text-blue-700' : 'text-slate-700'}>
+                            {b.desvioMedioMl > 0 ? '+' : ''}{b.desvioMedioMl} ml
+                          </span>
+                        </td>
+                        <td className="py-2 px-3 font-mono text-[11px]">
+                          <span className={b.impactoLitrosPor1000L > 0 ? 'text-amber-800 font-bold' : b.impactoLitrosPor1000L < 0 ? 'text-blue-800 font-bold' : 'text-slate-600'}>
+                            {b.impactoLitrosPor1000L > 0 ? '+' : ''}{b.impactoLitrosPor1000L.toFixed(2)} L
+                          </span>
+                          <span className="block text-[10px] text-slate-400">
+                            {b.impactoFinanceiroPor1000L > 0 ? '+' : ''}{formatarMoeda(b.impactoFinanceiroPor1000L)}
+                          </span>
+                        </td>
                         <td className="py-2 px-3">
                           <span
                             className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                              a.resultado === 'CONFORME'
+                              b.statusGeral === 'CONFORME'
                                 ? 'bg-emerald-100 text-emerald-800'
                                 : 'bg-red-100 text-red-800'
                             }`}
                           >
-                            {a.resultado}
+                            {b.statusGeral}
                           </span>
                         </td>
                       </tr>
-                    );
-                  })
+                    ))
+                  )}
+                </tbody>
+                {balancoConsolidado.resumoPorBico.length > 0 && (
+                  <tfoot className="bg-slate-50 border-t border-slate-200 font-bold text-slate-900">
+                    <tr>
+                      <td className="py-2 px-3 uppercase text-[11px]" colSpan={5}>
+                        Total de {balancoConsolidado.resumoPorBico.length} bicos aferidos
+                      </td>
+                      <td className="py-2 px-3 font-mono">{balancoConsolidado.totalAfericoes}</td>
+                      <td className="py-2 px-3 font-mono">{balancoConsolidado.volumeTotalAferido.toFixed(3)} L</td>
+                      <td className="py-2 px-3">—</td>
+                      <td className="py-2 px-3 font-mono text-emerald-800">
+                        {formatarMoeda(balancoConsolidado.valorTotalAfericoesGeral)}
+                      </td>
+                      <td className="py-2 px-3 font-mono">
+                        {balancoConsolidado.desvioMedioMl > 0 ? '+' : ''}{balancoConsolidado.desvioMedioMl} ml
+                      </td>
+                      <td className="py-2 px-3 font-mono text-blue-900">
+                        {balancoConsolidado.impactoMedioGeralLitros1000L > 0 ? '+' : ''}
+                        {balancoConsolidado.impactoMedioGeralLitros1000L.toFixed(2)} L
+                      </td>
+                      <td className="py-2 px-3 text-emerald-800">{balancoConsolidado.afericoesConformes} conf.</td>
+                    </tr>
+                  </tfoot>
                 )}
-              </tbody>
-            </table>
+              </table>
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* VISUALIZAÇÃO CRONOLÓGICA */}
+        {agrupamentoAfericoes === 'CRONOLOGICO' && (
+          <div className="space-y-2.5">
+            <div className="flex items-center justify-between">
+              <h5 className="text-xs font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                <FileCheck className="w-3.5 h-3.5 text-slate-600" />
+                Histórico Cronológico de Ensaios Volumétricos ({afericoesFiltradas.length} registros)
+              </h5>
+              <span className="text-[11px] text-slate-500">
+                Registros individuais de 20 Litros no período
+              </span>
+            </div>
+
+            <div className="overflow-x-auto border border-slate-200 rounded-xl">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-slate-100 border-b border-slate-200 font-bold text-slate-700 uppercase">
+                  <tr>
+                    <th className="py-2.5 px-3">Data / Hora</th>
+                    <th className="py-2.5 px-3">Bico / Combustível</th>
+                    <th className="py-2.5 px-3">Nominal</th>
+                    <th className="py-2.5 px-3">Volume Aferido</th>
+                    <th className="py-2.5 px-3">Desvio (ml)</th>
+                    <th className="py-2.5 px-3">Valor do Teste (R$)</th>
+                    <th className="py-2.5 px-3">Encerrante / Lacre</th>
+                    <th className="py-2.5 px-3">Responsável</th>
+                    <th className="py-2.5 px-3">Resultado</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {afericoesFiltradas.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="py-6 text-center text-slate-400">
+                        Nenhuma aferição registrada no período selecionado.
+                      </td>
+                    </tr>
+                  ) : (
+                    afericoesFiltradas.map((a) => {
+                      const desvioMl = Math.round((Number(a.diferenca) || 0) * 1000);
+                      const bicoNum = a.bicoNumero ?? (a.bicoId ? parseInt(a.bicoId.replace(/\D/g, ''), 10) : 1);
+                      const preco = resolverPrecoBico(a.bicoId, bicoNum, a.produto);
+                      const valTeste = (Number(a.volumeNominal) || 20) * preco;
+
+                      return (
+                        <tr key={a.id} className="hover:bg-slate-50">
+                          <td className="py-2 px-3 font-mono">
+                            {a.data} {a.hora}
+                          </td>
+                          <td className="py-2 px-3 font-medium text-slate-900">
+                            Bico {String(bicoNum).padStart(2, '0')} • {a.produto}
+                          </td>
+                          <td className="py-2 px-3 font-mono">{a.volumeNominal ? a.volumeNominal.toFixed(3) : '20.000'} L</td>
+                          <td className="py-2 px-3 font-mono font-bold">
+                            {a.volumeAferido ? a.volumeAferido.toFixed(3) : '20.000'} L
+                          </td>
+                          <td className="py-2 px-3 font-mono font-bold">
+                            <span
+                              className={
+                                Math.abs(desvioMl) > 100 ? 'text-red-600' : 'text-emerald-700'
+                              }
+                            >
+                              {desvioMl > 0 ? '+' : ''}
+                              {desvioMl} ml
+                            </span>
+                          </td>
+                          <td className="py-2 px-3 font-mono font-bold text-emerald-700">
+                            {formatarMoeda(valTeste)}
+                          </td>
+                          <td className="py-2 px-3 font-mono text-[11px] text-slate-600">
+                            {a.encerranteFinal ?? (a as any).encerranteLeitura ?? '—'}{' '}
+                            {a.lacreInmetro ? `• Lacre ${a.lacreInmetro}` : ''}
+                          </td>
+                          <td className="py-2 px-3">{a.responsavelNome || 'Operador'}</td>
+                          <td className="py-2 px-3">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                a.resultado === 'CONFORME'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-red-100 text-red-800'
+                              }`}
+                            >
+                              {a.resultado}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -3154,11 +3737,11 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
             className="w-full px-3 py-2 border border-blue-300 bg-blue-50/50 rounded-lg text-sm font-bold text-blue-900"
           >
             <option value="TODOS">⛽ Todos os Combustíveis</option>
-            <option value="Gasolina Comum">Gasolina Comum</option>
-            <option value="Gasolina Aditivada">Gasolina Aditivada</option>
-            <option value="Etanol Hidratado">Etanol Hidratado</option>
-            <option value="Diesel S10">Diesel S10</option>
-            <option value="Diesel S500">Diesel S500</option>
+            {listaCombustiveisDisponiveis.map((prod) => (
+              <option key={prod} value={prod}>
+                {prod}
+              </option>
+            ))}
           </select>
         </div>
 

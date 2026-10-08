@@ -153,8 +153,8 @@ export const SobrasFaltasView: React.FC<SobrasFaltasViewProps> = ({
     const matchTurnoStr = (t?: string) => {
       const val = (t || '').toLowerCase();
       if (isHorista) return val.includes('horista') || val === 'hor';
-      if (isTurno2) return val.includes('tarde') || val.includes('14h') || val.includes('turno 2 - tarde') || val === 'turno 2';
-      if (isTurno1) return val.includes('manhã') || val.includes('manha') || val.includes('06h') || val.includes('turno 1');
+      if (isTurno1) return val.includes('manhã') || val.includes('manha') || val.includes('06h') || val.includes('turno 1') || val.includes('1t') || val === 't1';
+      if (isTurno2) return val.includes('tarde') || (val.includes('14h') && !val.includes('06h')) || val.includes('turno 2') || val.includes('2t') || val === 't2';
       return val === turnoSelecionado.toLowerCase();
     };
 

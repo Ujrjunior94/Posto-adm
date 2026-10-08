@@ -278,14 +278,37 @@ export const PlannerView: React.FC<PlannerProps> = ({
     if (t.includes('adm') || t.includes('admin') || t === 'adm' || (h.startsWith('08:') && (t.includes('17h') || t.includes('18h')))) return 'ADM';
     if (t.includes('horista') || t === 'hor' || t === 'h') return 'HOR';
     if (t.includes('plantão') || t.includes('plantao') || t.includes('12x36') || t === 'plt') return 'PLT';
-    if (t.includes('noite') || t.includes('turno 3') || t === 't3' || h.startsWith('22:') || h.startsWith('23:')) {
+    if (t.includes('noite') || t.includes('turno 3') || t === 't3' || t.startsWith('3t') || h.startsWith('22:') || h.startsWith('23:')) {
       return 'T3';
     }
+    // Prioriza Turno 1 Manhã (06h - 14h / 1T / T1) para não colidir com '14h' do final de turno
+    if (
+      t.includes('turno 1') ||
+      t.includes('manhã') ||
+      t.includes('manha') ||
+      t.includes('matutino') ||
+      t === 't1' ||
+      t === '1t' ||
+      t.startsWith('1t') ||
+      t.includes('06-14') ||
+      t.includes('06h') ||
+      h.startsWith('05:') ||
+      h.startsWith('06:') ||
+      h.startsWith('07:')
+    ) {
+      return 'T1';
+    }
+    // Turno 2 Tarde (14h - 22h / 2T / T2)
     if (
       t.includes('turno 2') ||
       t.includes('tarde') ||
-      t.includes('14h') ||
+      t.includes('vespertino') ||
       t === 't2' ||
+      t === '2t' ||
+      t.startsWith('2t') ||
+      t.includes('14-22') ||
+      (t.includes('14h') && !t.includes('06h')) ||
+      h.startsWith('12:') ||
       h.startsWith('13:') ||
       h.startsWith('14:') ||
       h.startsWith('15:')

@@ -39,6 +39,7 @@ import {
   FlaskConical,
   Layers,
   ShieldCheck,
+  Clock,
 } from 'lucide-react';
 import { ModalEditarAfericao } from './ModalEditarAfericao';
 import { ModalConfigurarPrecoBico } from './ModalConfigurarPrecoBico';
@@ -82,6 +83,16 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
   const [filtroProduto, setFiltroProduto] = useState<string>('TODOS');
   const [filtroDesconto, setFiltroDesconto] = useState<'TODOS' | 'COM_DESCONTO' | 'SEM_DESCONTO'>('TODOS');
   const [buscaTexto, setBuscaTexto] = useState<string>('');
+
+  // Filtros e Agrupamento do Histórico de Aferições
+  const [agrupamentoHistoricoAfericoes, setAgrupamentoHistoricoAfericoes] = useState<
+    'COMBUSTIVEL' | 'CRONOLOGICO'
+  >('COMBUSTIVEL');
+  const [filtroCombustivelHistorico, setFiltroCombustivelHistorico] = useState<string>('TODOS');
+  const [filtroStatusHistorico, setFiltroStatusHistorico] = useState<
+    'TODOS' | 'CONFORME' | 'FORA_LIMITE'
+  >('TODOS');
+  const [buscaHistorico, setBuscaHistorico] = useState<string>('');
 
   // Modais de Aferições
   const [isModalAfericao, setIsModalAfericao] = useState(false);
@@ -349,6 +360,60 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
       return true;
     });
   }, [bicos, filtroProduto, filtroDesconto, buscaTexto]);
+
+  // Aferições filtradas para a seção de Histórico
+  const afericoesHistoricoFiltradas = useMemo(() => {
+    return afericoes.filter((a) => {
+      if (filtroCombustivelHistorico !== 'TODOS' && a.produto !== filtroCombustivelHistorico) return false;
+      const diffMl = Math.round(a.diferenca * 1000);
+      const tolMl = Math.round((a.toleranciaConfigurada || 0.1) * 1000);
+      const isOk = Math.abs(diffMl) <= tolMl;
+      if (filtroStatusHistorico === 'CONFORME' && !isOk) return false;
+      if (filtroStatusHistorico === 'FORA_LIMITE' && isOk) return false;
+      if (buscaHistorico.trim()) {
+        const q = buscaHistorico.toLowerCase();
+        const bico = bicos.find((b) => b.id === a.bicoId);
+        const func = funcionarios.find((f) => f.id === a.funcionarioId);
+        const matchData = (a.data || '').includes(q);
+        const matchProd = (a.produto || '').toLowerCase().includes(q);
+        const matchBico = String(bico?.numero || a.bicoNumero || '').includes(q);
+        const matchBomba = (bico?.bomba || '').toLowerCase().includes(q);
+        const matchFunc = (func?.nome || '').toLowerCase().includes(q);
+        if (!matchData && !matchProd && !matchBico && !matchBomba && !matchFunc) return false;
+      }
+      return true;
+    });
+  }, [afericoes, filtroCombustivelHistorico, filtroStatusHistorico, buscaHistorico, bicos, funcionarios]);
+
+  // Aferições agrupadas por combustível para o Histórico de Aferições
+  const historicoPorCombustivel = useMemo(() => {
+    const mapa = new Map<string, Afericao[]>();
+    afericoesHistoricoFiltradas.forEach((a) => {
+      const prod = a.produto || 'Combustível';
+      const lista = mapa.get(prod) || [];
+      lista.push(a);
+      mapa.set(prod, lista);
+    });
+    return Array.from(mapa.entries()).map(([produto, lista]) => {
+      const totalTestes = lista.length;
+      const conformes = lista.filter((a) => {
+        const diffMl = Math.round(a.diferenca * 1000);
+        const tolMl = Math.round((a.toleranciaConfigurada || 0.1) * 1000);
+        return Math.abs(diffMl) <= tolMl;
+      }).length;
+      const desvioTotalMl = lista.reduce((acc, a) => acc + Math.round(a.diferenca * 1000), 0);
+      const desvioMedioMl = totalTestes > 0 ? Math.round(desvioTotalMl / totalTestes) : 0;
+      const volTotal = lista.reduce((acc, a) => acc + (a.volumeAferido || 20), 0);
+      return {
+        produto,
+        totalTestes,
+        conformes,
+        desvioMedioMl,
+        volTotal,
+        lista,
+      };
+    });
+  }, [afericoesHistoricoFiltradas]);
 
   // Alternar Desconto de 1 Bico Rapidamente (Toggle 1-clique)
   const handleAlternarDescontoRapido = async (bico: Bico) => {
@@ -1755,119 +1820,373 @@ export const BicosAfericoesView: React.FC<BicosAfericoesProps> = ({
             </div>
           </div>
 
-          {/* Tabela de Histórico de Aferições */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
-              <div className="flex items-center gap-2 font-semibold text-slate-700 text-sm">
+          {/* Tabela de Histórico de Aferições com Agrupamento por Combustível e Filtros */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden space-y-0">
+            {/* Cabeçalho Principal com Seletor de Agrupamento */}
+            <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div className="flex items-center gap-2 font-semibold text-slate-800 text-sm">
                 <History className="w-4 h-4 text-slate-500" />
-                Histórico Recente de Aferições de Pista ({afericoes.length})
+                <span>Histórico de Aferições de Pista</span>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200 font-mono text-slate-700">
+                  {afericoesHistoricoFiltradas.length} de {afericoes.length}
+                </span>
               </div>
-              <button
-                type="button"
-                onClick={() => setIsModalLimparTudo(true)}
-                disabled={afericoes.length === 0}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-red-700 bg-red-50 hover:bg-red-100 rounded-lg border border-red-200 transition disabled:opacity-40 disabled:cursor-not-allowed"
-                title="Excluir todas as aferições salvas"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                Limpar Histórico
-              </button>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs text-slate-600">
-                <thead className="bg-slate-100 text-slate-700 uppercase font-semibold">
-                  <tr>
-                    <th className="px-5 py-3">Data / Hora</th>
-                    <th className="px-5 py-3">Bico / Bomba</th>
-                    <th className="px-5 py-3">Combustível</th>
-                    <th className="px-5 py-3">Responsável</th>
-                    <th className="px-5 py-3 text-right">Vol. Lido no Balde</th>
-                    <th className="px-5 py-3 text-right">Desvio Apurado</th>
-                    <th className="px-5 py-3 text-center">Faixa Inmetro</th>
-                    <th className="px-5 py-3 text-center">Status</th>
-                    <th className="px-5 py-3 text-right">Ações</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200">
-                  {afericoes.length === 0 ? (
-                    <tr>
-                      <td colSpan={9} className="px-6 py-8 text-center text-slate-400">
-                        Nenhuma aferição de 20L registrada até o momento.
-                      </td>
-                    </tr>
-                  ) : (
-                    afericoes.map((a) => {
-                      const bico = bicos.find((b) => b.id === a.bicoId);
-                      const func = funcionarios.find((f) => f.id === a.funcionarioId);
-                      const diffMl = Math.round(a.diferenca * 1000);
-                      const tolMl = Math.round((a.toleranciaConfigurada || 0.1) * 1000);
-                      const isOk = Math.abs(diffMl) <= tolMl;
 
-                      return (
-                        <tr key={a.id} className="hover:bg-slate-50 transition">
-                          <td className="px-5 py-3.5 font-mono">
-                            {a.data} {a.hora}
-                          </td>
-                          <td className="px-5 py-3.5 font-medium text-slate-800">
-                            Bico {bico?.numero || '—'} ({bico?.bomba || 'Bomba'})
-                          </td>
-                          <td className="px-5 py-3.5">{a.produto}</td>
-                          <td className="px-5 py-3.5">{func?.nome || 'Não informado'}</td>
-                          <td className="px-5 py-3.5 text-right font-mono font-bold text-slate-900">
-                            {a.volumeAferido.toFixed(3)} L
-                          </td>
-                          <td
-                            className={`px-5 py-3.5 text-right font-mono font-extrabold ${
-                              diffMl === 0
-                                ? 'text-slate-700'
-                                : isOk
-                                ? 'text-emerald-700'
-                                : 'text-red-700'
-                            }`}
-                          >
-                            {diffMl > 0 ? `+${diffMl}` : diffMl} ml
-                          </td>
-                          <td className="px-5 py-3.5 text-center font-mono text-[11px] text-slate-500">
-                            ± {tolMl} ml
-                          </td>
-                          <td className="px-5 py-3.5 text-center">
-                            {isOk ? (
-                              <span className="inline-flex items-center gap-1 text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-full text-xs font-bold border border-emerald-200">
-                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Conforme
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 text-red-800 bg-red-50 px-2.5 py-1 rounded-full text-xs font-bold border border-red-200">
-                                <XCircle className="w-3.5 h-3.5 text-red-600" /> Fora de ±{tolMl}ml
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-5 py-3.5 text-right">
-                            <div className="flex items-center justify-end gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => handleEditarAfericao(a)}
-                                className="p-1.5 text-slate-600 hover:text-amber-700 hover:bg-amber-50 rounded-lg transition border border-transparent hover:border-amber-200"
-                                title="Editar Aferição"
-                              >
-                                <Pencil className="w-4 h-4" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleSolicitarExclusao(a)}
-                                className="p-1.5 text-slate-400 hover:text-red-700 hover:bg-red-50 rounded-lg transition border border-transparent hover:border-red-200"
-                                title="Excluir Aferição"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Seletor de Agrupamento */}
+                <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-slate-200 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setAgrupamentoHistoricoAfericoes('COMBUSTIVEL')}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded font-bold transition cursor-pointer ${
+                      agrupamentoHistoricoAfericoes === 'COMBUSTIVEL'
+                        ? 'bg-blue-600 text-white shadow-2xs'
+                        : 'text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <Fuel className="w-3.5 h-3.5" />
+                    Agrupar por Combustível
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAgrupamentoHistoricoAfericoes('CRONOLOGICO')}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded font-bold transition cursor-pointer ${
+                      agrupamentoHistoricoAfericoes === 'CRONOLOGICO'
+                        ? 'bg-blue-600 text-white shadow-2xs'
+                        : 'text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <Clock className="w-3.5 h-3.5" />
+                    Lista Corrida
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsModalLimparTudo(true)}
+                  disabled={afericoes.length === 0}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-red-700 bg-red-50 hover:bg-red-100 rounded-lg border border-red-200 transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  title="Excluir todas as aferições salvas"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Limpar Histórico
+                </button>
+              </div>
             </div>
+
+            {/* Barra de Filtros: Combustível, Status e Busca */}
+            <div className="p-3 bg-slate-50/60 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-2.5 text-xs">
+              <div className="flex flex-wrap items-center gap-1.5 overflow-x-auto">
+                <span className="text-[11px] font-bold uppercase text-slate-500 mr-1 flex items-center gap-1">
+                  <Filter className="w-3 h-3 text-slate-400" />
+                  Combustível:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setFiltroCombustivelHistorico('TODOS')}
+                  className={`px-2.5 py-1 rounded-full text-xs font-semibold transition cursor-pointer ${
+                    filtroCombustivelHistorico === 'TODOS'
+                      ? 'bg-blue-600 text-white font-bold'
+                      : 'bg-white text-slate-700 hover:bg-slate-200 border border-slate-200'
+                  }`}
+                >
+                  Todos ({afericoes.length})
+                </button>
+                {produtosExistentes.map((prod) => {
+                  const qtd = afericoes.filter((a) => a.produto === prod).length;
+                  const isSel = filtroCombustivelHistorico === prod;
+                  return (
+                    <button
+                      key={prod}
+                      type="button"
+                      onClick={() => setFiltroCombustivelHistorico(isSel ? 'TODOS' : prod)}
+                      className={`px-2.5 py-1 rounded-full text-xs font-semibold transition flex items-center gap-1 cursor-pointer ${
+                        isSel
+                          ? 'bg-blue-600 text-white font-bold'
+                          : 'bg-white text-slate-700 hover:bg-slate-200 border border-slate-200'
+                      }`}
+                    >
+                      <span>{prod}</span>
+                      <span className={`text-[10px] px-1 rounded-full font-mono ${isSel ? 'bg-blue-700 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                        {qtd}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                {/* Filtro Status */}
+                <div className="flex items-center gap-1 bg-white p-0.5 rounded-lg border border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setFiltroStatusHistorico('TODOS')}
+                    className={`px-2 py-1 rounded text-xs font-semibold cursor-pointer ${
+                      filtroStatusHistorico === 'TODOS'
+                        ? 'bg-slate-800 text-white'
+                        : 'text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    Todos
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFiltroStatusHistorico('CONFORME')}
+                    className={`px-2 py-1 rounded text-xs font-semibold cursor-pointer ${
+                      filtroStatusHistorico === 'CONFORME'
+                        ? 'bg-emerald-600 text-white'
+                        : 'text-emerald-700 hover:bg-emerald-50'
+                    }`}
+                  >
+                    ✓ Conf.
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFiltroStatusHistorico('FORA_LIMITE')}
+                    className={`px-2 py-1 rounded text-xs font-semibold cursor-pointer ${
+                      filtroStatusHistorico === 'FORA_LIMITE'
+                        ? 'bg-red-600 text-white'
+                        : 'text-red-700 hover:bg-red-50'
+                    }`}
+                  >
+                    ⚠ Fora
+                  </button>
+                </div>
+
+                {/* Busca */}
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-2 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Buscar aferição..."
+                    value={buscaHistorico}
+                    onChange={(e) => setBuscaHistorico(e.target.value)}
+                    className="pl-8 pr-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs w-36 sm:w-44 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Renderização Agrupada por Combustível */}
+            {agrupamentoHistoricoAfericoes === 'COMBUSTIVEL' ? (
+              <div className="divide-y divide-slate-200">
+                {historicoPorCombustivel.length === 0 ? (
+                  <div className="px-6 py-10 text-center text-slate-400 text-xs">
+                    Nenhuma aferição de 20L encontrada com os filtros selecionados.
+                  </div>
+                ) : (
+                  historicoPorCombustivel.map((grupo) => (
+                    <div key={grupo.produto} className="p-4 space-y-3">
+                      {/* Banner do Combustível */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-gradient-to-r from-slate-900 to-slate-800 text-white p-3 rounded-lg">
+                        <div className="flex items-center gap-2.5">
+                          <Fuel className="w-4 h-4 text-blue-400" />
+                          <h5 className="font-bold text-xs tracking-wide">{grupo.produto}</h5>
+                          <span className="text-[11px] text-slate-300">
+                            • {grupo.totalTestes} teste(s) ({grupo.volTotal.toFixed(3)} L aferidos)
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="px-2 py-0.5 rounded bg-white/10 font-mono text-[11px]">
+                            Desvio médio: {grupo.desvioMedioMl > 0 ? '+' : ''}{grupo.desvioMedioMl} ml
+                          </span>
+                          <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
+                            {grupo.conformes} de {grupo.totalTestes} conf.
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Tabela dos Ensaios daquele Combustível */}
+                      <div className="overflow-x-auto border border-slate-200 rounded-lg">
+                        <table className="w-full text-left text-xs text-slate-600">
+                          <thead className="bg-slate-100 text-slate-700 uppercase font-semibold text-[11px]">
+                            <tr>
+                              <th className="px-4 py-2.5">Data / Hora</th>
+                              <th className="px-4 py-2.5">Bico / Bomba</th>
+                              <th className="px-4 py-2.5">Responsável</th>
+                              <th className="px-4 py-2.5 text-right">Vol. Lido</th>
+                              <th className="px-4 py-2.5 text-right">Desvio</th>
+                              <th className="px-4 py-2.5 text-center">Faixa</th>
+                              <th className="px-4 py-2.5 text-center">Status</th>
+                              <th className="px-4 py-2.5 text-right">Ações</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {grupo.lista.map((a) => {
+                              const bico = bicos.find((b) => b.id === a.bicoId);
+                              const func = funcionarios.find((f) => f.id === a.funcionarioId);
+                              const diffMl = Math.round(a.diferenca * 1000);
+                              const tolMl = Math.round((a.toleranciaConfigurada || 0.1) * 1000);
+                              const isOk = Math.abs(diffMl) <= tolMl;
+
+                              return (
+                                <tr key={a.id} className="hover:bg-slate-50 transition">
+                                  <td className="px-4 py-2.5 font-mono text-slate-700">
+                                    {a.data} {a.hora}
+                                  </td>
+                                  <td className="px-4 py-2.5 font-bold text-slate-900">
+                                    Bico {bico?.numero || a.bicoNumero || '—'}
+                                    <span className="block text-[10px] font-normal text-slate-500">
+                                      {bico?.bomba || 'Bomba'}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-2.5">{func?.nome || a.responsavelNome || 'Operador'}</td>
+                                  <td className="px-4 py-2.5 text-right font-mono font-bold text-slate-900">
+                                    {a.volumeAferido.toFixed(3)} L
+                                  </td>
+                                  <td
+                                    className={`px-4 py-2.5 text-right font-mono font-extrabold ${
+                                      diffMl === 0
+                                        ? 'text-slate-700'
+                                        : isOk
+                                        ? 'text-emerald-700'
+                                        : 'text-red-700'
+                                    }`}
+                                  >
+                                    {diffMl > 0 ? `+${diffMl}` : diffMl} ml
+                                  </td>
+                                  <td className="px-4 py-2.5 text-center font-mono text-[10px] text-slate-500">
+                                    ± {tolMl} ml
+                                  </td>
+                                  <td className="px-4 py-2.5 text-center">
+                                    {isOk ? (
+                                      <span className="inline-flex items-center gap-1 text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full text-[11px] font-bold border border-emerald-200">
+                                        <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Conforme
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 text-red-800 bg-red-50 px-2 py-0.5 rounded-full text-[11px] font-bold border border-red-200">
+                                        <XCircle className="w-3 h-3 text-red-600" /> Fora de ±{tolMl}ml
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="px-4 py-2.5 text-right">
+                                    <div className="flex items-center justify-end gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleEditarAfericao(a)}
+                                        className="p-1 text-slate-600 hover:text-amber-700 hover:bg-amber-50 rounded transition"
+                                        title="Editar Aferição"
+                                      >
+                                        <Pencil className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleSolicitarExclusao(a)}
+                                        className="p-1 text-slate-400 hover:text-red-700 hover:bg-red-50 rounded transition"
+                                        title="Excluir Aferição"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : (
+              /* Renderização em Lista Corrida / Cronológica */
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-slate-600">
+                  <thead className="bg-slate-100 text-slate-700 uppercase font-semibold text-[11px]">
+                    <tr>
+                      <th className="px-5 py-3">Data / Hora</th>
+                      <th className="px-5 py-3">Bico / Bomba</th>
+                      <th className="px-5 py-3">Combustível</th>
+                      <th className="px-5 py-3">Responsável</th>
+                      <th className="px-5 py-3 text-right">Vol. Lido no Balde</th>
+                      <th className="px-5 py-3 text-right">Desvio Apurado</th>
+                      <th className="px-5 py-3 text-center">Faixa Inmetro</th>
+                      <th className="px-5 py-3 text-center">Status</th>
+                      <th className="px-5 py-3 text-right">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {afericoesHistoricoFiltradas.length === 0 ? (
+                      <tr>
+                        <td colSpan={9} className="px-6 py-8 text-center text-slate-400">
+                          Nenhuma aferição de 20L encontrada com os filtros selecionados.
+                        </td>
+                      </tr>
+                    ) : (
+                      afericoesHistoricoFiltradas.map((a) => {
+                        const bico = bicos.find((b) => b.id === a.bicoId);
+                        const func = funcionarios.find((f) => f.id === a.funcionarioId);
+                        const diffMl = Math.round(a.diferenca * 1000);
+                        const tolMl = Math.round((a.toleranciaConfigurada || 0.1) * 1000);
+                        const isOk = Math.abs(diffMl) <= tolMl;
+
+                        return (
+                          <tr key={a.id} className="hover:bg-slate-50 transition">
+                            <td className="px-5 py-3.5 font-mono">
+                              {a.data} {a.hora}
+                            </td>
+                            <td className="px-5 py-3.5 font-medium text-slate-800">
+                              Bico {bico?.numero || a.bicoNumero || '—'} ({bico?.bomba || 'Bomba'})
+                            </td>
+                            <td className="px-5 py-3.5 font-semibold text-slate-900">{a.produto}</td>
+                            <td className="px-5 py-3.5">{func?.nome || a.responsavelNome || 'Não informado'}</td>
+                            <td className="px-5 py-3.5 text-right font-mono font-bold text-slate-900">
+                              {a.volumeAferido.toFixed(3)} L
+                            </td>
+                            <td
+                              className={`px-5 py-3.5 text-right font-mono font-extrabold ${
+                                diffMl === 0
+                                  ? 'text-slate-700'
+                                  : isOk
+                                  ? 'text-emerald-700'
+                                  : 'text-red-700'
+                              }`}
+                            >
+                              {diffMl > 0 ? `+${diffMl}` : diffMl} ml
+                            </td>
+                            <td className="px-5 py-3.5 text-center font-mono text-[11px] text-slate-500">
+                              ± {tolMl} ml
+                            </td>
+                            <td className="px-5 py-3.5 text-center">
+                              {isOk ? (
+                                <span className="inline-flex items-center gap-1 text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-full text-xs font-bold border border-emerald-200">
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Conforme
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-red-800 bg-red-50 px-2.5 py-1 rounded-full text-xs font-bold border border-red-200">
+                                  <XCircle className="w-3.5 h-3.5 text-red-600" /> Fora de ±{tolMl}ml
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-5 py-3.5 text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleEditarAfericao(a)}
+                                  className="p-1.5 text-slate-600 hover:text-amber-700 hover:bg-amber-50 rounded-lg transition border border-transparent hover:border-amber-200 cursor-pointer"
+                                  title="Editar Aferição"
+                                >
+                                  <Pencil className="w-4 h-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSolicitarExclusao(a)}
+                                  className="p-1.5 text-slate-400 hover:text-red-700 hover:bg-red-50 rounded-lg transition border border-transparent hover:border-red-200 cursor-pointer"
+                                  title="Excluir Aferição"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}

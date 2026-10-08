@@ -350,4 +350,5 @@ REGRAS DE LEITURA DA IMAGEM:
 }
 
 export const openRouterProvider = new OpenRouterProvider();
+export { DeepSeekProvider, defaultDeepSeekProvider } from './ai/deepseekProvider';
 export const defaultAIProvider: AIProvider = openRouterProvider;

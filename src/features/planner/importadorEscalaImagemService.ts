@@ -397,8 +397,23 @@ export function resolveShift(
     }
   }
 
-  // 4. Reconhecimento de horários ou siglas padrão (06-14, 14-22, 22-06, horista, plantão)
-  if (norm.includes('06') && norm.includes('14')) {
+  // 4. Reconhecimento prioritário e rigoroso de 1T (Manhã) vs 2T (Tarde) e horários oficiais
+  if (
+    norm === '1t' ||
+    norm === 't1' ||
+    norm === '1' ||
+    norm === 't01' ||
+    norm === '1o t' ||
+    norm === '1ot' ||
+    norm === 'manha' ||
+    norm === 'matutino' ||
+    norm.includes('turno 1') ||
+    norm.includes('1 turno') ||
+    norm.includes('1t') ||
+    norm.includes('06-14') ||
+    norm.includes('06h') ||
+    (norm.includes('06') && norm.includes('14'))
+  ) {
     const t1 = shifts.find((t) => t.sigla === 'T1') || shifts[0];
     return {
       status: 'MATCH',
@@ -408,12 +423,28 @@ export function resolveShift(
       isFolga: false,
       horarioInicio: t1.inicio,
       horarioFim: t1.fim,
-      confidence: 0.92,
-      observation: `Horário 06h-14h associado ao ${t1.nomeCurto}.`,
+      confidence: 0.96,
+      observation: `Turno 1 Manhã (${t1.inicio} às ${t1.fim}) validado com sucesso.`,
     };
   }
 
-  if (norm.includes('14') && norm.includes('22')) {
+  if (
+    norm === '2t' ||
+    norm === 't2' ||
+    norm === '2' ||
+    norm === 't02' ||
+    norm === '2o t' ||
+    norm === '2ot' ||
+    norm === 'tarde' ||
+    norm === 'tar' ||
+    norm === 'vespertino' ||
+    norm.includes('turno 2') ||
+    norm.includes('2 turno') ||
+    norm.includes('2t') ||
+    norm.includes('14-22') ||
+    (norm.includes('14h') && !norm.includes('06h')) ||
+    (norm.includes('14') && norm.includes('22'))
+  ) {
     const t2 = shifts.find((t) => t.sigla === 'T2') || shifts[1];
     return {
       status: 'MATCH',
@@ -423,8 +454,8 @@ export function resolveShift(
       isFolga: false,
       horarioInicio: t2.inicio,
       horarioFim: t2.fim,
-      confidence: 0.92,
-      observation: `Horário 14h-22h associado ao ${t2.nomeCurto}.`,
+      confidence: 0.96,
+      observation: `Turno 2 Tarde (${t2.inicio} às ${t2.fim}) validado com sucesso.`,
     };
   }
 

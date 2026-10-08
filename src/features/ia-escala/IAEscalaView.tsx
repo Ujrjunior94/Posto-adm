@@ -241,19 +241,52 @@ export const normalizarTurno = (
     };
   }
 
-  // Turno 2: Tarde (14h - 22h)
+  // Turno 1: Manhã (06h - 14h / 1T / T1)
+  if (
+    t === '1' ||
+    t === '1t' ||
+    t === 't1' ||
+    t === 't01' ||
+    t === '1ºt' ||
+    t === '1°t' ||
+    t.includes('turno 1') ||
+    t.includes('turno1') ||
+    t.includes('1 turno') ||
+    t.includes('manha') ||
+    t.includes('manhã') ||
+    t.includes('matutino') ||
+    t.includes('06-14') ||
+    t.includes('06h') ||
+    t.includes('06:00') ||
+    inicioLimpo.startsWith('05:') ||
+    inicioLimpo.startsWith('06:') ||
+    inicioLimpo.startsWith('07:')
+  ) {
+    const hIni = inicioLimpo || '06:00';
+    const hFim = fimLimpo || '14:00';
+    return {
+      turno: 'Turno 1 - Manhã (06h - 14h)',
+      horarioInicio: hIni,
+      horarioFim: hFim,
+    };
+  }
+
+  // Turno 2: Tarde (14h - 22h / 2T / T2)
   if (
     t === '2' ||
     t === '2t' ||
     t === 't2' ||
     t === 't02' ||
+    t === '2ºt' ||
+    t === '2°t' ||
     t.includes('turno 2') ||
     t.includes('turno2') ||
+    t.includes('2 turno') ||
     t.includes('14-22') ||
-    t.includes('14h') ||
-    t.includes('14:00') ||
+    (t.includes('14h') && !t.includes('06h')) ||
     t.includes('tarde') ||
     t === 'tar' ||
+    t.includes('vespertino') ||
     inicioLimpo.startsWith('12:') ||
     inicioLimpo.startsWith('13:') ||
     inicioLimpo.startsWith('14:') ||
@@ -263,7 +296,7 @@ export const normalizarTurno = (
     const hIni = inicioLimpo || '14:00';
     const hFim = fimLimpo || '22:00';
     return {
-      turno: hIni === '14:00' && hFim === '22:00' ? 'Turno 2 - Tarde (14h - 22h)' : `Tarde (${hIni} - ${hFim})`,
+      turno: 'Turno 2 - Tarde (14h - 22h)',
       horarioInicio: hIni,
       horarioFim: hFim,
     };
@@ -429,8 +462,8 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
   const [salvandoNoPlanner, setSalvandoNoPlanner] = useState(false);
   const [sucessoSalvo, setSucessoSalvo] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [motorIA, setMotorIA] = useState<'gemini'>('gemini');
-  const [motorUtilizadoResposta, setMotorUtilizadoResposta] = useState<string>('OpenRouter API');
+  const [motorIA, setMotorIA] = useState<'deepseek' | 'openrouter' | 'gemini'>('deepseek');
+  const [motorUtilizadoResposta, setMotorUtilizadoResposta] = useState<string>('DeepSeek AI');
 
   // Timer para feedback em tempo real durante processamento do endpoint /api/analyze-schedule-image
   useEffect(() => {
@@ -702,7 +735,9 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
 
     setProcessando(true);
     setMensagemStatus(
-      '1/3 Enviando imagem Base64 para o endpoint /api/analyze-schedule-image (OpenRouter multimodal)...'
+      motorIA === 'deepseek'
+        ? '1/3 Reconhecendo escala com DeepSeek AI (extração estruturada e raciocínio de turnos)...'
+        : '1/3 Enviando imagem Base64 para o endpoint /api/analyze-schedule-image...'
     );
     setErroProcessamento('');
     setSucessoSalvo(false);
@@ -1211,9 +1246,9 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
         let proxIdx = 0;
         if (itemAtual.status === 'FOLGA' || itemAtual.turno === 'Folga') {
           proxIdx = 0; // Vai para Turno 1 (Manhã)
-        } else if (itemAtual.turno.includes('Turno 1') || itemAtual.turno.includes('Manhã') || itemAtual.turno.includes('06h')) {
+        } else if (itemAtual.turno.includes('Turno 1') || itemAtual.turno.includes('Manhã') || itemAtual.turno.includes('06h') || itemAtual.turno.includes('1T')) {
           proxIdx = 1; // Vai para Turno 2 (Tarde)
-        } else if (itemAtual.turno.includes('Turno 2') || itemAtual.turno.includes('Tarde') || itemAtual.turno.includes('14h')) {
+        } else if (itemAtual.turno.includes('Turno 2') || itemAtual.turno.includes('Tarde') || itemAtual.turno.includes('2T') || (itemAtual.turno.includes('14h') && !itemAtual.turno.includes('06h'))) {
           proxIdx = 2; // Vai para Turno Horista
         } else {
           proxIdx = 3; // Vai para Folga
@@ -1539,10 +1574,10 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
     const totalTrabalho = itensEscala.filter((i) => i.status === 'TRABALHO').length;
     const totalFolga = itensEscala.filter((i) => i.status === 'FOLGA').length;
     const totalT1 = itensEscala.filter(
-      (i) => i.status === 'TRABALHO' && (i.turno.includes('Turno 1') || i.turno.includes('Manhã') || i.turno.includes('06h'))
+      (i) => i.status === 'TRABALHO' && (i.turno.includes('Turno 1') || i.turno.includes('Manhã') || i.turno.includes('06h') || i.turno.includes('1T'))
     ).length;
     const totalT2 = itensEscala.filter(
-      (i) => i.status === 'TRABALHO' && (i.turno.includes('Turno 2') || i.turno.includes('Tarde') || i.turno.includes('14h'))
+      (i) => i.status === 'TRABALHO' && (i.turno.includes('Turno 2') || i.turno.includes('Tarde') || i.turno.includes('2T') || (i.turno.includes('14h') && !i.turno.includes('06h')))
     ).length;
     const totalHorista = itensEscala.filter(
       (i) => i.status === 'TRABALHO' && i.turno.includes('Horista')
@@ -1972,52 +2007,101 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
               )}
             </div>
 
-            {/* Seletor e Indicador do Endpoint de IA */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-gradient-to-r from-purple-50 to-indigo-50/70 p-3.5 rounded-xl border border-purple-200 shadow-2xs">
-              <div className="text-xs">
-                <span className="font-bold text-slate-800 flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-                  Endpoint de Leitura Visual:
-                </span>
-                <p className="text-[11px] text-slate-600 font-mono mt-0.5">
-                  POST /api/analyze-schedule-image (OpenRouter multimodal)
-                </p>
+            {/* Seletor e Indicador do Motor de IA com DeepSeek */}
+            <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 p-4 rounded-xl border border-blue-200 shadow-2xs space-y-3">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
+                <div>
+                  <span className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                    Motor de Reconhecimento e Raciocínio de Escala:
+                  </span>
+                  <p className="text-[11px] text-slate-600 font-mono mt-0.5">
+                    {motorIA === 'deepseek'
+                      ? 'POST /api/deepseek/analyze-schedule (DeepSeek AI Engine)'
+                      : motorIA === 'openrouter'
+                      ? 'POST /api/analyze-schedule-image (OpenRouter multimodal)'
+                      : 'POST /api/gemini/escala-ocr (Google Gemini Vision)'}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1.5 bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span>{motorIA === 'deepseek' ? '🐋 DeepSeek Ativo' : motorIA === 'openrouter' ? 'OpenRouter API' : 'Gemini Vision'}</span>
+                </div>
               </div>
-              <div className="flex items-center gap-1.5 bg-purple-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                <span>OpenRouter Multimodal API</span>
+
+              {/* Botões seletores de motor de IA */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 border-t border-blue-100">
+                <button
+                  type="button"
+                  onClick={() => setMotorIA('deepseek')}
+                  className={`px-3 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
+                    motorIA === 'deepseek'
+                      ? 'bg-blue-600 text-white shadow-xs border border-blue-700'
+                      : 'bg-white text-slate-700 hover:bg-blue-50 border border-slate-200'
+                  }`}
+                >
+                  <span>🐋</span>
+                  <span>DeepSeek AI</span>
+                  <span className="text-[10px] bg-blue-100 text-blue-900 px-1.5 py-0.2 rounded font-semibold ml-1">
+                    Recomendado
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMotorIA('openrouter')}
+                  className={`px-3 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
+                    motorIA === 'openrouter'
+                      ? 'bg-purple-600 text-white shadow-xs border border-purple-700'
+                      : 'bg-white text-slate-700 hover:bg-purple-50 border border-slate-200'
+                  }`}
+                >
+                  <span>⚡</span>
+                  <span>OpenRouter Multimodal</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMotorIA('gemini')}
+                  className={`px-3 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
+                    motorIA === 'gemini'
+                      ? 'bg-amber-600 text-white shadow-xs border border-amber-700'
+                      : 'bg-white text-slate-700 hover:bg-amber-50 border border-slate-200'
+                  }`}
+                >
+                  <span>✨</span>
+                  <span>Google Gemini Vision</span>
+                </button>
               </div>
             </div>
 
-            {/* Estado de Carregamento em Tempo Real do Endpoint /api/analyze-schedule-image */}
+            {/* Estado de Carregamento em Tempo Real */}
             {processando && (
-              <div className="bg-gradient-to-br from-indigo-50 via-purple-50 to-blue-50 border-2 border-purple-300 rounded-xl p-5 text-center space-y-3.5 shadow-sm">
+              <div className="bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 border-2 border-blue-300 rounded-xl p-5 text-center space-y-3.5 shadow-sm">
                 <div className="relative inline-flex items-center justify-center">
-                  <div className="w-12 h-12 border-3 border-purple-200 border-t-purple-600 rounded-full animate-spin"></div>
-                  <Sparkles className="w-5 h-5 text-purple-600 absolute animate-pulse" />
+                  <div className="w-12 h-12 border-3 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
+                  <Sparkles className="w-5 h-5 text-blue-600 absolute animate-pulse" />
                 </div>
                 <div>
                   <h4 className="text-sm font-bold text-slate-900 flex items-center justify-center gap-2">
-                    <span>Processando Imagem da Escala</span>
-                    <span className="text-[11px] font-mono bg-purple-100 text-purple-800 px-2 py-0.5 rounded border border-purple-200">
-                      /api/analyze-schedule-image
+                    <span>Reconhecendo Escala com {motorIA === 'deepseek' ? 'DeepSeek AI' : 'IA Multimodal'}</span>
+                    <span className="text-[11px] font-mono bg-blue-100 text-blue-800 px-2 py-0.5 rounded border border-blue-200">
+                      {motorIA === 'deepseek' ? '/api/deepseek/analyze-schedule' : '/api/analyze-schedule-image'}
                     </span>
                   </h4>
                   <p className="text-xs text-slate-600 mt-1 max-w-sm mx-auto font-medium">
-                    {mensagemStatus || 'Enviando imagem Base64 e aguardando resposta da API do OpenRouter...'}
+                    {mensagemStatus || 'Processando imagem e estruturando turnos...'}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center justify-center gap-2 text-xs font-mono text-slate-600">
-                  <span className="bg-white px-2.5 py-1 rounded-full border border-purple-200 shadow-2xs font-semibold text-purple-900">
+                  <span className="bg-white px-2.5 py-1 rounded-full border border-blue-200 shadow-2xs font-semibold text-blue-900">
                     ⏱️ Tempo decorrido: {tempoDecorrido}s
                   </span>
-                  <span className="bg-white px-2.5 py-1 rounded-full border border-purple-200 shadow-2xs font-semibold text-purple-900">
+                  <span className="bg-white px-2.5 py-1 rounded-full border border-blue-200 shadow-2xs font-semibold text-blue-900">
                     📡 Status: HTTP 200 OK em andamento
                   </span>
                 </div>
                 {/* Barra de progresso animada */}
-                <div className="w-full bg-purple-200/70 h-2 rounded-full overflow-hidden">
-                  <div className="bg-purple-600 h-full w-2/3 rounded-full animate-pulse"></div>
+                <div className="w-full bg-blue-200/70 h-2 rounded-full overflow-hidden">
+                  <div className="bg-blue-600 h-full w-2/3 rounded-full animate-pulse"></div>
                 </div>
               </div>
             )}
@@ -2027,17 +2111,19 @@ export const IAEscalaView: React.FC<IAEscalaViewProps> = ({
               <button
                 onClick={handleProcessarComIA}
                 disabled={processando}
-                className="w-full py-3.5 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl text-sm transition flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer"
+                className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-sm transition flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer"
               >
                 {processando ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    Processando via /api/analyze-schedule-image ({tempoDecorrido}s)...
+                    Reconhecendo via {motorIA === 'deepseek' ? 'DeepSeek AI' : 'IA'} ({tempoDecorrido}s)...
                   </>
                 ) : (
                   <>
                     <Sparkles className="w-4 h-4 text-emerald-300" />
-                    Analisar Escala via /api/analyze-schedule-image
+                    {motorIA === 'deepseek'
+                      ? '🐋 Analisar e Reconhecer Escala com DeepSeek'
+                      : 'Analisar Escala via IA'}
                   </>
                 )}
               </button>

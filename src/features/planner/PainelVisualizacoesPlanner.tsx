@@ -110,14 +110,37 @@ export const obterMetaTurnoCompleta = (esc: Partial<Escala>) => {
     };
   }
 
-  // Turno 2 - Tarde (14h - 22h)
+  // Turno 1 - Manhã (06h - 14h / 1T / T1)
+  if (
+    t.includes('turno 1') ||
+    t.includes('manhã') ||
+    t.includes('manha') ||
+    t.includes('matutino') ||
+    t.includes('1t') ||
+    t === 't1' ||
+    t === '1' ||
+    t.includes('06h') ||
+    t.includes('06-14') ||
+    (hIni.startsWith('05:') || hIni.startsWith('06:') || hIni.startsWith('07:'))
+  ) {
+    return {
+      cor: 'bg-amber-100 text-amber-900 border-amber-300',
+      icone: Sunrise,
+      nome: 'Turno 1 — Manhã (06h–14h)',
+      sigla: 'T1',
+    };
+  }
+
+  // Turno 2 - Tarde (14h - 22h / 2T / T2)
   if (
     t.includes('tarde') ||
     t.includes('vespertino') ||
-    t.includes('14h') ||
     t.includes('turno 2') ||
     t.includes('2t') ||
     t === 't2' ||
+    t === '2' ||
+    t.includes('14-22') ||
+    (t.includes('14h') && !t.includes('06h')) ||
     hIni.startsWith('12:') ||
     hIni.startsWith('13:') ||
     hIni.startsWith('14:') ||

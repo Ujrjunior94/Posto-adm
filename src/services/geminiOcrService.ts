@@ -307,7 +307,7 @@ export interface EscalaOcrRequestPayload {
   imageBase64: string;
   mimeType?: string;
   mesAnoReferencia?: string;
-  motor?: 'gemini';
+  motor?: 'deepseek' | 'gemini' | 'openrouter';
   funcionariosCadastrados?: Array<{
     id: string;
     nome: string;
@@ -1300,7 +1300,10 @@ export async function requisitarLeituraEscalaOCR(payload: EscalaOcrRequestPayloa
 
   let ultimoErro = '';
 
-  const endpoints = ['/api/analyze-schedule-image', '/api/gemini/escala-ocr'];
+  const endpoints =
+    payload.motor === 'deepseek'
+      ? ['/api/deepseek/analyze-schedule', '/api/analyze-schedule-image', '/api/gemini/escala-ocr']
+      : ['/api/analyze-schedule-image', '/api/deepseek/analyze-schedule', '/api/gemini/escala-ocr'];
 
   for (const endpoint of endpoints) {
     try {
@@ -1314,6 +1317,8 @@ export async function requisitarLeituraEscalaOCR(payload: EscalaOcrRequestPayloa
           imageBase64: optimizedPayload.imageBase64,
           mimeType: optimizedPayload.mimeType || 'image/jpeg',
           mesAnoReferencia: optimizedPayload.mesAnoReferencia,
+          engine: payload.motor || 'deepseek',
+          provider: payload.motor || 'deepseek',
         }),
         signal: controller.signal,
       });

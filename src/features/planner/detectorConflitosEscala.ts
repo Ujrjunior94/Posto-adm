@@ -88,19 +88,38 @@ export function normalizarSiglaTurno(turno?: string, horarioInicio?: string): st
   if (t.includes('noite') || t.includes('turno 3') || t === 't3' || h.startsWith('22:') || h.startsWith('23:')) {
     return 'T3';
   }
+  // T1 - Manhã (06h - 14h / 1T / T1)
+  if (
+    t.includes('turno 1') ||
+    t.includes('manhã') ||
+    t.includes('manha') ||
+    t.includes('1t') ||
+    t === 't1' ||
+    t === '1' ||
+    t.includes('06h') ||
+    t.includes('06-14') ||
+    h.startsWith('05:') ||
+    h.startsWith('06:') ||
+    h.startsWith('07:')
+  ) {
+    return 'T1';
+  }
+  // T2 - Tarde (14h - 22h / 2T / T2)
   if (
     t.includes('turno 2') ||
     t.includes('tarde') ||
-    t.includes('14h') ||
+    t.includes('vespertino') ||
+    t.includes('2t') ||
     t === 't2' ||
+    t === '2' ||
+    t.includes('14-22') ||
+    (t.includes('14h') && !t.includes('06h')) ||
+    h.startsWith('12:') ||
     h.startsWith('13:') ||
     h.startsWith('14:') ||
     h.startsWith('15:')
   ) {
     return 'T2';
-  }
-  if (t.includes('turno 1') || t.includes('manhã') || t.includes('manha') || t === 't1' || h.startsWith('06:') || h.startsWith('07:') || h.startsWith('08:')) {
-    return 'T1';
   }
   return 'T1';
 }

@@ -37,7 +37,24 @@ export const FuncionariosView: React.FC<FuncionariosViewProps> = ({ funcionarios
     const val = (t || '').toLowerCase();
     if (val.includes('adm') || val.includes('admin') || val === 'adm') return 'Turno ADM (08h - 17h)';
     if (val.includes('horista') || val === 'hor' || val === 'h') return 'Turno Horista';
-    if (val.includes('tarde') || val.includes('14h') || val.includes('turno 2') || val === 't2') {
+    if (
+      val.includes('turno 1') ||
+      val.includes('manhã') ||
+      val.includes('manha') ||
+      val.includes('1t') ||
+      val === 't1' ||
+      val.includes('06h') ||
+      val.includes('06-14')
+    ) {
+      return 'Turno 1 - Manhã (06h - 14h)';
+    }
+    if (
+      val.includes('tarde') ||
+      val.includes('turno 2') ||
+      val === 't2' ||
+      val.includes('2t') ||
+      (val.includes('14h') && !val.includes('06h'))
+    ) {
       return 'Turno 2 - Tarde (14h - 22h)';
     }
     if (val.includes('folga') || val === 's' || val === 'dsr' || val === 'fol') return 'Folga';
