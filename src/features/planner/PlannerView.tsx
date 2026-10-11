@@ -222,6 +222,40 @@ export const PlannerView: React.FC<PlannerProps> = ({
     }
   };
 
+  const [limpandoPlanner, setLimpandoPlanner] = useState(false);
+
+  const handleLimparPlannerMes = async () => {
+    const escalasMesAtual = escalas.filter((e) => e.data && e.data.startsWith(mesAnoStr));
+    if (escalasMesAtual.length === 0) {
+      setMensagemUndo({ tipo: 'erro', texto: 'Não há registros de escala neste mês para limpar.' });
+      setTimeout(() => setMensagemUndo(null), 5000);
+      return;
+    }
+    const confirmado = window.confirm(
+      `Deseja realmente limpar todos os ${escalasMesAtual.length} registros de escala do mês ${monthName}? Esta ação excluirá permanentemente os lançamentos deste mês.`
+    );
+    if (!confirmado) return;
+
+    setLimpandoPlanner(true);
+    try {
+      const idsParaExcluir = escalasMesAtual.map((e) => e.id);
+      await repoEscala.deleteBatch(postoId, idsParaExcluir);
+      setMensagemUndo({
+        tipo: 'sucesso',
+        texto: `Escala do mês ${monthName} limpa com sucesso (${idsParaExcluir.length} registros removidos).`,
+      });
+      await onReload();
+    } catch (err: any) {
+      setMensagemUndo({
+        tipo: 'erro',
+        texto: `Erro ao limpar Planner: ${err?.message || 'Falha na operação'}`,
+      });
+    } finally {
+      setLimpandoPlanner(false);
+      setTimeout(() => setMensagemUndo(null), 6000);
+    }
+  };
+
   // Modal Escanear Imagem da Escala e Vincular no Planner
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [imagemEscalaBase64, setImagemEscalaBase64] = useState<string | null>(null);
@@ -1251,6 +1285,17 @@ export const PlannerView: React.FC<PlannerProps> = ({
           >
             <Zap className="w-3.5 h-3.5" />
             {salvandoAuto ? 'Processando...' : 'Gerar Escala 6x1'}
+          </button>
+
+          <button
+            type="button"
+            disabled={limpandoPlanner || escalas.filter((e) => e.data && e.data.startsWith(mesAnoStr)).length === 0}
+            onClick={handleLimparPlannerMes}
+            title="Limpar todos os registros de escala do mês atual"
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs font-bold rounded-lg transition cursor-pointer disabled:opacity-50"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            {limpandoPlanner ? 'Limpando...' : 'Limpar Planner'}
           </button>
 
           <button

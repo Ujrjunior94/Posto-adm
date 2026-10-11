@@ -193,7 +193,7 @@ export const normalizarTurno = (
     t.includes('noite') ||
     t.includes('noturno') ||
     t.includes('22-06') ||
-    t.includes('22h') ||
+    (t.includes('22h') && !t.includes('14h')) ||
     inicioLimpo.startsWith('22:') ||
     inicioLimpo.startsWith('23:')
   ) {

@@ -675,7 +675,7 @@ export interface RateioTurno {
   id: string;
   postoId: string;
   data: string; // YYYY-MM-DD
-  turno: string; // 'Turno 2 (06h - 14h)', 'Turno 3 (14h - 22h)', 'Turno 4 (22h - 06h)'
+  turno: string; // 'Turno 1 - Manhã (06h - 14h)', 'Turno 2 - Tarde (14h - 22h)', 'Turno Horista'
   tipo: TipoDiferencaTurno;
   valorTotalDiferenca: number; // Valor total da falta ou sobra do caixa do turno
   totalIntegrantesEscalados: number;

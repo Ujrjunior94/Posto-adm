@@ -370,7 +370,11 @@ REGRAS DE LEITURA DA IMAGEM:
       const formattedDataUrl = `data:${detectedMime};base64,${cleanBase64}`;
 
       const deepSeekDirectKey =
-        process.env.DEEPSEEK_API_KEY || process.env.VITE_DEEPSEEK_API_KEY || '';
+        req.body?.apiKey ||
+        (req.headers['x-api-key'] as string) ||
+        process.env.DEEPSEEK_API_KEY ||
+        process.env.VITE_DEEPSEEK_API_KEY ||
+        'sk-3d3e636aebaa4af08eba791d52a5d8b8';
       const openRouterKey =
         process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_API_KEY || '';
       const deepSeekModel =
@@ -665,7 +669,12 @@ Retorne exclusivamente o JSON estruturado com 'cells' e 'colaboradoresEscala'.`
    * GET /api/deepseek/status
    */
   app.get('/api/deepseek/status', (req, res) => {
-    const dsKey = process.env.DEEPSEEK_API_KEY || process.env.VITE_DEEPSEEK_API_KEY || '';
+    const dsKey =
+      (req.query?.apiKey as string) ||
+      (req.headers['x-api-key'] as string) ||
+      process.env.DEEPSEEK_API_KEY ||
+      process.env.VITE_DEEPSEEK_API_KEY ||
+      'sk-3d3e636aebaa4af08eba791d52a5d8b8';
     const orKey = process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_API_KEY || '';
     const model = process.env.DEEPSEEK_MODEL || process.env.VITE_DEEPSEEK_MODEL || 'deepseek-chat';
 
@@ -695,7 +704,12 @@ Retorne exclusivamente o JSON estruturado com 'cells' e 'colaboradoresEscala'.`
    */
   app.post('/api/deepseek/test', async (req, res) => {
     try {
-      const dsKey = process.env.DEEPSEEK_API_KEY || process.env.VITE_DEEPSEEK_API_KEY || '';
+      const dsKey =
+        req.body?.apiKey ||
+        (req.headers['x-api-key'] as string) ||
+        process.env.DEEPSEEK_API_KEY ||
+        process.env.VITE_DEEPSEEK_API_KEY ||
+        'sk-3d3e636aebaa4af08eba791d52a5d8b8';
       const orKey = process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_API_KEY || '';
       const model = process.env.DEEPSEEK_MODEL || process.env.VITE_DEEPSEEK_MODEL || 'deepseek-chat';
 
@@ -754,7 +768,12 @@ Retorne exclusivamente o JSON estruturado com 'cells' e 'colaboradoresEscala'.`
    */
   app.post('/api/deepseek/chat', async (req, res) => {
     try {
-      const dsKey = process.env.DEEPSEEK_API_KEY || process.env.VITE_DEEPSEEK_API_KEY || '';
+      const dsKey =
+        req.body?.apiKey ||
+        (req.headers['x-api-key'] as string) ||
+        process.env.DEEPSEEK_API_KEY ||
+        process.env.VITE_DEEPSEEK_API_KEY ||
+        'sk-3d3e636aebaa4af08eba791d52a5d8b8';
       const model = req.body?.model || process.env.DEEPSEEK_MODEL || 'deepseek-chat';
       const messages = req.body?.messages || [];
 

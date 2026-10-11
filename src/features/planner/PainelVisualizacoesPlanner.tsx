@@ -95,10 +95,10 @@ export const obterMetaTurnoCompleta = (esc: Partial<Escala>) => {
   if (
     t.includes('noite') ||
     t.includes('noturno') ||
-    t.includes('22h') ||
     t.includes('turno 3') ||
     t.includes('3t') ||
     t === 't3' ||
+    (t.includes('22h') && !t.includes('14h')) ||
     hIni.startsWith('22:') ||
     hIni.startsWith('23:')
   ) {

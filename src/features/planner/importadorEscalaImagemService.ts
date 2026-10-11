@@ -846,7 +846,11 @@ export function salvarSnapshotImportacao(
     registrosNovosIds,
   };
   try {
-    localStorage.setItem(STORAGE_SNAPSHOT_KEY, JSON.stringify(snapshot));
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(STORAGE_SNAPSHOT_KEY, JSON.stringify(snapshot));
+    } else {
+      (globalThis as any)[STORAGE_SNAPSHOT_KEY] = JSON.stringify(snapshot);
+    }
   } catch (e) {
     console.warn('Erro ao gravar snapshot local:', e);
   }
@@ -855,7 +859,10 @@ export function salvarSnapshotImportacao(
 
 export function obterUltimoSnapshotImportacao(): SnapshotImportacao | null {
   try {
-    const raw = localStorage.getItem(STORAGE_SNAPSHOT_KEY);
+    const raw =
+      typeof localStorage !== 'undefined'
+        ? localStorage.getItem(STORAGE_SNAPSHOT_KEY)
+        : (globalThis as any)[STORAGE_SNAPSHOT_KEY];
     if (!raw) return null;
     return JSON.parse(raw);
   } catch {
