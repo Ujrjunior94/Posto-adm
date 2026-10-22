@@ -369,7 +369,7 @@ export const ModalTabelaOficialANP: React.FC<ModalTabelaOficialANPProps> = ({
                               ({cel.d20KgM3.toFixed(1)} kg/m³)
                             </div>
                             {cel.isCorrente && (
-                              <span className="absolute top-0 right-0 w-2 h-2 rounded-full bg-teal-400 animate-pulse" />
+                              <span className="absolute top-0 right-0 w-2 h-2 rounded-full bg-teal-500" />
                             )}
                           </td>
                         ))}

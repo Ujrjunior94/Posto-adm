@@ -1246,13 +1246,46 @@ export const PlannerView: React.FC<PlannerProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* Seletor de Mês */}
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200">
+            <button
+              type="button"
+              onClick={prevMonth}
+              className="p-1.5 hover:bg-white rounded-md transition text-slate-700 cursor-pointer"
+              title="Mês anterior"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <span className="text-xs font-bold text-slate-800 capitalize min-w-[120px] text-center">
+              {monthName}
+            </span>
+            <button
+              type="button"
+              onClick={nextMonth}
+              className="p-1.5 hover:bg-white rounded-md transition text-slate-700 cursor-pointer"
+              title="Próximo mês"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+
           <button
             type="button"
             onClick={() => setModalImportarImagemAberto(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white text-xs font-bold rounded-lg transition shadow-md hover:shadow-lg cursor-pointer transform active:scale-98"
+            className="inline-flex items-center gap-2 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition shadow-xs cursor-pointer active:scale-98"
           >
-            <Sparkles className="w-4 h-4 text-emerald-300" />
-            Importar escala por imagem
+            <Sparkles className="w-4 h-4" />
+            <span>Importar por Imagem</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={salvandoAuto || funcionariosAtivos.length === 0}
+            onClick={handleGerarEscalaMesInteiro}
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-xs font-semibold rounded-lg transition disabled:opacity-50 cursor-pointer"
+          >
+            <Zap className="w-3.5 h-3.5 text-amber-500" />
+            <span>{salvandoAuto ? 'Processando...' : 'Gerar Escala 6x1'}</span>
           </button>
 
           <button
@@ -1260,31 +1293,10 @@ export const PlannerView: React.FC<PlannerProps> = ({
             disabled={desfazendoImportacao}
             onClick={handleDesfazerUltimaImportacao}
             title="Desfazer a última importação de escala e restaurar o estado anterior"
-            className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 text-xs font-bold rounded-lg transition cursor-pointer disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-xs font-semibold rounded-lg transition disabled:opacity-50 cursor-pointer"
           >
-            <Undo2 className="w-3.5 h-3.5 text-slate-600" />
-            {desfazendoImportacao ? 'Restaurando...' : 'Desfazer última importação'}
-          </button>
-
-          {onNavigateToIAEscala && (
-            <button
-              type="button"
-              onClick={onNavigateToIAEscala}
-              className="inline-flex items-center gap-1.5 px-3 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 text-xs font-bold rounded-lg transition cursor-pointer"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              Estúdio OCR Avançado
-            </button>
-          )}
-
-          <button
-            type="button"
-            disabled={salvandoAuto || funcionariosAtivos.length === 0}
-            onClick={handleGerarEscalaMesInteiro}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition shadow-xs disabled:opacity-50 cursor-pointer"
-          >
-            <Zap className="w-3.5 h-3.5" />
-            {salvandoAuto ? 'Processando...' : 'Gerar Escala 6x1'}
+            <Undo2 className="w-3.5 h-3.5 text-slate-500" />
+            <span>{desfazendoImportacao ? 'Restaurando...' : 'Desfazer'}</span>
           </button>
 
           <button
@@ -1292,33 +1304,20 @@ export const PlannerView: React.FC<PlannerProps> = ({
             disabled={limpandoPlanner || escalas.filter((e) => e.data && e.data.startsWith(mesAnoStr)).length === 0}
             onClick={handleLimparPlannerMes}
             title="Limpar todos os registros de escala do mês atual"
-            className="inline-flex items-center gap-1.5 px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs font-bold rounded-lg transition cursor-pointer disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-700 border border-slate-200 text-xs font-semibold rounded-lg transition disabled:opacity-50 cursor-pointer"
           >
             <Trash2 className="w-3.5 h-3.5" />
-            {limpandoPlanner ? 'Limpando...' : 'Limpar Planner'}
+            <span>{limpandoPlanner ? 'Limpando...' : 'Limpar Mês'}</span>
           </button>
 
           <button
             type="button"
             onClick={() => window.print()}
-            className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 text-xs font-bold rounded-lg transition cursor-pointer print:hidden"
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-xs font-semibold rounded-lg transition cursor-pointer print:hidden"
           >
-            <Printer className="w-3.5 h-3.5" />
-            Imprimir
+            <Printer className="w-3.5 h-3.5 text-slate-500" />
+            <span>Imprimir</span>
           </button>
-
-          {/* Seletor de Mês */}
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200">
-            <button onClick={prevMonth} className="p-1.5 hover:bg-white rounded-md transition text-slate-700">
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <span className="text-xs font-bold text-slate-800 capitalize min-w-[130px] text-center">
-              {monthName}
-            </span>
-            <button onClick={nextMonth} className="p-1.5 hover:bg-white rounded-md transition text-slate-700">
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
         </div>
       </div>
 
@@ -1678,7 +1677,7 @@ export const PlannerView: React.FC<PlannerProps> = ({
                               {temConflito && destacarConflitosNaGrade && (
                                 <span
                                   className={`absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full ring-2 ring-white ${
-                                    temConflitoCritico ? 'bg-red-600 animate-pulse' : 'bg-amber-500'
+                                    temConflitoCritico ? 'bg-red-600' : 'bg-amber-500'
                                   }`}
                                   title={conflitosCelula.map((c) => `${c.titulo}: ${c.descricao}`).join(' | ')}
                                 />

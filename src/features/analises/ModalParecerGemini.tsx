@@ -78,7 +78,7 @@ ${parecer.embasamentoLegal.join('; ')}
           <div className="flex items-center gap-3">
             <div
               className={`p-2.5 rounded-xl text-white ${
-                ehConforme ? 'bg-emerald-600' : 'bg-red-600 animate-pulse'
+                ehConforme ? 'bg-emerald-600' : 'bg-red-600'
               }`}
             >
               {ehConforme ? <ShieldCheck className="w-6 h-6" /> : <ShieldAlert className="w-6 h-6" />}

@@ -591,7 +591,7 @@ export const PainelVisualizacoesPlanner: React.FC<PainelVisualizacoesPlannerProp
                                     : `${esc.horarioInicio} - ${esc.horarioFim}`}
                                 </span>
                                 {temConflito && (
-                                  <AlertTriangle className="w-3 h-3 text-red-600 shrink-0 animate-pulse" />
+                                  <AlertTriangle className="w-3 h-3 text-red-600 shrink-0" />
                                 )}
                               </div>
                               <div className="text-[10px] opacity-80 truncate">

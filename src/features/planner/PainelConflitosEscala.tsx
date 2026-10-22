@@ -110,7 +110,7 @@ export const PainelConflitosEscala: React.FC<PainelConflitosEscalaProps> = ({
                 semConflitos
                   ? 'bg-emerald-600 text-white'
                   : criticos > 0
-                  ? 'bg-red-600 text-white animate-pulse'
+                  ? 'bg-red-600 text-white'
                   : 'bg-amber-500 text-white'
               }`}
             >

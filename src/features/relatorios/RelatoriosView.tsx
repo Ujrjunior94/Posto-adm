@@ -37,11 +37,23 @@ import {
   Clock,
   RotateCcw,
   XCircle,
+  Smartphone,
+  Share2,
+  Sparkles,
+  Calendar,
+  Users,
 } from 'lucide-react';
 import { formatarMoeda } from '../../utils/calculations';
 import { PRECOS_PADRAO_COMBUSTIVEL, calcularPrecoEfetivoBico } from '../../utils/pricing';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import {
+  gerarRelatorioMobilePDF,
+  formatarDataBR,
+  formatarLitros,
+  exportarRelatorioCombustivel5ColunasPDF,
+  ItemRelatorioCombustivel5Colunas,
+} from '../../utils/pdfGenerator';
 
 interface RelatoriosProps {
   funcionarios: Funcionario[];
@@ -59,6 +71,7 @@ interface RelatoriosProps {
 
 type TipoRelatorio =
   | 'BALANCO_CONSOLIDADO'
+  | 'COMBUSTIVEL_5COL'
   | 'AGRUPADO_COMBUSTIVEL'
   | 'FECHAMENTOS'
   | 'AFERICOES'
@@ -101,6 +114,12 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
     'TODOS' | 'CAIXA' | 'AFERICOES' | 'QUALIDADE'
   >('TODOS');
   const [tamanhoFonteTermica, setTamanhoFonteTermica] = useState<'NORMAL' | 'CONDENSADA'>('NORMAL');
+
+  // Modo de visualização simplificada para telas mobile e leitura executiva ágil
+  const [modoSimplificado, setModoSimplificado] = useState<boolean>(true);
+  const [abaSimplificada, setAbaSimplificada] = useState<
+    'TODOS' | 'CAIXA' | 'COMBUSTIVEL' | 'AFERICOES' | 'ESCALA'
+  >('TODOS');
 
   // Estados exclusivos de Agrupamento e Filtragem de Aferições
   const [agrupamentoAfericoes, setAgrupamentoAfericoes] = useState<
@@ -656,8 +675,257 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
     bicos,
   ]);
 
+  // Agrupamento oficial das 5 Colunas Requisitadas:
+  // 1. COMBUSTÍVEL | 2. QUANTIDADE | 3. VALOR UNITÁRIO | 4. VALOR TOTAL | 5. DESVIO
+  const relatorioCombustiveis5Colunas = useMemo<ItemRelatorioCombustivel5Colunas[]>(() => {
+    const PRODUTOS_PADRAO = [
+      'Gasolina Comum',
+      'Gasolina Aditivada',
+      'Etanol Hidratado',
+      'Diesel S10',
+      'Diesel S500',
+    ];
+
+    const todosProdutos = new Set<string>();
+    if (filtroCombustivel !== 'TODOS') {
+      todosProdutos.add(filtroCombustivel);
+    } else {
+      PRODUTOS_PADRAO.forEach((p) => todosProdutos.add(p));
+      listaCombustiveisDisponiveis.forEach((p) => todosProdutos.add(p));
+      fechamentosFiltrados.forEach((f) => {
+        f.encerrantesBicos?.forEach((b) => {
+          if (b.produto) todosProdutos.add(b.produto);
+        });
+      });
+    }
+
+    return Array.from(todosProdutos).map((prod) => {
+      // 1. Litros e Valores apurados nos fechamentos
+      let litrosVendidosTotal = 0;
+      let valorVendidoTotal = 0;
+      let afericoesLitrosNosBicos = 0;
+
+      fechamentosFiltrados.forEach((f) => {
+        if (f.encerrantesBicos && f.encerrantesBicos.length > 0) {
+          f.encerrantesBicos.forEach((b) => {
+            if (b.produto === prod) {
+              litrosVendidosTotal += Number(b.litrosVendidos) || 0;
+              valorVendidoTotal += Number(b.valorTotal) || 0;
+              afericoesLitrosNosBicos += Number(b.afericaoLitros) || 0;
+            }
+          });
+        }
+      });
+
+      // 2. Preço de Referência
+      const precoUnitarioPadrao = resolverPrecoBico(undefined, undefined, prod);
+
+      // Fallback se não houver encerrantes nos fechamentos
+      if (litrosVendidosTotal === 0) {
+        const bicosDoProduto = bicosFiltrados.filter((b) => b.produto === prod);
+        const somaEnc = bicosDoProduto.reduce((s, b) => s + (b.encerranteAtual || 0), 0);
+        if (somaEnc > 0) {
+          litrosVendidosTotal = somaEnc;
+          valorVendidoTotal = litrosVendidosTotal * precoUnitarioPadrao;
+        } else {
+          const afericoesProd = afericoesFiltradas.filter((a) => a.produto === prod);
+          if (afericoesProd.length > 0) {
+            litrosVendidosTotal = afericoesProd.reduce((s, a) => s + (Number(a.volumeAferido) || 20), 0);
+            valorVendidoTotal = litrosVendidosTotal * precoUnitarioPadrao;
+          }
+        }
+      }
+
+      const valorUnitario =
+        litrosVendidosTotal > 0 && valorVendidoTotal > 0
+          ? Number((valorVendidoTotal / litrosVendidosTotal).toFixed(2))
+          : precoUnitarioPadrao;
+
+      // 3. Apuração de Desvio
+      const afericoesProd = afericoesFiltradas.filter((a) => a.produto === prod);
+      const desvioMlTotal = afericoesProd.reduce(
+        (s, a) => s + Math.round((Number(a.diferenca) || 0) * 1000),
+        0
+      );
+      const desvioLitrosAfericao = Number(((desvioMlTotal * 50) / 1000).toFixed(2));
+      const desvioLitros = afericoesLitrosNosBicos > 0 ? afericoesLitrosNosBicos : desvioLitrosAfericao;
+
+      let statusDesvio: 'REGULAR' | 'SOBRA' | 'FALTA' = 'REGULAR';
+      if (desvioLitros > 0 || desvioMlTotal > 0) statusDesvio = 'SOBRA';
+      else if (desvioLitros < 0 || desvioMlTotal < 0) statusDesvio = 'FALTA';
+
+      let desvioTexto = '0,00 L (Regular)';
+      if (desvioLitros !== 0 && desvioMlTotal !== 0) {
+        const sL = desvioLitros > 0 ? '+' : '';
+        const sMl = desvioMlTotal > 0 ? '+' : '';
+        desvioTexto = `${sL}${desvioLitros.toFixed(2)} L (${sMl}${desvioMlTotal} ml)`;
+      } else if (desvioLitros !== 0) {
+        const sL = desvioLitros > 0 ? '+' : '';
+        desvioTexto = `${sL}${desvioLitros.toFixed(2)} L`;
+      } else if (desvioMlTotal !== 0) {
+        const sMl = desvioMlTotal > 0 ? '+' : '';
+        desvioTexto = `${sMl}${desvioMlTotal} ml`;
+      }
+
+      return {
+        produto: prod,
+        quantidade: Number(litrosVendidosTotal.toFixed(2)),
+        valorUnitario,
+        valorTotal: Number(valorVendidoTotal.toFixed(2)),
+        desvioTexto,
+        desvioLitros,
+        desvioMl: desvioMlTotal,
+        statusDesvio,
+      };
+    });
+  }, [
+    filtroCombustivel,
+    listaCombustiveisDisponiveis,
+    fechamentosFiltrados,
+    bicosFiltrados,
+    afericoesFiltradas,
+    bicos,
+  ]);
+
+  /**
+   * Exportação do Relatório Simplificado de Combustíveis nas 5 Colunas Solicitadas
+   */
+  const handleExportarCombustivel5ColunasPDF = (formato: 'MOBILE' | 'A4' = 'MOBILE') => {
+    try {
+      setGerandoPdf(true);
+      const periodoTexto = `${formatarDataBR(dataInicio)} a ${formatarDataBR(dataFim)}`;
+      exportarRelatorioCombustivel5ColunasPDF({
+        dados: relatorioCombustiveis5Colunas,
+        periodo: periodoTexto,
+        formato,
+        nomeArquivo: `Relatorio_Combustiveis_${formato === 'MOBILE' ? 'Mobile_' : ''}${dataInicio}_a_${dataFim}.pdf`,
+      });
+    } catch (err) {
+      console.error('Falha ao exportar PDF de combustíveis 5 colunas:', err);
+    } finally {
+      setGerandoPdf(false);
+    }
+  };
+
   const handleImprimir = () => {
     window.print();
+  };
+
+  /**
+   * Atalhos de período de 1 toque para facilitar a rotina do fiscal e do gerente no celular
+   */
+  const aplicarFiltroRapido = (periodo: 'HOJE' | 'ONTEM' | '7DIAS' | 'MES_ATUAL') => {
+    const hoje = new Date();
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const toIso = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+    if (periodo === 'HOJE') {
+      const hojeStr = toIso(hoje);
+      setDataInicio(hojeStr);
+      setDataFim(hojeStr);
+    } else if (periodo === 'ONTEM') {
+      const ontem = new Date(hoje);
+      ontem.setDate(hoje.getDate() - 1);
+      const ontemStr = toIso(ontem);
+      setDataInicio(ontemStr);
+      setDataFim(ontemStr);
+    } else if (periodo === '7DIAS') {
+      const seteDiasAtras = new Date(hoje);
+      seteDiasAtras.setDate(hoje.getDate() - 6);
+      setDataInicio(toIso(seteDiasAtras));
+      setDataFim(toIso(hoje));
+    } else if (periodo === 'MES_ATUAL') {
+      const primeiroDia = `${hoje.getFullYear()}-${pad(hoje.getMonth() + 1)}-01`;
+      const ultimoDia = `${hoje.getFullYear()}-${pad(hoje.getMonth() + 1)}-${pad(
+        new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate()
+      )}`;
+      setDataInicio(primeiroDia);
+      setDataFim(ultimoDia);
+    }
+  };
+
+  /**
+   * Exporta o relatório simplificado e otimizado para Smartphone e WhatsApp (PDF 9:16)
+   */
+  const handleGerarPdfMobile = (tipoForcado?: TipoRelatorio) => {
+    setGerandoPdf(true);
+    try {
+      const relatorioAlvo = tipoForcado || tipo;
+      const periodoTexto = `${formatarDataBR(dataInicio)} a ${formatarDataBR(dataFim)}`;
+
+      gerarRelatorioMobilePDF({
+        titulo:
+          relatorioAlvo === 'BALANCO_CONSOLIDADO'
+            ? 'RESUMO EXECUTIVO DO POSTO'
+            : `RELATÓRIO OPERACIONAL: ${relatorioAlvo}`,
+        subtitulo: `Período: ${periodoTexto} · Otimizado para Smartphone & WhatsApp`,
+        periodo: periodoTexto,
+        kpis: {
+          totalFaturado: balancoConsolidado.totalInformado,
+          totalConferido: balancoConsolidado.totalConferido,
+          totalDiferenca: balancoConsolidado.saldoDiferenca,
+          totalFechamentos: balancoConsolidado.totalFechamentos,
+          volumeTotalLitros: balancoConsolidado.volumeTotalAferido,
+          totalAfericoes: balancoConsolidado.totalAfericoes,
+          afericoesConformes: balancoConsolidado.afericoesConformes,
+          desvioMedioMl: balancoConsolidado.desvioMedioMl,
+          totalAnalises: balancoConsolidado.totalAnalises,
+          analisesConformes: balancoConsolidado.analisesConformes,
+        },
+        meiosPagamento: balancoConsolidado.meiosPagamento,
+        fechamentos: fechamentosFiltrados.map((f) => ({
+          data: f.data,
+          turno: f.turno,
+          funcionarioNome: f.funcionarioNome || 'Operador',
+          totalInformado: f.totalInformado,
+          totalConferido: f.totalConferido,
+          diferenca: f.diferenca,
+          status: f.status,
+          conferidoPor: f.conferidoPor,
+          pagamentos: {
+            dinheiro: f.dinheiro,
+            cartaoCredito: f.cartaoCredito,
+            cartaoDebito: f.cartaoDebito,
+            pix: f.pix,
+            outros: f.outros,
+          },
+        })),
+        combustiveis: relatorioCombustiveis5Colunas.map((c) => ({
+          produto: c.produto,
+          volumeLitros: c.quantidade,
+          valorUnitario: c.valorUnitario,
+          valorTotal: c.valorTotal,
+          desvioTexto: c.desvioTexto,
+          desvioLitros: c.desvioLitros,
+          desvioMl: c.desvioMl,
+          statusDesvio: c.statusDesvio,
+          precoMedio: c.valorUnitario,
+        })),
+        afericoes: afericoesFiltradas.map((a) => ({
+          data: a.data,
+          bicoNome: a.bicoNome || `Bico ${a.bicoId}`,
+          produto: a.produto || 'Combustível',
+          volumeNominal: a.volumeNominal || 20,
+          volumeAferido: a.volumeAferido || 20,
+          diferencaMl: Math.round((Number(a.diferenca) || 0) * 1000),
+          status: a.resultado || 'CONFORME',
+          responsavel: a.responsavel,
+        })),
+        escalas: escalasFiltradas.map((e) => ({
+          data: e.data,
+          funcionarioNome: e.funcionarioNome || 'Colaborador',
+          turno: e.turno || 'T1',
+          horarioInicio: e.horarioInicio,
+          horarioFim: e.horarioFim,
+          status: e.status || 'TRABALHO',
+        })),
+        nomeArquivo: `Relatorio_Mobile_${relatorioAlvo}_${dataInicio}_a_${dataFim}.pdf`,
+      });
+    } catch (err) {
+      console.error('Falha ao exportar PDF Mobile:', err);
+    } finally {
+      setGerandoPdf(false);
+    }
   };
 
   /**
@@ -3611,6 +3879,625 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
     );
   };
 
+  /**
+   * Renderizador do Modo Simplificado e Amigável para Telas Mobile / Smartphone
+   */
+  const renderModoSimplificadoMobile = () => {
+    const kpis = balancoConsolidado;
+    const dif = kpis.saldoDiferenca || 0;
+
+    return (
+      <div className="space-y-6">
+        {/* Banner Superior com Ação de Download do PDF Mobile */}
+        <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white p-5 rounded-2xl border border-slate-700 shadow-md flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="p-1.5 bg-emerald-500/20 text-emerald-400 rounded-lg">
+                <Smartphone className="w-5 h-5" />
+              </span>
+              <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+                Relatório Simplificado Mobile
+              </span>
+            </div>
+            <h3 className="text-lg font-bold text-white">
+              Painel Executivo do Posto
+            </h3>
+            <p className="text-xs text-slate-300">
+              Visualização limpa, números essenciais e exportação formatada para leitura em smartphones e WhatsApp.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              onClick={() => handleExportarCombustivel5ColunasPDF('MOBILE')}
+              disabled={gerandoPdf}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-3 bg-teal-500 hover:bg-teal-600 active:scale-[0.98] text-slate-950 font-bold rounded-xl text-xs transition shadow-lg shadow-teal-500/10 disabled:opacity-50 cursor-pointer min-h-[44px]"
+              title="Gera o Relatório Simplificado de Combustíveis nas 5 Colunas (PDF Mobile 9:16)"
+            >
+              <Fuel className="w-4 h-4 text-slate-950" />
+              <span>PDF 5 Colunas (Mobile)</span>
+            </button>
+
+            <button
+              onClick={() => handleGerarPdfMobile()}
+              disabled={gerandoPdf}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-3 bg-emerald-500 hover:bg-emerald-600 active:scale-[0.98] text-slate-950 font-bold rounded-xl text-xs transition shadow-lg shadow-emerald-500/10 disabled:opacity-50 cursor-pointer min-h-[44px]"
+              title="Gera o PDF executivo vertical para o celular ou envio no WhatsApp"
+            >
+              <Smartphone className="w-4 h-4 text-slate-950" />
+              <span>{gerandoPdf ? 'Gerando...' : 'PDF Geral Mobile'}</span>
+            </button>
+
+            <button
+              onClick={() => handleExportarPDF('BALANCO_CONSOLIDADO')}
+              disabled={gerandoPdf}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-3 bg-slate-800 hover:bg-slate-700 active:scale-[0.98] text-slate-200 font-semibold rounded-xl text-xs transition border border-slate-700 disabled:opacity-50 cursor-pointer min-h-[44px]"
+              title="Gera o PDF clássico A4 com todas as tabelas completas para impressão em papel"
+            >
+              <FileDown className="w-4 h-4 text-blue-400" />
+              <span>PDF A4 Tradicional</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Barra de Filtros Rápidos de 1 Toque */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <span className="text-xs font-bold text-slate-700 uppercase flex items-center gap-1.5">
+              <Calendar className="w-4 h-4 text-slate-500" />
+              Período Rápido
+            </span>
+            <div className="text-xs text-slate-500 font-medium">
+              Ativo: <span className="font-bold text-slate-800">{formatarDataBR(dataInicio)}</span> até{' '}
+              <span className="font-bold text-slate-800">{formatarDataBR(dataFim)}</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <button
+              onClick={() => aplicarFiltroRapido('HOJE')}
+              className="px-3 py-2 text-xs font-bold rounded-lg border border-slate-200 hover:border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700 transition cursor-pointer min-h-[44px] flex items-center justify-center"
+            >
+              Hoje
+            </button>
+            <button
+              onClick={() => aplicarFiltroRapido('ONTEM')}
+              className="px-3 py-2 text-xs font-bold rounded-lg border border-slate-200 hover:border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700 transition cursor-pointer min-h-[44px] flex items-center justify-center"
+            >
+              Ontem
+            </button>
+            <button
+              onClick={() => aplicarFiltroRapido('7DIAS')}
+              className="px-3 py-2 text-xs font-bold rounded-lg border border-slate-200 hover:border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700 transition cursor-pointer min-h-[44px] flex items-center justify-center"
+            >
+              Últimos 7 dias
+            </button>
+            <button
+              onClick={() => aplicarFiltroRapido('MES_ATUAL')}
+              className="px-3 py-2 text-xs font-bold rounded-lg border border-slate-200 hover:border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700 transition cursor-pointer min-h-[44px] flex items-center justify-center"
+            >
+              Mês Atual
+            </button>
+          </div>
+        </div>
+
+        {/* 4 Cards de Resumo Executivo (KPIs em grid responsivo) */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {/* Card 1: Caixa Conferido */}
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between text-xs text-slate-500 font-semibold uppercase">
+                <span>Total em Caixa</span>
+                <DollarSign className="w-4 h-4 text-emerald-600" />
+              </div>
+              <div className="text-2xl font-bold text-slate-900 mt-1 tabular-nums">
+                {formatarMoeda(kpis.totalConferido)}
+              </div>
+            </div>
+            <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
+              <span className="text-slate-500">{kpis.totalFechamentos} turnos</span>
+              <span className="text-slate-600 font-medium">
+                Sistema: {formatarMoeda(kpis.totalInformado)}
+              </span>
+            </div>
+          </div>
+
+          {/* Card 2: Saldo / Diferença */}
+          <div className={`p-4 rounded-xl border shadow-xs flex flex-col justify-between ${
+            dif === 0
+              ? 'bg-white border-slate-200'
+              : dif > 0
+              ? 'bg-blue-50/50 border-blue-200'
+              : 'bg-red-50/50 border-red-200'
+          }`}>
+            <div>
+              <div className="flex items-center justify-between text-xs text-slate-500 font-semibold uppercase">
+                <span>Saldo Diferença</span>
+                {dif === 0 ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                ) : dif > 0 ? (
+                  <TrendingUp className="w-4 h-4 text-blue-600" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 text-red-600" />
+                )}
+              </div>
+              <div className={`text-2xl font-bold mt-1 tabular-nums ${
+                dif === 0
+                  ? 'text-emerald-700'
+                  : dif > 0
+                  ? 'text-blue-700'
+                  : 'text-red-700'
+              }`}>
+                {dif > 0 ? '+' : ''}{formatarMoeda(dif)}
+              </div>
+            </div>
+            <div className="mt-3 pt-2 border-t border-slate-100/80 text-xs">
+              <span className={dif === 0 ? 'text-emerald-600 font-medium' : dif > 0 ? 'text-blue-600 font-medium' : 'text-red-600 font-medium'}>
+                {dif === 0
+                  ? '✓ Caixa 100% conferido'
+                  : dif > 0
+                  ? `Sobra de ${formatarMoeda(dif)}`
+                  : `Falta de ${formatarMoeda(Math.abs(dif))}`}
+              </span>
+            </div>
+          </div>
+
+          {/* Card 3: Volume de Combustível */}
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between text-xs text-slate-500 font-semibold uppercase">
+                <span>Volume Combustíveis</span>
+                <Fuel className="w-4 h-4 text-blue-600" />
+              </div>
+              <div className="text-2xl font-bold text-slate-900 mt-1 tabular-nums">
+                {formatarLitros(kpis.volumeTotalAferido)}
+              </div>
+            </div>
+            <div className="mt-3 pt-2 border-t border-slate-100 text-xs text-slate-500 flex items-center justify-between">
+              <span>{kpis.agrupadoPorCombustivel.length} produtos</span>
+              <span className="font-semibold text-slate-700">
+                {formatarMoeda(kpis.valorTotalAfericoesGeral)}
+              </span>
+            </div>
+          </div>
+
+          {/* Card 4: Aferições Metrológicas 20L */}
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between text-xs text-slate-500 font-semibold uppercase">
+                <span>Aferições 20L (Inmetro)</span>
+                <Gauge className="w-4 h-4 text-teal-600" />
+              </div>
+              <div className="text-2xl font-bold text-slate-900 mt-1 tabular-nums">
+                {kpis.taxaConformidade}%
+              </div>
+            </div>
+            <div className="mt-3 pt-2 border-t border-slate-100 text-xs text-slate-500 flex items-center justify-between">
+              <span>{kpis.afericoesConformes}/{kpis.totalAfericoes} conformes</span>
+              <span className="font-mono text-slate-700">
+                {kpis.desvioMedioMl > 0 ? '+' : ''}{kpis.desvioMedioMl} ml
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Abas Rápidas no Modo Simplificado */}
+        <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl overflow-x-auto">
+          {[
+            { id: 'TODOS', label: 'Visão Geral' },
+            { id: 'CAIXA', label: `Caixa (${fechamentosFiltrados.length})` },
+            { id: 'COMBUSTIVEL', label: `Combustíveis (${kpis.agrupadoPorCombustivel.length})` },
+            { id: 'AFERICOES', label: `Aferições (${afericoesFiltradas.length})` },
+            { id: 'ESCALA', label: `Escala (${escalasFiltradas.length})` },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setAbaSimplificada(tab.id as any)}
+              className={`px-3.5 py-2 text-xs font-bold rounded-lg transition whitespace-nowrap cursor-pointer min-h-[40px] flex items-center ${
+                abaSimplificada === tab.id
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* CONTEÚDO: SEÇÃO DE FECHAMENTOS (Cartões Verticais Scannable) */}
+        {(abaSimplificada === 'TODOS' || abaSimplificada === 'CAIXA') && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-bold text-slate-900 uppercase flex items-center gap-2">
+                <DollarSign className="w-4 h-4 text-emerald-600" />
+                Fechamentos de Caixa ({fechamentosFiltrados.length})
+              </h4>
+              <span className="text-xs text-slate-500">
+                Formato em cartões verticais para celular
+              </span>
+            </div>
+
+            {fechamentosFiltrados.length === 0 ? (
+              <div className="bg-white p-8 rounded-xl border border-slate-200 text-center text-slate-500 text-sm">
+                Nenhum fechamento registrado para o período selecionado.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {fechamentosFiltrados.map((f, idx) => {
+                  const difItem = f.diferenca || 0;
+                  return (
+                    <div
+                      key={f.id || idx}
+                      className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3 transition hover:border-slate-300"
+                    >
+                      {/* Topo do Cartão: Operador e Turno */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="font-bold text-slate-900 text-sm">
+                            {f.funcionarioNome || 'Operador'}
+                          </div>
+                          <div className="text-xs text-slate-500 flex items-center gap-1.5 mt-0.5">
+                            <span>{f.turno}</span>
+                            <span>·</span>
+                            <span>{formatarDataBR(f.data)}</span>
+                          </div>
+                        </div>
+
+                        {/* Badge de Diferença */}
+                        <div className={`px-2.5 py-1 rounded-lg text-xs font-bold tabular-nums ${
+                          difItem === 0
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            : difItem > 0
+                            ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                            : 'bg-red-50 text-red-700 border border-red-200'
+                        }`}>
+                          {difItem === 0
+                            ? '✓ Sem Diferença'
+                            : `${difItem > 0 ? '+ ' : ''}${formatarMoeda(difItem)} ${difItem > 0 ? 'Sobra' : 'Falta'}`}
+                        </div>
+                      </div>
+
+                      {/* Valores: Físico vs Sistema */}
+                      <div className="grid grid-cols-2 gap-2 bg-slate-50 p-2.5 rounded-lg text-xs">
+                        <div>
+                          <span className="text-slate-500 block text-[11px]">Total Conferido (Físico)</span>
+                          <span className="font-bold text-slate-900 text-sm tabular-nums">
+                            {formatarMoeda(f.totalConferido)}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block text-[11px]">Total Registrado (Sistema)</span>
+                          <span className="font-medium text-slate-700 text-sm tabular-nums">
+                            {formatarMoeda(f.totalInformado)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Meios de Pagamento */}
+                      <div className="text-xs text-slate-600 flex flex-wrap gap-x-3 gap-y-1">
+                        <span>Dinheiro: <strong className="text-slate-800">{formatarMoeda(f.dinheiro || 0)}</strong></span>
+                        <span>PIX: <strong className="text-slate-800">{formatarMoeda(f.pix || 0)}</strong></span>
+                        <span>Cartão: <strong className="text-slate-800">{formatarMoeda((f.cartaoCredito || 0) + (f.cartaoDebito || 0))}</strong></span>
+                      </div>
+
+                      {/* Conferente */}
+                      <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
+                        <span>Conferido por: {f.conferidoPor || 'Fiscal'}</span>
+                        <span className="font-medium text-slate-500">{f.status || 'CONFERIDO'}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* CONTEÚDO: RELATÓRIO SIMPLIFICADO POR COMBUSTÍVEL (5 COLUNAS OFICIAIS) */}
+        {(abaSimplificada === 'TODOS' || abaSimplificada === 'COMBUSTIVEL') && (
+          <div className="space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h4 className="text-sm font-bold text-slate-900 uppercase flex items-center gap-2">
+                  <Fuel className="w-4 h-4 text-teal-600" />
+                  Relatório por Combustível (5 Colunas)
+                </h4>
+                <p className="text-xs text-slate-500">
+                  Combustível · Quantidade · Valor Unitário · Valor Total · Desvio
+                </p>
+              </div>
+
+              {/* Botões de Exportação Rápida das 5 Colunas */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleExportarCombustivel5ColunasPDF('MOBILE')}
+                  disabled={gerandoPdf}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-xs font-bold transition shadow-xs cursor-pointer min-h-[36px]"
+                  title="Exportar PDF no formato Mobile (9:16) para WhatsApp"
+                >
+                  <Smartphone className="w-3.5 h-3.5 text-white" />
+                  <span>PDF Mobile (5 Colunas)</span>
+                </button>
+                <button
+                  onClick={() => handleExportarCombustivel5ColunasPDF('A4')}
+                  disabled={gerandoPdf}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition cursor-pointer min-h-[36px]"
+                  title="Exportar PDF em formato A4 impresso"
+                >
+                  <Download className="w-3.5 h-3.5 text-slate-600" />
+                  <span>PDF A4</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Visualização 1: Cartões Scannable para Telas Pequenas (sm:hidden) */}
+            <div className="grid grid-cols-1 gap-3 sm:hidden">
+              {relatorioCombustiveis5Colunas.map((comb) => (
+                <div
+                  key={comb.produto}
+                  className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3"
+                >
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                    <span className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                      <Fuel className="w-4 h-4 text-teal-600" />
+                      {comb.produto}
+                    </span>
+                    <span
+                      className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${
+                        comb.statusDesvio === 'FALTA'
+                          ? 'bg-red-50 text-red-700 border border-red-200'
+                          : comb.statusDesvio === 'SOBRA'
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          : 'bg-slate-50 text-slate-700 border border-slate-200'
+                      }`}
+                    >
+                      {comb.desvioTexto}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="bg-slate-50 p-2.5 rounded-lg">
+                      <span className="text-slate-400 block text-[10px] uppercase font-semibold">Quantidade</span>
+                      <span className="font-bold text-slate-900 text-sm font-mono">
+                        {comb.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-50 p-2.5 rounded-lg">
+                      <span className="text-slate-400 block text-[10px] uppercase font-semibold">Valor Unitário</span>
+                      <span className="font-semibold text-slate-800 text-sm font-mono">
+                        R$ {comb.valorUnitario.toFixed(2)} / L
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-50 p-2.5 rounded-lg col-span-2 flex items-center justify-between">
+                      <div>
+                        <span className="text-slate-400 block text-[10px] uppercase font-semibold">Valor Total</span>
+                        <span className="font-bold text-slate-900 text-base font-mono">
+                          {formatarMoeda(comb.valorTotal)}
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-slate-400 block text-[10px] uppercase font-semibold">Desvio</span>
+                        <span
+                          className={`font-bold text-xs ${
+                            comb.statusDesvio === 'FALTA'
+                              ? 'text-red-700'
+                              : comb.statusDesvio === 'SOBRA'
+                              ? 'text-emerald-700'
+                              : 'text-slate-700'
+                          }`}
+                        >
+                          {comb.desvioTexto}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Visualização 2: Tabela de Fácil Leitura (hidden sm:block) */}
+            <div className="hidden sm:block overflow-x-auto bg-white border border-slate-200 rounded-xl shadow-xs">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-slate-900 font-bold text-white uppercase text-[11px] tracking-wider">
+                  <tr>
+                    <th className="py-3 px-4 text-left">COMBUSTÍVEL</th>
+                    <th className="py-3 px-4 text-right">QUANTIDADE</th>
+                    <th className="py-3 px-4 text-right">VALOR UNITÁRIO</th>
+                    <th className="py-3 px-4 text-right">VALOR TOTAL</th>
+                    <th className="py-3 px-4 text-center">DESVIO</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {relatorioCombustiveis5Colunas.map((c) => (
+                    <tr key={c.produto} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="py-3 px-4 font-bold text-slate-900 flex items-center gap-2">
+                        <Fuel className="w-3.5 h-3.5 text-teal-600" />
+                        <span>{c.produto}</span>
+                      </td>
+                      <td className="py-3 px-4 text-right font-mono font-bold text-slate-800">
+                        {c.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L
+                      </td>
+                      <td className="py-3 px-4 text-right font-mono text-slate-600">
+                        R$ {c.valorUnitario.toFixed(2)}
+                      </td>
+                      <td className="py-3 px-4 text-right font-mono font-bold text-slate-900">
+                        {formatarMoeda(c.valorTotal)}
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        <span
+                          className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
+                            c.statusDesvio === 'FALTA'
+                              ? 'bg-red-50 text-red-700 border border-red-200'
+                              : c.statusDesvio === 'SOBRA'
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : 'bg-slate-100 text-slate-700'
+                          }`}
+                        >
+                          {c.desvioTexto}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-slate-50 font-bold text-slate-900 border-t-2 border-slate-300 text-xs">
+                  <tr>
+                    <td className="py-3 px-4 uppercase font-extrabold text-slate-800">TOTAL GERAL</td>
+                    <td className="py-3 px-4 text-right font-mono text-slate-900 font-extrabold">
+                      {relatorioCombustiveis5Colunas
+                        .reduce((s, c) => s + c.quantidade, 0)
+                        .toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{' '}
+                      L
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono text-slate-600">
+                      R${' '}
+                      {(
+                        relatorioCombustiveis5Colunas.reduce((s, c) => s + c.valorTotal, 0) /
+                        Math.max(1, relatorioCombustiveis5Colunas.reduce((s, c) => s + c.quantidade, 0))
+                      ).toFixed(2)}
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono text-slate-900 font-extrabold text-sm">
+                      {formatarMoeda(relatorioCombustiveis5Colunas.reduce((s, c) => s + c.valorTotal, 0))}
+                    </td>
+                    <td className="py-3 px-4 text-center font-mono">
+                      <span
+                        className={`font-bold ${
+                          relatorioCombustiveis5Colunas.reduce((s, c) => s + (c.desvioLitros || 0), 0) < 0
+                            ? 'text-red-700'
+                            : 'text-emerald-700'
+                        }`}
+                      >
+                        {relatorioCombustiveis5Colunas.reduce((s, c) => s + (c.desvioLitros || 0), 0) > 0 ? '+' : ''}
+                        {relatorioCombustiveis5Colunas
+                          .reduce((s, c) => s + (c.desvioLitros || 0), 0)
+                          .toFixed(2)}{' '}
+                        L
+                      </span>
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* CONTEÚDO: SEÇÃO DE AFERIÇÕES METROLÓGICAS 20L */}
+        {(abaSimplificada === 'TODOS' || abaSimplificada === 'AFERICOES') && (
+          <div className="space-y-3">
+            <h4 className="text-sm font-bold text-slate-900 uppercase flex items-center gap-2">
+              <Gauge className="w-4 h-4 text-teal-600" />
+              Aferições Metrológicas 20L ({afericoesFiltradas.length})
+            </h4>
+
+            {afericoesFiltradas.length === 0 ? (
+              <div className="bg-white p-6 rounded-xl border border-slate-200 text-center text-slate-500 text-sm">
+                Nenhuma aferição registrada no período.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {afericoesFiltradas.slice(0, 12).map((af, idx) => {
+                  const conf = af.resultado === 'CONFORME';
+                  const desvioMl = Math.round((Number(af.diferenca) || 0) * 1000);
+
+                  return (
+                    <div
+                      key={af.id || idx}
+                      className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs space-y-1.5"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-slate-900 text-xs">
+                          {af.bicoNome || `Bico ${af.bicoId}`} · {af.produto}
+                        </span>
+                        <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${
+                          conf
+                            ? 'bg-emerald-50 text-emerald-700'
+                            : 'bg-red-50 text-red-700'
+                        }`}>
+                          {conf ? '✓ Conforme' : '⚠ Fora Limite'}
+                        </span>
+                      </div>
+                      <div className="text-xs text-slate-600 flex items-center justify-between">
+                        <span>Desvio: <strong className={conf ? 'text-slate-800' : 'text-red-600'}>{desvioMl > 0 ? '+' : ''}{desvioMl} ml</strong></span>
+                        <span className="text-slate-400">{formatarDataBR(af.data)}</span>
+                      </div>
+                      {af.responsavel && (
+                        <div className="text-[11px] text-slate-400 pt-1 border-t border-slate-100">
+                          Resp: {af.responsavel}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* CONTEÚDO: SEÇÃO DE ESCALA */}
+        {(abaSimplificada === 'TODOS' || abaSimplificada === 'ESCALA') && (
+          <div className="space-y-3">
+            <h4 className="text-sm font-bold text-slate-900 uppercase flex items-center gap-2">
+              <Users className="w-4 h-4 text-indigo-600" />
+              Escala de Funcionários ({escalasFiltradas.length})
+            </h4>
+
+            {escalasFiltradas.length === 0 ? (
+              <div className="bg-white p-6 rounded-xl border border-slate-200 text-center text-slate-500 text-sm">
+                Nenhum colaborador escalado no período.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {escalasFiltradas.slice(0, 15).map((esc, idx) => (
+                  <div
+                    key={esc.id || idx}
+                    className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between"
+                  >
+                    <div>
+                      <div className="font-bold text-slate-900 text-xs">
+                        {esc.funcionarioNome}
+                      </div>
+                      <div className="text-[11px] text-slate-400">
+                        {formatarDataBR(esc.data)} · {esc.horarioInicio || '06:00'} - {esc.horarioFim || '14:00'}
+                      </div>
+                    </div>
+                    <div className="text-xs font-bold text-teal-700 bg-teal-50 px-2.5 py-1 rounded-md">
+                      {esc.turno}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Rodapé Fixo / Bottom Action para Exportação Mobile */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="text-xs text-slate-500">
+            Deseja conferir o relatório completo com todas as colunas de auditoria?
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleGerarPdfMobile()}
+              disabled={gerandoPdf}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition cursor-pointer min-h-[40px]"
+            >
+              <Smartphone className="w-4 h-4" />
+              {gerandoPdf ? 'Gerando PDF Mobile...' : 'Baixar PDF Mobile'}
+            </button>
+            <button
+              onClick={() => setModoSimplificado(false)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg text-xs transition cursor-pointer min-h-[40px]"
+            >
+              <Layers className="w-4 h-4" />
+              Ver Tabelas Completas
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   if (modoTermico80mm) {
     return renderModoTermico80mm();
   }
@@ -3670,7 +4557,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
             <button
               onClick={() => handleExportarPDF(tipo)}
               disabled={gerandoPdf}
-              className="inline-flex items-center gap-2 px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold rounded-lg text-xs transition shadow-sm disabled:opacity-50 cursor-pointer"
+              className="inline-flex items-center gap-2 px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold rounded-lg text-xs transition shadow-sm disabled:opacity-50 cursor-pointer min-h-[40px]"
             >
               <FileDown className="w-4 h-4 text-indigo-600" />
               PDF Módulo: {tipo}
@@ -3678,16 +4565,31 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
           )}
 
           <button
+            onClick={() => handleGerarPdfMobile()}
+            disabled={gerandoPdf}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition shadow-sm hover:shadow disabled:opacity-50 cursor-pointer min-h-[40px]"
+            title="Gera um PDF vertical (9:16) com leitura limpa e cartões scannable para visualização rápida no celular e compartilhamento no WhatsApp"
+          >
+            <Smartphone className="w-4 h-4 text-emerald-200" />
+            <span>
+              {gerandoPdf ? 'Gerando PDF Mobile...' : 'Baixar PDF Mobile (WhatsApp)'}
+            </span>
+            <span className="hidden sm:inline-block px-1.5 py-0.5 text-[9px] font-extrabold bg-white/20 rounded uppercase tracking-wider">
+              Celular 9:16
+            </span>
+          </button>
+
+          <button
             onClick={() => handleExportarPDF('BALANCO_CONSOLIDADO')}
             disabled={gerandoPdf}
-            className="inline-flex items-center gap-2.5 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold rounded-lg text-xs transition shadow-sm hover:shadow disabled:opacity-50 cursor-pointer"
+            className="inline-flex items-center gap-2.5 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold rounded-lg text-xs transition shadow-sm hover:shadow disabled:opacity-50 cursor-pointer min-h-[40px]"
             title="Gera um relatório completo formatado em PDF via jsPDF e AutoTable contendo Fechamento de Caixa, Auditoria, Análise ANP e Aferições Inmetro"
           >
             <FileDown className="w-4 h-4" />
             <span>
               {gerandoPdf
                 ? 'Gerando Relatório PDF...'
-                : 'Gerar PDF Formatado (Caixa, Auditoria, Análise & Aferições)'}
+                : 'Gerar PDF Formatado (A4 Mesa)'}
             </span>
             <span className="hidden sm:inline-block px-1.5 py-0.5 text-[9px] font-extrabold bg-white/20 rounded uppercase tracking-wider">
               jsPDF + AutoTable
@@ -3695,6 +4597,60 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Barra de Alternância: Modo Simplificado (Mobile & WhatsApp) vs Modo Detalhado */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900 text-white p-3.5 rounded-xl shadow-xs print:hidden">
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 bg-emerald-500/20 rounded-lg text-emerald-400">
+            <Smartphone className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              Visualização de Relatórios
+              <span className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded ${
+                modoSimplificado ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+              }`}>
+                {modoSimplificado ? 'Modo Simplificado Mobile' : 'Modo Analítico Completo'}
+              </span>
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {modoSimplificado
+                ? 'Layout direto em cartões, KPIs essenciais e exportação vertical para smartphone'
+                : 'Tabelas completas de alta densidade com todas as colunas de conferência'}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5 bg-slate-800 p-1 rounded-lg">
+          <button
+            onClick={() => setModoSimplificado(true)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md transition cursor-pointer min-h-[36px] ${
+              modoSimplificado
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'text-slate-300 hover:text-white'
+            }`}
+          >
+            <Smartphone className="w-3.5 h-3.5" />
+            Modo Simplificado (Mobile)
+          </button>
+          <button
+            onClick={() => setModoSimplificado(false)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md transition cursor-pointer min-h-[36px] ${
+              !modoSimplificado
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-300 hover:text-white'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5" />
+            Modo Detalhado (Tabelas)
+          </button>
+        </div>
+      </div>
+
+      {modoSimplificado ? (
+        renderModoSimplificadoMobile()
+      ) : (
+        <>
 
       {/* Barra de Filtros e Seleção do Tipo */}
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 print:hidden">
@@ -3709,6 +4665,9 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
           >
             <option value="BALANCO_CONSOLIDADO">
               ★ Relatório Geral (Fechamento, Auditoria, Análise & Aferições)
+            </option>
+            <option value="COMBUSTIVEL_5COL">
+              ★ Relatório por Combustível (5 Colunas: Combustível, Qtd, Preço, Total, Desvio)
             </option>
             <option value="AGRUPADO_COMBUSTIVEL">
               ★ Agrupamento por Combustível (Tanques, Bicos, Aferições & ANP)
@@ -3801,6 +4760,126 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
             Documento Auditável • Nuvem 24h
           </div>
         </div>
+
+        {/* MODO ESPECÍFICO 5 COLUNAS POR COMBUSTÍVEL */}
+        {tipo === 'COMBUSTIVEL_5COL' && (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
+              <div>
+                <h4 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Fuel className="w-5 h-5 text-teal-600" />
+                  Relatório Simplificado por Combustível (5 Colunas Oficiais)
+                </h4>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Visualização padronizada: Combustível · Quantidade · Valor Unitário · Valor Total · Desvio
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleExportarCombustivel5ColunasPDF('MOBILE')}
+                  disabled={gerandoPdf}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-xs font-bold transition shadow-xs cursor-pointer"
+                  title="Exportar PDF formatado para celular (9:16) e WhatsApp"
+                >
+                  <Smartphone className="w-4 h-4" />
+                  PDF Mobile (5 Colunas)
+                </button>
+                <button
+                  onClick={() => handleExportarCombustivel5ColunasPDF('A4')}
+                  disabled={gerandoPdf}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-bold transition shadow-xs cursor-pointer"
+                  title="Exportar PDF no formato clássico A4"
+                >
+                  <FileDown className="w-4 h-4 text-blue-300" />
+                  PDF A4
+                </button>
+              </div>
+            </div>
+
+            {/* Tabela das 5 Colunas */}
+            <div className="overflow-x-auto bg-white border border-slate-200 rounded-xl shadow-xs">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-slate-900 font-bold text-white uppercase text-[11px] tracking-wider">
+                  <tr>
+                    <th className="py-3.5 px-4 text-left">COMBUSTÍVEL</th>
+                    <th className="py-3.5 px-4 text-right">QUANTIDADE</th>
+                    <th className="py-3.5 px-4 text-right">VALOR UNITÁRIO</th>
+                    <th className="py-3.5 px-4 text-right">VALOR TOTAL</th>
+                    <th className="py-3.5 px-4 text-center">DESVIO</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {relatorioCombustiveis5Colunas.map((c) => (
+                    <tr key={c.produto} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="py-3.5 px-4 font-bold text-slate-900 flex items-center gap-2">
+                        <Fuel className="w-4 h-4 text-teal-600" />
+                        <span className="text-sm">{c.produto}</span>
+                      </td>
+                      <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-800 text-sm">
+                        {c.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L
+                      </td>
+                      <td className="py-3.5 px-4 text-right font-mono text-slate-600 text-sm">
+                        R$ {c.valorUnitario.toFixed(2)}
+                      </td>
+                      <td className="py-3.5 px-4 text-right font-mono font-extrabold text-slate-900 text-sm">
+                        {formatarMoeda(c.valorTotal)}
+                      </td>
+                      <td className="py-3.5 px-4 text-center">
+                        <span
+                          className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${
+                            c.statusDesvio === 'FALTA'
+                              ? 'bg-red-50 text-red-700 border border-red-200'
+                              : c.statusDesvio === 'SOBRA'
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : 'bg-slate-100 text-slate-700'
+                          }`}
+                        >
+                          {c.desvioTexto}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-slate-50 font-bold text-slate-900 border-t-2 border-slate-300 text-xs">
+                  <tr>
+                    <td className="py-3.5 px-4 uppercase font-extrabold text-slate-800 text-sm">TOTAL GERAL</td>
+                    <td className="py-3.5 px-4 text-right font-mono text-slate-900 font-extrabold text-sm">
+                      {relatorioCombustiveis5Colunas
+                        .reduce((s, c) => s + c.quantidade, 0)
+                        .toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{' '}
+                      L
+                    </td>
+                    <td className="py-3.5 px-4 text-right font-mono text-slate-600 text-sm">
+                      R${' '}
+                      {(
+                        relatorioCombustiveis5Colunas.reduce((s, c) => s + c.valorTotal, 0) /
+                        Math.max(1, relatorioCombustiveis5Colunas.reduce((s, c) => s + c.quantidade, 0))
+                      ).toFixed(2)}
+                    </td>
+                    <td className="py-3.5 px-4 text-right font-mono text-slate-900 font-extrabold text-base">
+                      {formatarMoeda(relatorioCombustiveis5Colunas.reduce((s, c) => s + c.valorTotal, 0))}
+                    </td>
+                    <td className="py-3.5 px-4 text-center font-mono">
+                      <span
+                        className={`font-bold text-sm ${
+                          relatorioCombustiveis5Colunas.reduce((s, c) => s + (c.desvioLitros || 0), 0) < 0
+                            ? 'text-red-700'
+                            : 'text-emerald-700'
+                        }`}
+                      >
+                        {relatorioCombustiveis5Colunas.reduce((s, c) => s + (c.desvioLitros || 0), 0) > 0 ? '+' : ''}
+                        {relatorioCombustiveis5Colunas
+                          .reduce((s, c) => s + (c.desvioLitros || 0), 0)
+                          .toFixed(2)}{' '}
+                        L
+                      </span>
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        )}
 
         {/* MODO AGRUPADO POR COMBUSTÍVEL */}
         {tipo === 'AGRUPADO_COMBUSTIVEL' && renderPainelAgrupadoPorCombustivel()}
@@ -4769,6 +5848,8 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
           </div>
         )}
       </div>
+        </>
+      )}
     </div>
   );
 };

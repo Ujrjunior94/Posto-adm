@@ -850,3 +850,915 @@ export const exportarRelatorioFechamentosPDF = (
 
   doc.save(`Relatorio_Fechamentos_${periodo.replace(/\s+/g, '_')}.pdf`);
 };
+
+// ==========================================
+// 6. EXPORTAÇÃO ESPECIAL: RELATÓRIO PDF MOBILE (SMARTPHONE & WHATSAPP)
+// ==========================================
+export interface RelatorioMobileParams {
+  titulo?: string;
+  subtitulo?: string;
+  periodo?: string;
+  dadosPosto?: DadosPostoEmissao;
+  kpis?: {
+    totalFaturado?: number;
+    totalConferido?: number;
+    totalDiferenca?: number;
+    totalFechamentos?: number;
+    volumeTotalLitros?: number;
+    totalAfericoes?: number;
+    afericoesConformes?: number;
+    desvioMedioMl?: number;
+    totalAnalises?: number;
+    analisesConformes?: number;
+  };
+  meiosPagamento?: {
+    dinheiro?: number;
+    cartaoCredito?: number;
+    cartaoDebito?: number;
+    pix?: number;
+    outros?: number;
+    prazo?: number;
+  };
+  fechamentos?: Array<{
+    data: string;
+    turno: string;
+    funcionarioNome: string;
+    totalInformado: number;
+    totalConferido: number;
+    diferenca: number;
+    status: string;
+    conferidoPor?: string;
+    pagamentos?: {
+      dinheiro?: number;
+      cartaoCredito?: number;
+      cartaoDebito?: number;
+      pix?: number;
+      outros?: number;
+    };
+  }>;
+  combustiveis?: Array<{
+    produto: string; // 1. COMBUSTÍVEL
+    volumeLitros: number; // 2. QUANTIDADE (Litros)
+    valorUnitario?: number; // 3. VALOR UNITÁRIO (R$/L)
+    valorTotal: number; // 4. VALOR TOTAL (R$)
+    desvioTexto?: string; // 5. DESVIO formatado (ex: "+0,25 L", "0,00 L (Regular)")
+    desvioLitros?: number;
+    desvioMl?: number;
+    statusDesvio?: 'REGULAR' | 'SOBRA' | 'FALTA';
+    precoMedio?: number;
+    totalAfericoes?: number;
+    desvioMedioMl?: number;
+  }>;
+  afericoes?: Array<{
+    data: string;
+    bicoNome: string;
+    produto: string;
+    volumeNominal: number;
+    volumeAferido: number;
+    diferencaMl: number;
+    status: string;
+    responsavel?: string;
+  }>;
+  escalas?: Array<{
+    data: string;
+    funcionarioNome: string;
+    turno: string;
+    horarioInicio?: string;
+    horarioFim?: string;
+    status: string;
+  }>;
+  nomeArquivo?: string;
+}
+
+/**
+ * Gera um documento PDF em proporção vertical (108mm x 192mm - 9:16)
+ * especificamente otimizado para abertura em smartphones, visualizadores do WhatsApp,
+ * e-mails e telas móveis sem necessidade de pinça/zoom ou rolagem horizontal.
+ */
+export const gerarRelatorioMobilePDF = (params: RelatorioMobileParams): void => {
+  const PAGE_WIDTH = 108;
+  const PAGE_HEIGHT = 192;
+  const MARGIN = 6;
+  const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2; // 96mm
+
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: [PAGE_WIDTH, PAGE_HEIGHT],
+  });
+
+  const dadosPosto = params.dadosPosto || DADOS_POSTO_PADRAO;
+  const dataHoraEmissao = new Date().toLocaleString('pt-BR');
+  const periodo = params.periodo || 'Período Atual';
+
+  let curY = MARGIN;
+
+  // Função interna para desenhar o rodapé mobile
+  const desenharRodapeMobile = (pagAtual: number, totalPags: number) => {
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.3);
+    doc.line(MARGIN, PAGE_HEIGHT - 9, PAGE_WIDTH - MARGIN, PAGE_HEIGHT - 9);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text('📱 Relatório Mobile · MEU POSTO 2.0', MARGIN, PAGE_HEIGHT - 5);
+    doc.text(`Pág. ${pagAtual} de ${totalPags}`, PAGE_WIDTH - MARGIN, PAGE_HEIGHT - 5, { align: 'right' });
+  };
+
+  // Função para desenhar cabeçalho da página 1
+  const desenharCabecalhoPrincipal = () => {
+    // Banner superior escuro
+    doc.setFillColor(15, 23, 42); // slate-900
+    doc.roundedRect(MARGIN, curY, CONTENT_WIDTH, 24, 2, 2, 'F');
+
+    // Faixa teal de destaque
+    doc.setFillColor(13, 148, 136); // teal-600
+    doc.rect(MARGIN, curY + 23.5, CONTENT_WIDTH, 1.2, 'F');
+
+    // Nome do Posto
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text(dadosPosto.nomePosto || 'AUTO POSTO MEU POSTO', MARGIN + 4, curY + 6.5);
+
+    // CNPJ e Município
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.5);
+    doc.setTextColor(203, 213, 225);
+    doc.text(
+      `CNPJ: ${dadosPosto.cnpj || '12.345.678/0001-90'} · ${dadosPosto.cidadeUf || 'Brasil'}`,
+      MARGIN + 4,
+      curY + 11.5
+    );
+
+    // Título do Relatório
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(255, 255, 255);
+    doc.text(params.titulo || 'RESUMO EXECUTIVO OPERACIONAL', MARGIN + 4, curY + 17);
+
+    // Período e Data de Emissão
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6);
+    doc.setTextColor(148, 163, 184);
+    doc.text(`Período: ${periodo} · Emissão: ${dataHoraEmissao}`, MARGIN + 4, curY + 21.5);
+
+    curY += 28;
+  };
+
+  // Função para cabeçalho secundário em páginas subsequentes
+  const desenharCabecalhoSecundario = (subtituloSecao: string) => {
+    doc.setFillColor(15, 23, 42);
+    doc.roundedRect(MARGIN, curY, CONTENT_WIDTH, 12, 1.5, 1.5, 'F');
+
+    doc.setFillColor(13, 148, 136);
+    doc.rect(MARGIN, curY + 11.5, CONTENT_WIDTH, 0.8, 'F');
+
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.text(subtituloSecao, MARGIN + 4, curY + 5.5);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6);
+    doc.setTextColor(203, 213, 225);
+    doc.text(`${dadosPosto.nomePosto || 'MEU POSTO 2.0'} · ${periodo}`, MARGIN + 4, curY + 9.5);
+
+    curY += 15;
+  };
+
+  // Helper para quebra de página segura
+  const verificarEspaco = (alturaNecessaria: number, subtituloNovaPagina = 'CONTINUAÇÃO DO RELATÓRIO') => {
+    if (curY + alturaNecessaria > PAGE_HEIGHT - 12) {
+      doc.addPage([PAGE_WIDTH, PAGE_HEIGHT], 'portrait');
+      curY = MARGIN;
+      desenharCabecalhoSecundario(subtituloNovaPagina);
+    }
+  };
+
+  // 1. PÁGINA 1: CABEÇALHO PRINCIPAL
+  desenharCabecalhoPrincipal();
+
+  // 2. CARDS DE KPIS EXECUTIVOS (2 colunas)
+  if (params.kpis) {
+    const kpis = params.kpis;
+    const cardW = (CONTENT_WIDTH - 3) / 2; // ~46.5mm
+    const cardH = 14;
+
+    const kpiCards = [
+      {
+        label: 'TOTAL EM CAIXA',
+        valor: formatarMoeda(kpis.totalConferido ?? kpis.totalFaturado ?? 0),
+        sub: `${kpis.totalFechamentos ?? 0} turnos registrados`,
+        cor: [13, 148, 136], // teal-600
+        bg: [240, 253, 250],
+      },
+      {
+        label: 'SALDO DIFERENÇA',
+        valor: `${(kpis.totalDiferenca || 0) > 0 ? '+' : ''}${formatarMoeda(kpis.totalDiferenca ?? 0)}`,
+        sub: (kpis.totalDiferenca || 0) === 0 ? 'Conferência exata' : (kpis.totalDiferenca || 0) > 0 ? 'Sobra de caixa' : 'Falta de caixa',
+        cor: (kpis.totalDiferenca || 0) === 0 ? [15, 23, 42] : (kpis.totalDiferenca || 0) > 0 ? [22, 163, 74] : [220, 38, 38],
+        bg: (kpis.totalDiferenca || 0) < 0 ? [254, 242, 242] : [248, 250, 252],
+      },
+      {
+        label: 'VOLUME COMBUSTÍVEL',
+        valor: formatarLitros(kpis.volumeTotalLitros ?? 0),
+        sub: 'Movimentação do período',
+        cor: [37, 99, 235], // blue-600
+        bg: [239, 246, 255],
+      },
+      {
+        label: 'AFERIÇÕES 20L',
+        valor: `${kpis.afericoesConformes ?? 0}/${kpis.totalAfericoes ?? 0} conf.`,
+        sub: `Desvio médio: ${(kpis.desvioMedioMl || 0) > 0 ? '+' : ''}${kpis.desvioMedioMl ?? 0} ml`,
+        cor: (kpis.desvioMedioMl || 0) === 0 ? [22, 163, 74] : [217, 119, 6],
+        bg: [248, 250, 252],
+      },
+    ];
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.setTextColor(15, 23, 42);
+    doc.text('INDICADORES DO PERÍODO', MARGIN, curY + 2);
+    curY += 4.5;
+
+    for (let i = 0; i < kpiCards.length; i += 2) {
+      const c1 = kpiCards[i];
+      const c2 = kpiCards[i + 1];
+
+      // Card 1
+      doc.setFillColor(c1.bg[0], c1.bg[1], c1.bg[2]);
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.3);
+      doc.roundedRect(MARGIN, curY, cardW, cardH, 1.5, 1.5, 'FD');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(5.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text(c1.label, MARGIN + 2.5, curY + 3.8);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.5);
+      doc.setTextColor(c1.cor[0], c1.cor[1], c1.cor[2]);
+      doc.text(c1.valor, MARGIN + 2.5, curY + 8.5);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(5.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text(c1.sub, MARGIN + 2.5, curY + 12);
+
+      // Card 2
+      if (c2) {
+        const x2 = MARGIN + cardW + 3;
+        doc.setFillColor(c2.bg[0], c2.bg[1], c2.bg[2]);
+        doc.setDrawColor(226, 232, 240);
+        doc.roundedRect(x2, curY, cardW, cardH, 1.5, 1.5, 'FD');
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(5.5);
+        doc.setTextColor(100, 116, 139);
+        doc.text(c2.label, x2 + 2.5, curY + 3.8);
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8.5);
+        doc.setTextColor(c2.cor[0], c2.cor[1], c2.cor[2]);
+        doc.text(c2.valor, x2 + 2.5, curY + 8.5);
+
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(5.5);
+        doc.setTextColor(100, 116, 139);
+        doc.text(c2.sub, x2 + 2.5, curY + 12);
+      }
+
+      curY += cardH + 2.5;
+    }
+
+    curY += 2;
+  }
+
+  // 3. MEIOS DE PAGAMENTO (Se disponível)
+  if (params.meiosPagamento) {
+    const mp = params.meiosPagamento;
+    const totalPgto =
+      (mp.dinheiro || 0) +
+      (mp.cartaoCredito || 0) +
+      (mp.cartaoDebito || 0) +
+      (mp.pix || 0) +
+      (mp.outros || 0) +
+      (mp.prazo || 0);
+
+    if (totalPgto > 0) {
+      verificarEspaco(28, 'MEIOS DE PAGAMENTO');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(15, 23, 42);
+      doc.text('RESUMO DE FORMAS DE PAGAMENTO', MARGIN, curY + 2);
+      curY += 4.5;
+
+      const boxH = 22;
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.3);
+      doc.roundedRect(MARGIN, curY, CONTENT_WIDTH, boxH, 1.5, 1.5, 'FD');
+
+      const colW = CONTENT_WIDTH / 3;
+      const itens = [
+        { label: 'Dinheiro', val: mp.dinheiro || 0 },
+        { label: 'PIX', val: mp.pix || 0 },
+        { label: 'Débito', val: mp.cartaoDebito || 0 },
+        { label: 'Crédito', val: mp.cartaoCredito || 0 },
+        { label: 'A Prazo', val: mp.prazo || 0 },
+        { label: 'Outros', val: mp.outros || 0 },
+      ];
+
+      itens.forEach((it, idx) => {
+        const col = idx % 3;
+        const row = Math.floor(idx / 3);
+        const itemX = MARGIN + col * colW + 2.5;
+        const itemY = curY + 4 + row * 8.5;
+
+        const perc = totalPgto > 0 ? ((it.val / totalPgto) * 100).toFixed(0) : '0';
+
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(6);
+        doc.setTextColor(100, 116, 139);
+        doc.text(`${it.label} (${perc}%)`, itemX, itemY);
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7.5);
+        doc.setTextColor(15, 23, 42);
+        doc.text(formatarMoeda(it.val), itemX, itemY + 4);
+      });
+
+      curY += boxH + 4;
+    }
+  }
+
+  // 4. CARTÕES DE FECHAMENTO DE CAIXA (Formato vertical scannable)
+  if (params.fechamentos && params.fechamentos.length > 0) {
+    verificarEspaco(30, 'FECHAMENTOS DE CAIXA');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.setTextColor(15, 23, 42);
+    doc.text(`FECHAMENTOS DE CAIXA (${params.fechamentos.length})`, MARGIN, curY + 2);
+    curY += 4.5;
+
+    params.fechamentos.forEach((f) => {
+      const cardHeight = 22;
+      verificarEspaco(cardHeight + 2, 'FECHAMENTOS DE CAIXA');
+
+      // Fundo do card com borda sutil
+      doc.setFillColor(255, 255, 255);
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.3);
+      doc.roundedRect(MARGIN, curY, CONTENT_WIDTH, cardHeight, 1.5, 1.5, 'FD');
+
+      // Faixa lateral de status
+      const dif = f.diferenca || 0;
+      const statusColor = dif === 0 ? [22, 163, 74] : dif > 0 ? [59, 130, 246] : [220, 38, 38];
+      doc.setFillColor(statusColor[0], statusColor[1], statusColor[2]);
+      doc.roundedRect(MARGIN, curY, 2, cardHeight, 1, 1, 'F');
+
+      // Linha 1: Operador e Turno
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(15, 23, 42);
+      doc.text(`${f.funcionarioNome || 'Operador'} · ${f.turno}`, MARGIN + 4.5, curY + 5);
+
+      // Linha 1 direita: Data
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(6.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text(formatarDataBR(f.data), PAGE_WIDTH - MARGIN - 3, curY + 5, { align: 'right' });
+
+      // Linha 2: Valores
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(6.5);
+      doc.setTextColor(71, 85, 105);
+      doc.text(`Físico: ${formatarMoeda(f.totalConferido)}`, MARGIN + 4.5, curY + 10);
+      doc.text(`Sistema: ${formatarMoeda(f.totalInformado)}`, MARGIN + 46, curY + 10);
+
+      // Badge de diferença
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7);
+      doc.setTextColor(statusColor[0], statusColor[1], statusColor[2]);
+      const rotuloDif = dif === 0 ? 'DIF: R$ 0,00' : `${dif > 0 ? 'SOBRA: +' : 'FALTA: '}${formatarMoeda(dif)}`;
+      doc.text(rotuloDif, PAGE_WIDTH - MARGIN - 3, curY + 10, { align: 'right' });
+
+      // Linha 3: Meios de Pagamento (compacto)
+      if (f.pagamentos) {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(5.5);
+        doc.setTextColor(148, 163, 184);
+        const pgtosTexto = `Dinheiro: ${formatarMoeda(f.pagamentos.dinheiro || 0)}  |  Cartões: ${formatarMoeda(
+          (f.pagamentos.cartaoCredito || 0) + (f.pagamentos.cartaoDebito || 0)
+        )}  |  PIX: ${formatarMoeda(f.pagamentos.pix || 0)}`;
+        doc.text(pgtosTexto, MARGIN + 4.5, curY + 15);
+      }
+
+      // Linha 4: Visto do conferente
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(5.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Conferência: ${f.conferidoPor || 'Fiscal de Pista'} · Status: ${f.status || 'CONCLUIDO'}`, MARGIN + 4.5, curY + 19);
+
+      curY += cardHeight + 2.5;
+    });
+
+    curY += 2;
+  }
+
+  // 5. RESUMO POR COMBUSTÍVEL — 5 COLUNAS ESPECÍFICAS (COMBUSTÍVEL | QUANTIDADE | VALOR UNITÁRIO | VALOR TOTAL | DESVIO)
+  if (params.combustiveis && params.combustiveis.length > 0) {
+    verificarEspaco(30, 'RELATÓRIO POR COMBUSTÍVEL');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.setTextColor(15, 23, 42);
+    doc.text('MOVIMENTAÇÃO POR COMBUSTÍVEL (5 COLUNAS)', MARGIN, curY + 2);
+    curY += 4;
+
+    const totalLitros = params.combustiveis.reduce((s, c) => s + (c.volumeLitros || 0), 0);
+    const totalValor = params.combustiveis.reduce((s, c) => s + (c.valorTotal || 0), 0);
+    const precoMedioGeral = totalLitros > 0 ? totalValor / totalLitros : 5.89;
+    const totalDesvioLitros = params.combustiveis.reduce((s, c) => s + (c.desvioLitros || 0), 0);
+
+    const formatarDesvioCell = (c: (typeof params.combustiveis)[0]) => {
+      if (c.desvioTexto) return c.desvioTexto;
+      if (c.desvioLitros !== undefined) {
+        const sinal = c.desvioLitros > 0 ? '+' : '';
+        return `${sinal}${c.desvioLitros.toFixed(2)} L`;
+      }
+      if (c.desvioMedioMl !== undefined && c.desvioMedioMl !== 0) {
+        const sinal = c.desvioMedioMl > 0 ? '+' : '';
+        return `${sinal}${c.desvioMedioMl} ml`;
+      }
+      return '0,00 L (Reg.)';
+    };
+
+    autoTable(doc, {
+      startY: curY,
+      margin: { left: MARGIN, right: MARGIN },
+      theme: 'grid',
+      head: [['COMBUSTÍVEL', 'QUANTIDADE', 'VALOR UNIT.', 'VALOR TOTAL', 'DESVIO']],
+      body: params.combustiveis.map((c) => {
+        const vlUnit = c.valorUnitario ?? c.precoMedio ?? (c.volumeLitros > 0 ? c.valorTotal / c.volumeLitros : 5.89);
+        return [
+          c.produto,
+          `${c.volumeLitros.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L`,
+          `R$ ${vlUnit.toFixed(2)}`,
+          formatarMoeda(c.valorTotal),
+          formatarDesvioCell(c),
+        ];
+      }),
+      foot: [
+        [
+          'TOTAL GERAL',
+          `${totalLitros.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L`,
+          `R$ ${precoMedioGeral.toFixed(2)}`,
+          formatarMoeda(totalValor),
+          `${totalDesvioLitros > 0 ? '+' : ''}${totalDesvioLitros.toFixed(2)} L`,
+        ],
+      ],
+      headStyles: {
+        fillColor: [15, 23, 42],
+        textColor: [255, 255, 255],
+        fontSize: 6,
+        fontStyle: 'bold',
+        halign: 'center',
+        cellPadding: 1.6,
+      },
+      footStyles: {
+        fillColor: [241, 245, 249],
+        textColor: [15, 23, 42],
+        fontStyle: 'bold',
+        fontSize: 6,
+        halign: 'right',
+        cellPadding: 1.8,
+      },
+      styles: {
+        fontSize: 5.8,
+        cellPadding: 1.6,
+        textColor: [30, 41, 59],
+        overflow: 'ellipsize',
+      },
+      columnStyles: {
+        0: { cellWidth: 26, fontStyle: 'bold', halign: 'left' },
+        1: { cellWidth: 18, halign: 'right' },
+        2: { cellWidth: 16, halign: 'right' },
+        3: { cellWidth: 18, halign: 'right', fontStyle: 'bold' },
+        4: { cellWidth: 18, halign: 'center', fontStyle: 'bold' },
+      },
+      didParseCell: (data) => {
+        if (data.row.section === 'body' && data.column.index === 4) {
+          const item = params.combustiveis?.[data.row.index];
+          if (item?.statusDesvio === 'FALTA' || (item?.desvioLitros !== undefined && item.desvioLitros < 0)) {
+            data.cell.styles.textColor = [185, 28, 28]; // red
+          } else if (item?.statusDesvio === 'SOBRA' || (item?.desvioLitros !== undefined && item.desvioLitros > 0)) {
+            data.cell.styles.textColor = [22, 101, 52]; // green
+          }
+        }
+      },
+    });
+
+    curY = (doc as any).lastAutoTable.finalY + 4;
+  }
+
+  // 6. AFERIÇÕES METROLÓGICAS (20L)
+  if (params.afericoes && params.afericoes.length > 0) {
+    verificarEspaco(24, 'AUDITORIA DE AFERIÇÕES 20L');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.setTextColor(15, 23, 42);
+    doc.text(`AFERIÇÕES METROLÓGICAS 20L (${params.afericoes.length})`, MARGIN, curY + 2);
+    curY += 4.5;
+
+    params.afericoes.slice(0, 10).forEach((af) => {
+      const itemH = 11;
+      verificarEspaco(itemH + 1.5, 'AUDITORIA DE AFERIÇÕES 20L');
+
+      const conforme = af.status === 'CONFORME';
+      doc.setFillColor(255, 255, 255);
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.3);
+      doc.roundedRect(MARGIN, curY, CONTENT_WIDTH, itemH, 1, 1, 'FD');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6.5);
+      doc.setTextColor(15, 23, 42);
+      doc.text(`${af.bicoNome} · ${af.produto}`, MARGIN + 3, curY + 4);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6.5);
+      doc.setTextColor(conforme ? 22 : 220, conforme ? 163 : 38, conforme ? 74 : 38);
+      doc.text(conforme ? '✓ CONFORME' : '⚠ FORA LIMITE', PAGE_WIDTH - MARGIN - 3, curY + 4, { align: 'right' });
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(5.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text(
+        `Vol. 20L | Diferença: ${af.diferencaMl > 0 ? '+' : ''}${af.diferencaMl} ml | Data: ${formatarDataBR(af.data)}`,
+        MARGIN + 3,
+        curY + 8.5
+      );
+
+      curY += itemH + 1.5;
+    });
+
+    curY += 2;
+  }
+
+  // 7. ESCALAS DA EQUIPE (Se fornecido)
+  if (params.escalas && params.escalas.length > 0) {
+    verificarEspaco(24, 'ESCALA DE FUNCIONÁRIOS');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.setTextColor(15, 23, 42);
+    doc.text(`QUADRO DA ESCALA (${params.escalas.length} registros)`, MARGIN, curY + 2);
+    curY += 4.5;
+
+    params.escalas.slice(0, 12).forEach((esc) => {
+      const itemH = 9.5;
+      verificarEspaco(itemH + 1.5, 'ESCALA DE FUNCIONÁRIOS');
+
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.3);
+      doc.roundedRect(MARGIN, curY, CONTENT_WIDTH, itemH, 1, 1, 'FD');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6.5);
+      doc.setTextColor(15, 23, 42);
+      doc.text(esc.funcionarioNome, MARGIN + 3, curY + 4);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6);
+      doc.setTextColor(13, 148, 136);
+      doc.text(esc.turno, PAGE_WIDTH - MARGIN - 3, curY + 4, { align: 'right' });
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(5.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Data: ${formatarDataBR(esc.data)} · Horário: ${esc.horarioInicio || '06:00'} às ${esc.horarioFim || '14:00'}`, MARGIN + 3, curY + 7.5);
+
+      curY += itemH + 1.5;
+    });
+
+    curY += 2;
+  }
+
+  // 8. BLOCO DE ASSINATURA E VISTO OPERACIONAL
+  verificarEspaco(22, 'VISTO OPERACIONAL');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(15, 23, 42);
+  doc.text('CONFERÊNCIA & VALIDAÇÃO OPERACIONAL', MARGIN, curY + 2);
+  curY += 5;
+
+  const signW = (CONTENT_WIDTH - 4) / 2;
+  // Linha 1: Fiscal
+  doc.setDrawColor(148, 163, 184);
+  doc.setLineWidth(0.3);
+  doc.line(MARGIN, curY + 8, MARGIN + signW, curY + 8);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(5.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Fiscal de Pista / Turno', MARGIN, curY + 11.5);
+
+  // Linha 2: Gerente
+  doc.line(MARGIN + signW + 4, curY + 8, PAGE_WIDTH - MARGIN, curY + 8);
+  doc.text('Gerência / Responsável', MARGIN + signW + 4, curY + 11.5);
+
+  curY += 15;
+
+  // Numeração de páginas final em todos os sheets gerados
+  const totalPaginas = (doc as any).internal.getNumberOfPages();
+  for (let p = 1; p <= totalPaginas; p++) {
+    doc.setPage(p);
+    desenharRodapeMobile(p, totalPaginas);
+  }
+
+  const nomeFinal =
+    params.nomeArquivo ||
+    `Relatorio_Mobile_${(params.titulo || 'Geral').replace(/\s+/g, '_')}_${periodo.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+  doc.save(nomeFinal);
+};
+
+// ==========================================
+// 7. EXPORTAÇÃO ESPECÍFICA: RELATÓRIO DE COMBUSTÍVEIS EM 5 COLUNAS
+// (COMBUSTÍVEL | QUANTIDADE | VALOR UNITÁRIO | VALOR TOTAL | DESVIO)
+// Otimizado para visualização simples e ágil no Mobile e WhatsApp
+// ==========================================
+export interface ItemRelatorioCombustivel5Colunas {
+  produto: string; // 1. COMBUSTÍVEL
+  quantidade: number; // 2. QUANTIDADE (Litros)
+  valorUnitario: number; // 3. VALOR UNITÁRIO (R$/L)
+  valorTotal: number; // 4. VALOR TOTAL (R$)
+  desvioTexto: string; // 5. DESVIO (ex: "+0,25 L", "0,00 L (Regular)", "-0,30 L")
+  desvioLitros?: number;
+  desvioMl?: number;
+  statusDesvio?: 'REGULAR' | 'SOBRA' | 'FALTA';
+}
+
+export interface ExportarCombustivel5ColunasOptions {
+  dados: ItemRelatorioCombustivel5Colunas[];
+  periodo: string;
+  dadosPosto?: DadosPostoEmissao;
+  formato?: 'MOBILE' | 'A4';
+  nomeArquivo?: string;
+}
+
+export const exportarRelatorioCombustivel5ColunasPDF = ({
+  dados,
+  periodo,
+  dadosPosto = DADOS_POSTO_PADRAO,
+  formato = 'MOBILE',
+  nomeArquivo,
+}: ExportarCombustivel5ColunasOptions): void => {
+  const isMobile = formato === 'MOBILE';
+  const PAGE_WIDTH = isMobile ? 108 : 210;
+  const PAGE_HEIGHT = isMobile ? 192 : 297;
+  const MARGIN = isMobile ? 6 : 14;
+  const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
+
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: isMobile ? [PAGE_WIDTH, PAGE_HEIGHT] : 'a4',
+  });
+
+  const dataHoraEmissao = new Date().toLocaleString('pt-BR');
+
+  // Cabeçalho
+  if (isMobile) {
+    doc.setFillColor(15, 23, 42); // slate-900
+    doc.roundedRect(MARGIN, MARGIN, CONTENT_WIDTH, 24, 2, 2, 'F');
+
+    doc.setFillColor(13, 148, 136); // teal-600
+    doc.rect(MARGIN, MARGIN + 23.5, CONTENT_WIDTH, 1.2, 'F');
+
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text(dadosPosto.nomePosto || 'AUTO POSTO MEU POSTO', MARGIN + 4, MARGIN + 6.5);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.5);
+    doc.setTextColor(203, 213, 225);
+    doc.text(`CNPJ: ${dadosPosto.cnpj || '12.345.678/0001-90'} · ${dadosPosto.cidadeUf || 'Brasil'}`, MARGIN + 4, MARGIN + 11.5);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(255, 255, 255);
+    doc.text('RELATÓRIO SIMPLIFICADO POR COMBUSTÍVEL', MARGIN + 4, MARGIN + 17);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6);
+    doc.setTextColor(148, 163, 184);
+    doc.text(`Período: ${periodo} · Emissão: ${dataHoraEmissao}`, MARGIN + 4, MARGIN + 21.5);
+  } else {
+    adicionarCabecalhoDocumento(
+      doc,
+      'RELATÓRIO SIMPLIFICADO POR COMBUSTÍVEL (5 COLUNAS)',
+      `Período: ${periodo} | Visualização consolidada de litragem, preço, faturamento e desvio`,
+      dadosPosto
+    );
+  }
+
+  let curY = isMobile ? MARGIN + 28 : 48;
+
+  // Cálculos Consolidados
+  const totalLitros = dados.reduce((s, c) => s + (c.quantidade || 0), 0);
+  const totalValor = dados.reduce((s, c) => s + (c.valorTotal || 0), 0);
+  const precoMedioPond = totalLitros > 0 ? totalValor / totalLitros : 5.89;
+  const totalDesvio = dados.reduce((s, c) => s + (c.desvioLitros || 0), 0);
+
+  // Cards de Indicadores Rápidos (KPIs)
+  if (isMobile) {
+    const cardW = (CONTENT_WIDTH - 3) / 2;
+    const cardH = 13;
+
+    const cards = [
+      { label: 'QUANTIDADE TOTAL', val: `${totalLitros.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L`, cor: [13, 148, 136] },
+      { label: 'VALOR TOTAL (R$)', val: formatarMoeda(totalValor), cor: [15, 23, 42] },
+      { label: 'VALOR UNITÁRIO MÉDIO', val: `R$ ${precoMedioPond.toFixed(2)} / L`, cor: [37, 99, 235] },
+      { label: 'DESVIO CONSOLIDADO', val: `${totalDesvio > 0 ? '+' : ''}${totalDesvio.toFixed(2)} L`, cor: totalDesvio < 0 ? [220, 38, 38] : [22, 163, 74] },
+    ];
+
+    for (let i = 0; i < cards.length; i += 2) {
+      const c1 = cards[i];
+      const c2 = cards[i + 1];
+
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.3);
+      doc.roundedRect(MARGIN, curY, cardW, cardH, 1.5, 1.5, 'FD');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(5.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text(c1.label, MARGIN + 2.5, curY + 4);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(c1.cor[0], c1.cor[1], c1.cor[2]);
+      doc.text(c1.val, MARGIN + 2.5, curY + 9.5);
+
+      if (c2) {
+        const x2 = MARGIN + cardW + 3;
+        doc.setFillColor(248, 250, 252);
+        doc.setDrawColor(226, 232, 240);
+        doc.roundedRect(x2, curY, cardW, cardH, 1.5, 1.5, 'FD');
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(5.5);
+        doc.setTextColor(100, 116, 139);
+        doc.text(c2.label, x2 + 2.5, curY + 4);
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8);
+        doc.setTextColor(c2.cor[0], c2.cor[1], c2.cor[2]);
+        doc.text(c2.val, x2 + 2.5, curY + 9.5);
+      }
+
+      curY += cardH + 2.5;
+    }
+    curY += 2;
+  }
+
+  // Tabela Exata das 5 Colunas Requisitadas:
+  // 1. COMBUSTÍVEL | 2. QUANTIDADE | 3. VALOR UNITÁRIO | 4. VALOR TOTAL | 5. DESVIO
+  const colStyles = isMobile
+    ? {
+        0: { cellWidth: 26, fontStyle: 'bold' as const, halign: 'left' as const },
+        1: { cellWidth: 18, halign: 'right' as const },
+        2: { cellWidth: 16, halign: 'right' as const },
+        3: { cellWidth: 18, halign: 'right' as const, fontStyle: 'bold' as const },
+        4: { cellWidth: 18, halign: 'center' as const, fontStyle: 'bold' as const },
+      }
+    : {
+        0: { cellWidth: 46, fontStyle: 'bold' as const, halign: 'left' as const },
+        1: { cellWidth: 34, halign: 'right' as const },
+        2: { cellWidth: 32, halign: 'right' as const },
+        3: { cellWidth: 36, halign: 'right' as const, fontStyle: 'bold' as const },
+        4: { cellWidth: 34, halign: 'center' as const, fontStyle: 'bold' as const },
+      };
+
+  autoTable(doc, {
+    startY: curY,
+    margin: { left: MARGIN, right: MARGIN },
+    theme: 'grid',
+    head: [['COMBUSTÍVEL', 'QUANTIDADE', 'VALOR UNITÁRIO', 'VALOR TOTAL', 'DESVIO']],
+    body: dados.map((c) => [
+      c.produto,
+      `${c.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L`,
+      `R$ ${c.valorUnitario.toFixed(2)}`,
+      formatarMoeda(c.valorTotal),
+      c.desvioTexto || (c.desvioLitros !== undefined ? `${c.desvioLitros > 0 ? '+' : ''}${c.desvioLitros.toFixed(2)} L` : '0,00 L (Reg.)'),
+    ]),
+    foot: [
+      [
+        'TOTAL GERAL',
+        `${totalLitros.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L`,
+        `R$ ${precoMedioPond.toFixed(2)}`,
+        formatarMoeda(totalValor),
+        `${totalDesvio > 0 ? '+' : ''}${totalDesvio.toFixed(2)} L`,
+      ],
+    ],
+    headStyles: {
+      fillColor: [15, 23, 42],
+      textColor: [255, 255, 255],
+      fontSize: isMobile ? 6 : 8.5,
+      fontStyle: 'bold',
+      halign: 'center',
+      cellPadding: isMobile ? 1.8 : 3,
+    },
+    footStyles: {
+      fillColor: [241, 245, 249],
+      textColor: [15, 23, 42],
+      fontStyle: 'bold',
+      fontSize: isMobile ? 6 : 8.5,
+      halign: 'right',
+      cellPadding: isMobile ? 2 : 3,
+    },
+    styles: {
+      fontSize: isMobile ? 6 : 8,
+      cellPadding: isMobile ? 1.8 : 2.8,
+      textColor: [30, 41, 59],
+    },
+    columnStyles: colStyles,
+    didParseCell: (cellData) => {
+      if (cellData.row.section === 'body' && cellData.column.index === 4) {
+        const item = dados[cellData.row.index];
+        if (item?.statusDesvio === 'FALTA' || (item?.desvioLitros !== undefined && item.desvioLitros < 0)) {
+          cellData.cell.styles.textColor = [185, 28, 28]; // red
+        } else if (item?.statusDesvio === 'SOBRA' || (item?.desvioLitros !== undefined && item.desvioLitros > 0)) {
+          cellData.cell.styles.textColor = [22, 101, 52]; // green
+        }
+      }
+    },
+  });
+
+  const nextY = (doc as any).lastAutoTable.finalY + (isMobile ? 6 : 14);
+
+  // Bloco de Assinaturas Operacionais
+  const signW = isMobile ? (CONTENT_WIDTH - 4) / 2 : (CONTENT_WIDTH - 20) / 2;
+  const lineY = nextY + (isMobile ? 10 : 16);
+
+  doc.setDrawColor(148, 163, 184);
+  doc.setLineWidth(0.4);
+
+  // Assinatura 1
+  doc.line(MARGIN, lineY, MARGIN + signW, lineY);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(isMobile ? 6 : 8);
+  doc.setTextColor(30, 41, 59);
+  doc.text('Responsável Operacional / Pista', MARGIN + signW / 2, lineY + 3.5, { align: 'center' });
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(isMobile ? 5 : 7);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Conferência de Bombas & Encerrantes', MARGIN + signW / 2, lineY + 7, { align: 'center' });
+
+  // Assinatura 2
+  const x2 = PAGE_WIDTH - MARGIN - signW;
+  doc.line(x2, lineY, x2 + signW, lineY);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(isMobile ? 6 : 8);
+  doc.setTextColor(30, 41, 59);
+  doc.text('Gerência / Auditoria Financeira', x2 + signW / 2, lineY + 3.5, { align: 'center' });
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(isMobile ? 5 : 7);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Visto de Validação de Fechamento', x2 + signW / 2, lineY + 7, { align: 'center' });
+
+  // Rodapé com Paginação
+  const totalPaginas = (doc as any).internal.getNumberOfPages();
+  for (let p = 1; p <= totalPaginas; p++) {
+    doc.setPage(p);
+    if (isMobile) {
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.3);
+      doc.line(MARGIN, PAGE_HEIGHT - 9, PAGE_WIDTH - MARGIN, PAGE_HEIGHT - 9);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(6);
+      doc.setTextColor(100, 116, 139);
+      doc.text('📱 Relatório Mobile (5 Colunas) · MEU POSTO 2.0', MARGIN, PAGE_HEIGHT - 5);
+      doc.text(`Pág. ${p} de ${totalPaginas}`, PAGE_WIDTH - MARGIN, PAGE_HEIGHT - 5, { align: 'right' });
+    } else {
+      adicionarRodapeDocumento(doc, p, totalPaginas);
+    }
+  }
+
+  const arquivoFinal =
+    nomeArquivo ||
+    `Relatorio_Combustiveis_${isMobile ? 'Mobile_' : ''}${periodo.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+  doc.save(arquivoFinal);
+};
+
+

@@ -732,7 +732,7 @@ export const DiagramaBombaCombustivel: React.FC<DiagramaBombaCombustivelProps> =
           );
         case 'FORA_INMETRO':
           return (
-            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-900 bg-red-100 px-2 py-0.5 rounded border border-red-300 animate-pulse">
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-900 bg-red-100 px-2 py-0.5 rounded border border-red-300">
               <XCircle className="w-3 h-3 text-red-700" />
               FORA ±100ml
             </span>
