@@ -142,14 +142,12 @@ export const exportarLmcDiarioPDF = (
   doc.setFontSize(8.5);
   doc.setTextColor(51, 65, 85);
   doc.text('PRODUTO / COMBUSTÍVEL:', 18, currentY + 6);
-  doc.text('TANQUE:', 90, currentY + 6);
-  doc.text('STATUS ANP (±0,6%):', 140, currentY + 6);
+  doc.text('STATUS ANP (±0,6%):', 120, currentY + 6);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.setTextColor(15, 23, 42);
   doc.text(String(registro.produto).toUpperCase(), 18, currentY + 11.5);
-  doc.text(registro.tanqueCodigo || 'Tanque Geral', 90, currentY + 11.5);
 
   const statusLabel =
     registro.statusANP === 'CONFORME'

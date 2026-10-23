@@ -1264,9 +1264,6 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
             [
               'Bico / Bomba',
               'Combustível',
-              'Tanque',
-              'Encerrante Atual',
-              'Lacre Inmetro',
               'Testes',
               'Vol. Total (L)',
               'Preço (R$/L)',
@@ -1281,9 +1278,6 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
               ? balancoConsolidado.resumoPorBico.map((b) => [
                   `Bico ${String(b.bicoNumero).padStart(2, '0')}\n${b.bombaNome}`,
                   b.produto,
-                  b.tanqueCodigo,
-                  b.encerranteFinal ? String(b.encerranteFinal) : '—',
-                  b.lacreInmetro || 'Conferido',
                   String(b.qtdTestes),
                   `${b.volumeAferidoTotal.toFixed(3)} L`,
                   formatarMoeda(b.precoLitro),
@@ -1292,15 +1286,12 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                   `${b.impactoLitrosPor1000L > 0 ? '+' : ''}${b.impactoLitrosPor1000L.toFixed(2)} L\n(${b.impactoFinanceiroPor1000L > 0 ? '+' : ''}${formatarMoeda(b.impactoFinanceiroPor1000L)})`,
                   b.statusGeral,
                 ])
-              : [['—', '—', '—', '—', '—', '0', '0.000 L', 'R$ 0,00', 'R$ 0,00', '0 ml', '0.00 L', '—']],
+              : [['—', '—', '0', '0.000 L', 'R$ 0,00', 'R$ 0,00', '0 ml', '0.00 L', '—']],
           foot:
             balancoConsolidado.resumoPorBico.length > 0
               ? [
                   [
                     'TOTAL',
-                    '—',
-                    '—',
-                    '—',
                     '—',
                     String(balancoConsolidado.totalAfericoes),
                     `${balancoConsolidado.volumeTotalAferido.toFixed(3)} L`,
@@ -1367,7 +1358,6 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                   'Vol. Aferido',
                   'Desvio (ml)',
                   'Valor Teste (R$)',
-                  'Encerrante / Lacre',
                   'Responsável',
                   'Status Inmetro',
                 ],
@@ -1375,8 +1365,6 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
               body: testes.map((a: any) => {
                 const bicoNum =
                   a.bicoNumero ?? (a.bicoId ? parseInt(a.bicoId.replace(/\D/g, ''), 10) : 1);
-                const encInfo = a.encerranteFinal ?? a.encerranteLeitura;
-                const lacreInfo = a.lacreInmetro ? `Lacre: ${a.lacreInmetro}` : '';
                 return [
                   `${a.data} ${a.hora || ''}`.trim(),
                   `Bico ${String(bicoNum).padStart(2, '0')}`,
@@ -1384,7 +1372,6 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                   `${Number(a.volumeAferido || 20).toFixed(3)} L`,
                   `${a.desvioMl > 0 ? '+' : ''}${a.desvioMl} ml`,
                   formatarMoeda(a.valorTeste),
-                  [encInfo ? `Enc: ${encInfo}` : '', lacreInfo].filter(Boolean).join(' | ') || '—',
                   a.responsavelNome || 'Operador',
                   a.resultado,
                 ];
@@ -1397,7 +1384,6 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                   `${comb.volumeAferidoTotal.toFixed(3)} L`,
                   `${comb.desvioMedioMl > 0 ? '+' : ''}${comb.desvioMedioMl} ml méd.`,
                   formatarMoeda(comb.valorTotalAfericao),
-                  '—',
                   '—',
                   `${comb.conformes} de ${testes.length} conf.`,
                 ],
@@ -1439,7 +1425,6 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                 'Vol. Aferido',
                 'Desvio (ml)',
                 'Valor Teste (R$)',
-                'Encerrante / Lacre',
                 'Responsável',
                 'Status Inmetro',
               ],
@@ -1448,8 +1433,6 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
               afericoesFiltradas.length > 0
                 ? afericoesFiltradas.map((a) => {
                     const desvioMl = Math.round((Number(a.diferenca) || 0) * 1000);
-                    const encInfo = a.encerranteFinal ?? a.encerranteLeitura;
-                    const lacreInfo = a.lacreInmetro ? `Lacre: ${a.lacreInmetro}` : '';
                     const bicoNum =
                       a.bicoNumero ?? (a.bicoId ? parseInt(a.bicoId.replace(/\D/g, ''), 10) : 1);
                     const preco = resolverPrecoBico(a.bicoId, bicoNum, a.produto);
@@ -1463,12 +1446,11 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                       `${Number(a.volumeAferido || 20).toFixed(3)} L`,
                       `${desvioMl > 0 ? '+' : ''}${desvioMl} ml`,
                       formatarMoeda(valTeste),
-                      [encInfo ? `Enc: ${encInfo}` : '', lacreInfo].filter(Boolean).join(' | ') || '—',
                       a.responsavelNome || 'Operador',
                       a.resultado,
                     ];
                   })
-                : [['—', '—', '—', '20.000 L', '20.000 L', '0 ml', 'R$ 0,00', '—', '—', '—']],
+                : [['—', '—', '—', '20.000 L', '20.000 L', '0 ml', 'R$ 0,00', '—', '—']],
             theme: 'grid',
             headStyles: { fillColor: [15, 23, 42], textColor: 255, fontSize: 6.5 },
             bodyStyles: { fontSize: 6.5 },
@@ -1761,13 +1743,11 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
 
         autoTable(doc, {
           startY: currentY,
-          head: [['Bico', 'Bomba / Lado', 'Combustível', 'Tanque Vinculado', 'Encerrante Atual', 'Status']],
+          head: [['Bico', 'Bomba / Lado', 'Combustível', 'Status']],
           body: bicos.map((b) => [
             `Bico ${String(b.numero).padStart(2, '0')}`,
             `${b.bomba} (Lado ${b.lado})`,
             b.produto,
-            b.tanqueCodigo || b.tanqueId,
-            `${(b.encerranteAtual || 0).toLocaleString('pt-BR')} L`,
             b.status,
           ]),
           theme: 'grid',
@@ -1929,8 +1909,6 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
         'Aferido_L',
         'Diferenca_ml',
         'Resultado',
-        'Encerrante_Foto',
-        'Lacre_Inmetro',
         'Responsavel',
       ]);
       afericoesFiltradas.forEach((a) => {
@@ -1943,8 +1921,6 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
           String(a.volumeAferido),
           String(Math.round(a.diferenca * 1000)),
           a.resultado,
-          String(a.encerranteFinal ?? a.encerranteLeitura ?? ''),
-          a.lacreInmetro || '',
           a.responsavelNome || '',
         ]);
       });
@@ -2140,7 +2116,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
               negrito: true,
             });
             linhas.push({
-              texto: `   Bomba: ${b.bombaNome} | TQ: ${b.tanqueCodigo}`,
+              texto: `   Bomba: ${b.bombaNome}`,
             });
             linhas.push({
               texto: `   Total Testes: ${b.qtdTestes}x | Vol: ${b.volumeAferidoTotal.toFixed(1)} L`,
@@ -2164,15 +2140,9 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                 linhas.push({
                   texto: `   #${idx + 1} ${af.data} ${af.hora || ''} | ${af.volumeAferido.toFixed(3)}L (${sinal}${af.desvioMl}ml)`,
                 });
-                const encInfo = af.encerranteFinal
-                  ? `Enc: ${af.encerranteFinal.toLocaleString('pt-BR')}`
-                  : af.lacreInmetro
-                  ? `Lacre: ${af.lacreInmetro}`
-                  : '';
                 const respInfo = af.responsavelNome ? `Resp: ${af.responsavelNome.slice(0, 10)}` : '';
-                const extra = [encInfo, respInfo].filter(Boolean).join(' | ');
                 linhas.push({
-                  texto: `      ${af.resultado === 'CONFORME' ? '[OK]' : '[FORA]'} ${formatarMoeda(af.valorTeste)}${extra ? ` | ${extra}` : ''}`,
+                  texto: `      ${af.resultado === 'CONFORME' ? '[OK]' : '[FORA]'} ${formatarMoeda(af.valorTeste)}${respInfo ? ` | ${respInfo}` : ''}`,
                 });
               });
             }
@@ -2553,7 +2523,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                         </div>
                         <div className="text-[9.5px] text-slate-600 space-y-0.5">
                           <div className="flex justify-between">
-                            <span>{b.bombaNome} • {b.tanqueCodigo}</span>
+                            <span>{b.bombaNome}</span>
                             <span className="font-semibold text-slate-800">{b.qtdTestes} teste(s) ({b.volumeAferidoTotal.toFixed(1)}L)</span>
                           </div>
                           <div className="flex justify-between">
@@ -2589,7 +2559,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                                     {af.resultado === 'CONFORME' ? '✓ Conforme' : '✗ Fora Tol.'} • {formatarMoeda(af.valorTeste)}
                                   </span>
                                   <span>
-                                    {af.encerranteFinal ? `Enc: ${af.encerranteFinal.toLocaleString('pt-BR')}` : (af.lacreInmetro ? `Lacre: ${af.lacreInmetro}` : (af.responsavelNome ? `Resp: ${af.responsavelNome.slice(0, 10)}` : ''))}
+                                    {af.responsavelNome ? `Resp: ${af.responsavelNome.slice(0, 10)}` : ''}
                                   </span>
                                 </div>
                               </div>
@@ -3233,7 +3203,6 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                               <th className="py-2.5 px-3">Vol. Aferido</th>
                               <th className="py-2.5 px-3">Desvio (ml)</th>
                               <th className="py-2.5 px-3 font-bold text-emerald-900">Valor Teste (R$)</th>
-                              <th className="py-2.5 px-3">Encerrante / Lacre</th>
                               <th className="py-2.5 px-3">Responsável</th>
                               <th className="py-2.5 px-3">Status Inmetro</th>
                             </tr>
@@ -3241,7 +3210,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                           <tbody className="divide-y divide-slate-100">
                             {testes.length === 0 ? (
                               <tr>
-                                <td colSpan={9} className="py-5 text-center text-slate-400">
+                                <td colSpan={8} className="py-5 text-center text-slate-400">
                                   Nenhum ensaio individual registrado para este combustível.
                                 </td>
                               </tr>
@@ -3281,10 +3250,6 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                                     <td className="py-2 px-3 font-mono font-bold text-emerald-700">
                                       {formatarMoeda(a.valorTeste)}
                                     </td>
-                                    <td className="py-2 px-3 font-mono text-[11px] text-slate-600">
-                                      {a.encerranteFinal ?? (a as any).encerranteLeitura ?? '—'}{' '}
-                                      {a.lacreInmetro ? `• Lacre ${a.lacreInmetro}` : ''}
-                                    </td>
                                     <td className="py-2 px-3">{a.responsavelNome || 'Operador'}</td>
                                     <td className="py-2 px-3">
                                       <span
@@ -3321,7 +3286,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                                 <td className="py-2 px-3 font-mono text-emerald-800">
                                   {formatarMoeda(comb.valorTotalAfericao)}
                                 </td>
-                                <td className="py-2 px-3" colSpan={2}>
+                                <td className="py-2 px-3">
                                   —
                                 </td>
                                 <td className="py-2 px-3 text-emerald-800">
@@ -3359,9 +3324,6 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                   <tr>
                     <th className="py-2.5 px-3">Bico / Bomba</th>
                     <th className="py-2.5 px-3">Combustível</th>
-                    <th className="py-2.5 px-3">Tanque</th>
-                    <th className="py-2.5 px-3">Encerrante Atual</th>
-                    <th className="py-2.5 px-3">Lacre Inmetro</th>
                     <th className="py-2.5 px-3">Testes</th>
                     <th className="py-2.5 px-3">Volume Total</th>
                     <th className="py-2.5 px-3">Preço (R$/L)</th>
@@ -3374,7 +3336,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                 <tbody className="divide-y divide-slate-100">
                   {balancoConsolidado.resumoPorBico.length === 0 ? (
                     <tr>
-                      <td colSpan={12} className="py-6 text-center text-slate-400">
+                      <td colSpan={9} className="py-6 text-center text-slate-400">
                         Nenhum bico aferido no período selecionado.
                       </td>
                     </tr>
@@ -3386,13 +3348,6 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                           <span className="block text-[10px] font-normal text-slate-500">{b.bombaNome}</span>
                         </td>
                         <td className="py-2 px-3 font-medium text-slate-800">{b.produto}</td>
-                        <td className="py-2 px-3 font-mono text-[11px] text-slate-600">{b.tanqueCodigo}</td>
-                        <td className="py-2 px-3 font-mono text-[11px]">
-                          {b.encerranteFinal ? b.encerranteFinal.toLocaleString('pt-BR') : '—'}
-                        </td>
-                        <td className="py-2 px-3 font-mono text-[11px] text-slate-600">
-                          {b.lacreInmetro || 'Conferido'}
-                        </td>
                         <td className="py-2 px-3 font-mono">{b.qtdTestes}x</td>
                         <td className="py-2 px-3 font-mono font-semibold">{b.volumeAferidoTotal.toFixed(3)} L</td>
                         <td className="py-2 px-3 font-mono">{formatarMoeda(b.precoLitro)}</td>
@@ -3430,7 +3385,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                 {balancoConsolidado.resumoPorBico.length > 0 && (
                   <tfoot className="bg-slate-50 border-t border-slate-200 font-bold text-slate-900">
                     <tr>
-                      <td className="py-2 px-3 uppercase text-[11px]" colSpan={5}>
+                      <td className="py-2 px-3 uppercase text-[11px]" colSpan={2}>
                         Total de {balancoConsolidado.resumoPorBico.length} bicos aferidos
                       </td>
                       <td className="py-2 px-3 font-mono">{balancoConsolidado.totalAfericoes}</td>
@@ -3478,7 +3433,6 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                     <th className="py-2.5 px-3">Volume Aferido</th>
                     <th className="py-2.5 px-3">Desvio (ml)</th>
                     <th className="py-2.5 px-3">Valor do Teste (R$)</th>
-                    <th className="py-2.5 px-3">Encerrante / Lacre</th>
                     <th className="py-2.5 px-3">Responsável</th>
                     <th className="py-2.5 px-3">Resultado</th>
                   </tr>
@@ -3486,7 +3440,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                 <tbody className="divide-y divide-slate-100">
                   {afericoesFiltradas.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="py-6 text-center text-slate-400">
+                      <td colSpan={8} className="py-6 text-center text-slate-400">
                         Nenhuma aferição registrada no período selecionado.
                       </td>
                     </tr>
@@ -3521,10 +3475,6 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                           </td>
                           <td className="py-2 px-3 font-mono font-bold text-emerald-700">
                             {formatarMoeda(valTeste)}
-                          </td>
-                          <td className="py-2 px-3 font-mono text-[11px] text-slate-600">
-                            {a.encerranteFinal ?? (a as any).encerranteLeitura ?? '—'}{' '}
-                            {a.lacreInmetro ? `• Lacre ${a.lacreInmetro}` : ''}
                           </td>
                           <td className="py-2 px-3">{a.responsavelNome || 'Operador'}</td>
                           <td className="py-2 px-3">
@@ -3599,7 +3549,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                     <div>
                       <h5 className="font-bold text-sm tracking-wide">{comb.produto}</h5>
                       <span className="text-[10px] text-slate-300">
-                        {comb.tanques.length} Tanque(s) • {comb.bicos.length} Bico(s)
+                        {comb.bicos.length} Bico(s)
                       </span>
                     </div>
                   </div>
@@ -3610,32 +3560,6 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
 
                 {/* Resumo de Indicadores */}
                 <div className="p-4 space-y-3.5 text-xs">
-                  {/* Tanques & Armazenamento */}
-                  <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 space-y-1">
-                    <div className="flex justify-between font-semibold text-slate-700 text-[11px]">
-                      <span>Estoque em Tanque:</span>
-                      <span className="font-mono font-bold text-slate-900">
-                        {comb.volAtualTotal.toLocaleString('pt-BR')} L / {comb.capNominalTotal.toLocaleString('pt-BR')} L
-                      </span>
-                    </div>
-                    <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full transition-all ${
-                          comb.ocupacaoPorcentagem > 85
-                            ? 'bg-emerald-500'
-                            : comb.ocupacaoPorcentagem > 30
-                            ? 'bg-blue-500'
-                            : 'bg-amber-500'
-                        }`}
-                        style={{ width: `${Math.min(100, comb.ocupacaoPorcentagem)}%` }}
-                      />
-                    </div>
-                    <div className="flex justify-between text-[10px] text-slate-500">
-                      <span>Ocupação de Estoque: {comb.ocupacaoPorcentagem.toFixed(1)}%</span>
-                      <span>{comb.tanques.map((t: any) => t.codigo).join(', ') || 'Nenhum tanque'}</span>
-                    </div>
-                  </div>
-
                   {/* Metrologia Inmetro (Aferições 20L & Impacto 1.000L) */}
                   <div className="grid grid-cols-2 gap-2">
                     <div className="p-2 bg-blue-50/60 border border-blue-200 rounded-lg">
@@ -3699,44 +3623,7 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                 </span>
               </div>
 
-              {/* Tabela 1: Tanques Vinculados */}
-              <div className="space-y-2">
-                <h6 className="text-xs font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
-                  🛢️ Tanques de Armazenamento Vinculados ({comb.tanques.length})
-                </h6>
-                <div className="overflow-x-auto bg-white border border-slate-200 rounded-xl">
-                  <table className="w-full text-xs text-left">
-                    <thead className="bg-slate-100 font-bold text-slate-700 uppercase border-b border-slate-200">
-                      <tr>
-                        <th className="py-2 px-3">Código Tanque</th>
-                        <th className="py-2 px-3">Capacidade Nominal</th>
-                        <th className="py-2 px-3">Estoque Atual</th>
-                        <th className="py-2 px-3">Ocupação %</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {comb.tanques.length === 0 ? (
-                        <tr>
-                          <td colSpan={4} className="py-3 px-3 text-slate-400 text-center">Nenhum tanque registrado para este combustível.</td>
-                        </tr>
-                      ) : (
-                        comb.tanques.map((t: any) => (
-                          <tr key={t.id || t.codigo}>
-                            <td className="py-2 px-3 font-bold text-slate-900">{t.codigo}</td>
-                            <td className="py-2 px-3 font-mono">{(t.capacidadeNominal || 0).toLocaleString('pt-BR')} L</td>
-                            <td className="py-2 px-3 font-mono font-bold text-blue-900">{(t.volumeAtual || 0).toLocaleString('pt-BR')} L</td>
-                            <td className="py-2 px-3 font-mono font-semibold">
-                              {((t.volumeAtual / Math.max(1, t.capacidadeNominal)) * 100).toFixed(1)}%
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Tabela 2: Bicos & Bombas Vinculados */}
+              {/* Tabela de Bicos & Bombas Vinculados */}
               <div className="space-y-2">
                 <h6 className="text-xs font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
                   ⛽ Bicos de Abastecimento Ativos ({comb.bicos.length})
@@ -3747,25 +3634,19 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                       <tr>
                         <th className="py-2 px-3">Bico Nº</th>
                         <th className="py-2 px-3">Bomba / Lado</th>
-                        <th className="py-2 px-3">Tanque Vinculado</th>
-                        <th className="py-2 px-3">Encerrante Atual</th>
                         <th className="py-2 px-3">Status</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {comb.bicos.length === 0 ? (
                         <tr>
-                          <td colSpan={5} className="py-3 px-3 text-slate-400 text-center">Nenhum bico vinculado a este combustível.</td>
+                          <td colSpan={3} className="py-3 px-3 text-slate-400 text-center">Nenhum bico vinculado a este combustível.</td>
                         </tr>
                       ) : (
                         comb.bicos.map((b: any) => (
                           <tr key={b.id || b.numero}>
                             <td className="py-2 px-3 font-bold text-slate-900">Bico {String(b.numero).padStart(2, '0')}</td>
                             <td className="py-2 px-3 font-medium text-slate-700">{b.bomba} (Lado {b.lado})</td>
-                            <td className="py-2 px-3 font-mono">{b.tanqueCodigo || b.tanqueId || '—'}</td>
-                            <td className="py-2 px-3 font-mono font-bold text-emerald-800">
-                              {(b.encerranteAtual || 0).toLocaleString('pt-BR')} L
-                            </td>
                             <td className="py-2 px-3 font-semibold text-emerald-700">{b.status || 'Ativo'}</td>
                           </tr>
                         ))
@@ -5470,8 +5351,6 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                 <tr>
                   <th className="py-2 px-3">Bico / Bomba</th>
                   <th className="py-2 px-3">Combustível</th>
-                  <th className="py-2 px-3">Tanque Vinculado</th>
-                  <th className="py-2 px-3">Encerrante Atual</th>
                   <th className="py-2 px-3">Status</th>
                 </tr>
               </thead>
@@ -5482,10 +5361,6 @@ export const RelatoriosView: React.FC<RelatoriosProps> = ({
                       Bico {String(b.numero).padStart(2, '0')} ({b.bomba} • Lado {b.lado})
                     </td>
                     <td className="py-2 px-3">{b.produto}</td>
-                    <td className="py-2 px-3 font-mono">{b.tanqueCodigo || b.tanqueId}</td>
-                    <td className="py-2 px-3 font-mono">
-                      {(b.encerranteAtual || 0).toLocaleString('pt-BR')} L
-                    </td>
                     <td className="py-2 px-3 font-bold">{b.status}</td>
                   </tr>
                 ))}

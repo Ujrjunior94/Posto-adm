@@ -245,6 +245,7 @@ const MainApp: React.FC = () => {
   const [conformidades, setConformidades] = useState<Conformidade[]>([]);
   const [auditoria, setAuditoria] = useState<AuditLog[]>([]);
   const [escalasImportadas, setEscalasImportadas] = useState<EscalaImportada[]>([]);
+  const [registrosLMC, setRegistrosLMC] = useState<LMCRegistro[]>([]);
 
   // Turno operacional ao vivo baseado no relógio (Turno 1 = Manhã, Turno 2 = Tarde)
   const horaAtual = new Date().getHours();
@@ -372,6 +373,7 @@ const MainApp: React.FC = () => {
     const unConf = repoConformidades.subscribe(postoId, setConformidades);
     const unAud = repoAuditoria.subscribe(postoId, setAuditoria);
     const unEscImp = repoEscalasImportadas.subscribe(postoId, setEscalasImportadas);
+    const unLMC = repoLMC.subscribe(postoId, setRegistrosLMC);
 
     return () => {
       unFunc();
@@ -385,6 +387,7 @@ const MainApp: React.FC = () => {
       unConf();
       unAud();
       unEscImp();
+      unLMC();
     };
   }, [postoId, userProfile]);
 
@@ -1113,6 +1116,7 @@ const MainApp: React.FC = () => {
               densidades={densidades}
               conformidades={conformidades}
               escalasImportadas={escalasImportadas}
+              registrosLMC={registrosLMC}
               onNavigate={(aba) => setActiveTab(aba)}
             />
           )}

@@ -10,6 +10,7 @@ import {
   RegistroDensidade,
   Conformidade,
   EscalaImportada,
+  LMCRegistro,
 } from '../../types';
 import {
   Users,
@@ -30,6 +31,7 @@ import {
 } from 'lucide-react';
 import { formatarMoeda } from '../../utils/calculations';
 import { VendasPorBicoChart } from './VendasPorBicoChart';
+import { VendasDiariasCombustivelChart } from './VendasDiariasCombustivelChart';
 
 interface DashboardProps {
   funcionarios: Funcionario[];
@@ -42,6 +44,7 @@ interface DashboardProps {
   densidades: RegistroDensidade[];
   conformidades: Conformidade[];
   escalasImportadas?: EscalaImportada[];
+  registrosLMC?: LMCRegistro[];
   onNavigate: (aba: string) => void;
 }
 
@@ -54,6 +57,7 @@ export const DashboardView: React.FC<DashboardProps> = ({
   afericoes,
   densidades,
   conformidades,
+  registrosLMC = [],
   onNavigate,
 }) => {
   const hoje = new Date().toISOString().slice(0, 10);
@@ -284,7 +288,15 @@ export const DashboardView: React.FC<DashboardProps> = ({
         </div>
       </div>
 
-      {/* 3. Grade Principal em 2 Colunas: Operações de Combustível vs Equipe & Checklist */}
+      {/* 3. Gráfico de Linha Recharts: Volume de Vendas Diário de Cada Combustível (Acompanhamento LMC) */}
+      <VendasDiariasCombustivelChart
+        fechamentos={fechamentos}
+        registrosLMC={registrosLMC}
+        bicos={bicos}
+        onNavigateToLMC={() => onNavigate('lmc')}
+      />
+
+      {/* 4. Grade Principal em 2 Colunas: Operações de Combustível vs Equipe & Checklist */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Coluna Esquerda (7 cols): Tanques & Bicos */}
         <div className="lg:col-span-7 space-y-6">
