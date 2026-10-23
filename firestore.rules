@@ -2,18 +2,35 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Connection testing endpoint (24/7 Cloud Heartbeat)
+    // Negação estrita por padrão
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Endpoint de teste de conectividade (Heartbeat 24/7)
     match /test/connection {
       allow read: if true;
     }
 
-    // Helper functions
+    // Funções utilitárias de validação e segurança
+    function isAuthenticated() {
+      return request.auth != null && request.auth.uid != null;
+    }
+
+    function isUser(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
+    }
+
     function isValidId(id) {
       return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-\\.]+$');
     }
 
     function incoming() {
       return request.resource.data;
+    }
+
+    function existingData() {
+      return resource.data;
     }
 
     function isValidPostoDoc(postoId) {
@@ -34,133 +51,60 @@ service cloud.firestore {
         && incoming().email.size() <= 200;
     }
 
-    // Default deny catch-all
-    match /{document=**} {
-      allow read, write: if false;
+    function userHasDoc() {
+      return isAuthenticated() && exists(/databases/$(database)/documents/usuarios/$(request.auth.uid));
     }
 
-    // Coleção de Usuários e Acessos na Nuvem 24h
+    function currentUserData() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
+    }
+
+    function isManager() {
+      return userHasDoc() && (currentUserData().role == 'GERENTE' || currentUserData().role == 'ADMINISTRADOR');
+    }
+
+    function isPostoMember(postoId) {
+      return isAuthenticated() && (
+        !userHasDoc() ||
+        currentUserData().postoId == postoId ||
+        isManager()
+      );
+    }
+
+    // Coleção de Usuários: Apenas autenticados leem; auto-criação restrita; impede auto-elevação de privilégio
     match /usuarios/{uid} {
-      allow get, list: if true;
-      allow create, update: if isValidId(uid) && isValidUserPayload(uid);
-      allow delete: if isValidId(uid);
+      allow get, list: if isAuthenticated();
+      // Auto-cadastro: o próprio usuário autenticado cria seu perfil inicial
+      allow create: if isUser(uid) && isValidUserPayload(uid);
+      // Atualização: o próprio usuário pode atualizar dados cadastrais, MAS não pode alterar o próprio 'role' (privilégio);
+      // apenas Gerente/Administrador pode alterar o 'role'.
+      allow update: if isValidId(uid) && isValidUserPayload(uid) && (
+        (isUser(uid) && incoming().role == existingData().role) ||
+        isManager()
+      );
+      // Exclusão: restrita exclusivamente a gestores
+      allow delete: if isValidId(uid) && isManager();
     }
 
-    // Multi-tenant: Postos e subcoleções operacionais 24h na nuvem
+    // Isolamento Multi-tenant: Postos e subcoleções operacionais
     match /postos/{postoId} {
-      allow get, list: if isValidId(postoId);
-      allow create, update: if isValidId(postoId);
-      allow delete: if isValidId(postoId);
+      allow get, list: if isValidId(postoId) && isPostoMember(postoId);
+      allow create, update: if isValidId(postoId) && isPostoMember(postoId);
+      allow delete: if isValidId(postoId) && isManager();
 
-      // Funcionários
-      match /funcionarios/{funcionarioId} {
-        allow get, list: if isValidId(postoId);
-        allow create, update: if isValidId(postoId) && isValidId(funcionarioId) && isValidPostoDoc(postoId);
-        allow delete: if isValidId(postoId) && isValidId(funcionarioId);
-      }
-
-      // Escalas e Turnos
-      match /escalas/{escalaId} {
-        allow get, list: if isValidId(postoId);
-        allow create, update: if isValidId(postoId) && isValidId(escalaId) && isValidPostoDoc(postoId);
-        allow delete: if isValidId(postoId) && isValidId(escalaId);
-      }
-
-      // Escalas Importadas (Imagem Original + OCR + Conferência + Histórico)
-      match /escalasImportadas/{importacaoId} {
-        allow get, list: if isValidId(postoId);
-        allow create, update: if isValidId(postoId) && isValidId(importacaoId) && isValidPostoDoc(postoId);
-        allow delete: if isValidId(postoId) && isValidId(importacaoId);
-      }
-
-      match /turnos/{turnoId} {
-        allow get, list: if isValidId(postoId);
-        allow create, update: if isValidId(postoId) && isValidId(turnoId) && isValidPostoDoc(postoId);
-        allow delete: if isValidId(postoId) && isValidId(turnoId);
-      }
-
-      // Fechamentos de Caixa
-      match /fechamentos/{fechamentoId} {
-        allow get, list: if isValidId(postoId);
-        allow create, update: if isValidId(postoId) && isValidId(fechamentoId) && isValidPostoDoc(postoId);
-        allow delete: if isValidId(postoId) && isValidId(fechamentoId);
-      }
-
-      // Ocorrências de Caixa
-      match /ocorrenciasCaixa/{ocorrenciaId} {
-        allow get, list: if isValidId(postoId);
-        allow create, update: if isValidId(postoId) && isValidId(ocorrenciaId) && isValidPostoDoc(postoId);
-        allow delete: if isValidId(postoId) && isValidId(ocorrenciaId);
-      }
-
-      // Rateios de Sobras e Faltas
-      match /rateios/{rateioId} {
-        allow get, list: if isValidId(postoId);
-        allow create, update: if isValidId(postoId) && isValidId(rateioId) && isValidPostoDoc(postoId);
-        allow delete: if isValidId(postoId) && isValidId(rateioId);
-      }
-
-      // LMC — Livro de Movimentação de Combustíveis
-      match /lmc/{lmcId} {
-        allow get, list: if isValidId(postoId);
-        allow create, update: if isValidId(postoId) && isValidId(lmcId) && isValidPostoDoc(postoId);
-        allow delete: if isValidId(postoId) && isValidId(lmcId);
-      }
-
-      // Tanques e Réguas
-      match /tanques/{tanqueId} {
-        allow get, list: if isValidId(postoId);
-        allow create, update: if isValidId(postoId) && isValidId(tanqueId) && isValidPostoDoc(postoId);
-        allow delete: if isValidId(postoId) && isValidId(tanqueId);
-      }
-
-      // Bicos
-      match /bicos/{bicoId} {
-        allow get, list: if isValidId(postoId);
-        allow create, update: if isValidId(postoId) && isValidId(bicoId) && isValidPostoDoc(postoId);
-        allow delete: if isValidId(postoId) && isValidId(bicoId);
-      }
-
-      // Aferições (Medida Padrão 20L)
-      match /afericoes/{afericaoId} {
-        allow get, list: if isValidId(postoId);
-        allow create, update: if isValidId(postoId) && isValidId(afericaoId) && isValidPostoDoc(postoId);
-        allow delete: if isValidId(postoId) && isValidId(afericaoId);
-      }
-
-      // Densidades e Termodensímetro (ANP)
-      match /densidades/{densidadeId} {
-        allow get, list: if isValidId(postoId);
-        allow create, update: if isValidId(postoId) && isValidId(densidadeId) && isValidPostoDoc(postoId);
-        allow delete: if isValidId(postoId) && isValidId(densidadeId);
-      }
-
-      // Análises laboratoriais de combustível
-      match /analises/{analiseId} {
-        allow get, list: if isValidId(postoId);
-        allow create, update: if isValidId(postoId) && isValidId(analiseId) && isValidPostoDoc(postoId);
-        allow delete: if isValidId(postoId) && isValidId(analiseId);
-      }
-
-      // Conformidade Operacional
-      match /conformidades/{conformidadeId} {
-        allow get, list: if isValidId(postoId);
-        allow create, update: if isValidId(postoId) && isValidId(conformidadeId) && isValidPostoDoc(postoId);
-        allow delete: if isValidId(postoId) && isValidId(conformidadeId);
-      }
-
-      // Relatórios
-      match /relatorios/{relatorioId} {
-        allow get, list: if isValidId(postoId);
-        allow create, update: if isValidId(postoId) && isValidId(relatorioId) && isValidPostoDoc(postoId);
-        allow delete: if isValidId(postoId) && isValidId(relatorioId);
-      }
-
-      // Auditoria Operacional
+      // Trilha de Auditoria: Imutabilidade estrita (WORM - Write Once, Read Many)
+      // Impedir qualquer exclusão ou adulteração de logs de auditoria
       match /auditoria/{auditoriaId} {
-        allow get, list: if isValidId(postoId);
-        allow create, update: if isValidId(postoId) && isValidId(auditoriaId) && isValidPostoDoc(postoId);
-        allow delete: if isValidId(postoId) && isValidId(auditoriaId);
+        allow get, list: if isValidId(postoId) && isValidId(auditoriaId) && isPostoMember(postoId);
+        allow create: if isValidId(postoId) && isValidId(auditoriaId) && isValidPostoDoc(postoId) && isPostoMember(postoId);
+        allow update, delete: if false; // Proibição absoluta de alteração ou apagamento de auditoria
+      }
+
+      // Subcoleções operacionais padrão
+      match /{subcollection}/{docId} {
+        allow get, list: if isValidId(postoId) && isValidId(docId) && isPostoMember(postoId);
+        allow create, update: if isValidId(postoId) && isValidId(docId) && isValidPostoDoc(postoId) && isPostoMember(postoId);
+        allow delete: if isValidId(postoId) && isValidId(docId) && isPostoMember(postoId);
       }
     }
   }

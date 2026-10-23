@@ -16,7 +16,6 @@ export interface ContaCadastradaLocal {
   uid: string;
   nome: string;
   email: string;
-  senhaHash?: string;
   role: UserRole;
   postoId: string;
   ativo: boolean;
@@ -28,98 +27,68 @@ interface RegisterAccessParams {
   nome: string;
   email: string;
   senha: string;
-  role: UserRole;
+  role?: UserRole;
 }
 
 interface AuthContextType {
   currentUser: FirebaseUser | null;
   userProfile: UserProfile | null;
   loading: boolean;
-  usuariosCadastrados: Omit<ContaCadastradaLocal, 'senhaHash'>[];
+  usuariosCadastrados: ContaCadastradaLocal[];
   signInWithGoogle: () => Promise<void>;
   signInWithCredentials: (email: string, senha: string) => Promise<void>;
   registerAccess: (params: RegisterAccessParams) => Promise<void>;
-  signInDemo: (role: UserRole) => Promise<void>;
   signOut: () => Promise<void>;
   setPostoAtivo: (postoId: string) => void;
   postoId: string;
 }
 
-const STORAGE_CONTAS_KEY = 'meuposto_contas_acesso_v1';
 const STORAGE_SESSAO_KEY = 'meuposto_sessao_ativa_v1';
-
-const carregarContasLocais = (): ContaCadastradaLocal[] => {
-  try {
-    const raw = localStorage.getItem(STORAGE_CONTAS_KEY);
-    if (!raw) return [];
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
-};
-
-const salvarContasLocais = (contas: ContaCadastradaLocal[]) => {
-  try {
-    localStorage.setItem(STORAGE_CONTAS_KEY, JSON.stringify(contas));
-  } catch {
-    // ignore storage errors
-  }
-};
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_SESSAO_KEY);
-      return saved ? (JSON.parse(saved) as UserProfile) : null;
-    } catch {
-      return null;
-    }
-  });
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [postoId, setPostoId] = useState<string>('posto-matriz-01');
   const [loading, setLoading] = useState<boolean>(true);
-  const [contasNuvem, setContasNuvem] = useState<ContaCadastradaLocal[]>(() => carregarContasLocais());
+  const [contasNuvem, setContasNuvem] = useState<ContaCadastradaLocal[]>([]);
 
-  const persistirSessao = (perfil: UserProfile | null) => {
-    setUserProfile(perfil);
-    try {
-      if (perfil) {
-        localStorage.setItem(STORAGE_SESSAO_KEY, JSON.stringify(perfil));
-      } else {
-        localStorage.removeItem(STORAGE_SESSAO_KEY);
-      }
-    } catch {
-      // ignore
-    }
-  };
-
-  // Sincronização 24h em tempo real da coleção de usuários na nuvem Firestore
+  // Sincronização em tempo real da equipe/usuários cadastrados
   useEffect(() => {
+    // Somente escuta usuários se houver alguém autenticado
+    if (!currentUser) {
+      setContasNuvem([]);
+      return;
+    }
+
     const unsubUsuarios = onSnapshot(
       collection(db, 'usuarios'),
       (snap) => {
-        const listaNuvem: ContaCadastradaLocal[] = snap.docs.map((d) => {
-          const data = d.data() as ContaCadastradaLocal;
+        const lista: ContaCadastradaLocal[] = snap.docs.map((d) => {
+          const data = d.data() as any;
           return {
-            ...data,
             uid: d.id,
+            nome: data.nome || 'Usuário',
+            email: data.email || '',
+            role: data.role || 'OPERADOR',
+            postoId: data.postoId || 'posto-matriz-01',
+            ativo: data.ativo ?? true,
+            criadoEm: data.criadoEm || new Date().toISOString(),
+            atualizadoEm: data.atualizadoEm || new Date().toISOString(),
           };
         });
-        if (listaNuvem.length > 0) {
-          setContasNuvem(listaNuvem);
-          salvarContasLocais(listaNuvem);
-        }
+        setContasNuvem(lista);
       },
       (err) => {
-        console.warn('Listener de usuários em nuvem:', err);
+        console.warn('Listener de usuários do posto:', err);
       }
     );
 
     return () => unsubUsuarios();
-  }, []);
+  }, [currentUser]);
 
+  // Autenticação Central Firebase Auth Oficial (JWT Criptográfico)
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
       setCurrentUser(fbUser);
@@ -127,36 +96,59 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
           const userDocRef = doc(db, 'usuarios', fbUser.uid);
           const snap = await getDoc(userDocRef);
+
           if (snap.exists()) {
             const data = snap.data() as UserProfile;
-            persistirSessao(data);
+            setUserProfile(data);
             if (data.postoId) setPostoId(data.postoId);
+            try {
+              localStorage.setItem(STORAGE_SESSAO_KEY, JSON.stringify(data));
+            } catch {
+              // ignore
+            }
           } else {
-            const contas = carregarContasLocais();
-            const contaExistente = contas.find(
-              (c) => c.email.toLowerCase() === (fbUser.email || '').toLowerCase()
-            );
+            // Se o documento ainda não existe (ex: primeiro login via Google ou conta recém-criada),
+            // verifica se é o primeiro usuário do posto. Se for, atribui GERENTE; caso contrário, OPERADOR.
+            let roleAtribuida: UserRole = 'OPERADOR';
+            try {
+              const allSnap = await getDocs(collection(db, 'usuarios'));
+              if (allSnap.empty) {
+                roleAtribuida = 'GERENTE';
+              }
+            } catch {
+              roleAtribuida = 'OPERADOR';
+            }
 
             const novoPerfil: UserProfile = {
               uid: fbUser.uid,
-              nome:
-                contaExistente?.nome ||
-                fbUser.displayName ||
-                fbUser.email?.split('@')[0] ||
-                'Usuário Operacional',
+              nome: fbUser.displayName || fbUser.email?.split('@')[0] || 'Usuário Operacional',
               email: fbUser.email || '',
-              role: contaExistente?.role || 'GERENTE',
-              postoId: contaExistente?.postoId || 'posto-matriz-01',
+              role: roleAtribuida,
+              postoId: 'posto-matriz-01',
               ativo: true,
               criadoEm: new Date().toISOString(),
               atualizadoEm: new Date().toISOString(),
             };
+
             await setDoc(userDocRef, novoPerfil, { merge: true });
-            persistirSessao(novoPerfil);
+            setUserProfile(novoPerfil);
             setPostoId(novoPerfil.postoId);
+            try {
+              localStorage.setItem(STORAGE_SESSAO_KEY, JSON.stringify(novoPerfil));
+            } catch {
+              // ignore
+            }
           }
         } catch (err) {
-          console.error('Erro ao carregar perfil do Firestore:', err);
+          console.error('Erro ao sincronizar perfil do Firestore com Firebase Auth:', err);
+        }
+      } else {
+        // Sessão encerrada no Firebase Auth -> Negação de acesso imediata
+        setUserProfile(null);
+        try {
+          localStorage.removeItem(STORAGE_SESSAO_KEY);
+        } catch {
+          // ignore
         }
       }
       setLoading(false);
@@ -175,74 +167,78 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   /**
-   * Cadastro de novo acesso gravado 100% na nuvem Firestore (coleção usuarios)
+   * Cadastro seguro de novo acesso no Firebase Authentication oficial.
+   * Não grava senhas em Base64 e impede auto-elevação para Gerente/Supervisor.
    */
-  const registerAccess = async ({ nome, email, senha, role }: RegisterAccessParams) => {
+  const registerAccess = async ({ nome, email, senha }: RegisterAccessParams) => {
     const emailLimpo = email.trim().toLowerCase();
     const nomeLimpo = nome.trim();
 
-    if (!nomeLimpo) {
-      throw new Error('Informe seu nome completo.');
+    if (!nomeLimpo || nomeLimpo.length < 2) {
+      throw new Error('Informe seu nome completo (mínimo de 2 caracteres).');
     }
     if (!emailLimpo || !emailLimpo.includes('@')) {
       throw new Error('Informe um e-mail válido.');
     }
-    if (!senha || senha.length < 4) {
-      throw new Error('A senha deve ter pelo menos 4 caracteres.');
+    if (!senha || senha.length < 6) {
+      throw new Error('A senha de acesso deve ter pelo menos 6 caracteres.');
     }
 
-    if (contasNuvem.some((c) => c.email.toLowerCase() === emailLimpo)) {
-      throw new Error('Este e-mail já possui cadastro na nuvem. Use a aba "Entrar".');
+    // Regra de Integridade e Proteção contra Elevação de Privilégios:
+    // O primeiro usuário da base de dados torna-se GERENTE para configuração do posto.
+    // Todos os cadastros subsequentes entram como OPERADOR e só podem ser promovidos
+    // pelo Gerente através da aba de controle de Funcionários.
+    let roleDefinida: UserRole = 'OPERADOR';
+    try {
+      const snapExistentes = await getDocs(collection(db, 'usuarios'));
+      if (snapExistentes.empty) {
+        roleDefinida = 'GERENTE';
+      }
+    } catch {
+      roleDefinida = 'OPERADOR';
     }
+
+    // Criação da credencial oficial e segura no Firebase Auth
+    let cred;
+    try {
+      cred = await createUserWithEmailAndPassword(auth, emailLimpo, senha);
+    } catch (err: any) {
+      const code = err?.code;
+      if (code === 'auth/email-already-in-use') {
+        throw new Error('Este e-mail já possui cadastro. Acesse a aba "Entrar" com suas credenciais.');
+      } else if (code === 'auth/weak-password') {
+        throw new Error('Senha muito fraca. Utilize pelo menos 6 caracteres com números ou símbolos.');
+      } else if (code === 'auth/invalid-email') {
+        throw new Error('Formato de e-mail inválido.');
+      } else {
+        throw new Error(err?.message || 'Falha ao registrar conta no Firebase Authentication.');
+      }
+    }
+
+    const fbUser = cred.user;
+    await updateProfile(fbUser, { displayName: nomeLimpo });
 
     const agora = new Date().toISOString();
-    let uidGerado = `user-${Date.now()}`;
-    const senhaHash = btoa(unescape(encodeURIComponent(senha)));
-
-    try {
-      const cred = await createUserWithEmailAndPassword(auth, emailLimpo, senha);
-      uidGerado = cred.user.uid;
-      await updateProfile(cred.user, { displayName: nomeLimpo });
-    } catch {
-      // Prossegue gravando na coleção usuarios do Cloud Firestore
-    }
-
-    const novaContaNuvem: ContaCadastradaLocal = {
-      uid: uidGerado,
+    const novoPerfil: UserProfile = {
+      uid: fbUser.uid,
       nome: nomeLimpo,
       email: emailLimpo,
-      senhaHash,
-      role,
+      role: roleDefinida,
       postoId: 'posto-matriz-01',
       ativo: true,
       criadoEm: agora,
       atualizadoEm: agora,
     };
 
-    // Grava diretamente no Cloud Firestore 24h
-    await setDoc(doc(db, 'usuarios', uidGerado), novaContaNuvem, { merge: true });
-
-    const atualizadas = [novaContaNuvem, ...contasNuvem];
-    salvarContasLocais(atualizadas);
-    setContasNuvem(atualizadas);
-
-    const perfilAtivo: UserProfile = {
-      uid: novaContaNuvem.uid,
-      nome: novaContaNuvem.nome,
-      email: novaContaNuvem.email,
-      role: novaContaNuvem.role,
-      postoId: novaContaNuvem.postoId,
-      ativo: true,
-      criadoEm: novaContaNuvem.criadoEm,
-      atualizadoEm: novaContaNuvem.atualizadoEm,
-    };
-
-    persistirSessao(perfilAtivo);
-    setPostoId(perfilAtivo.postoId);
+    // Grava perfil no Firestore sem qualquer senha (a senha fica sob guarda do Firebase Auth)
+    await setDoc(doc(db, 'usuarios', fbUser.uid), novoPerfil, { merge: true });
+    setUserProfile(novoPerfil);
+    setPostoId(novoPerfil.postoId);
   };
 
   /**
-   * Login com E-mail e Senha verificando diretamente na nuvem Firestore
+   * Login com E-mail e Senha exigindo autenticação Firebase válida.
+   * Não utiliza Base64 e emite token criptográfico oficial do Firebase.
    */
   const signInWithCredentials = async (email: string, senha: string) => {
     const emailLimpo = email.trim().toLowerCase();
@@ -250,99 +246,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error('Preencha o e-mail e a senha para entrar.');
     }
 
-    const senhaCodificada = btoa(unescape(encodeURIComponent(senha)));
-
-    // Busca atualizada na nuvem Firestore
-    let listaUsuarios = contasNuvem;
-    try {
-      const snap = await getDocs(collection(db, 'usuarios'));
-      if (!snap.empty) {
-        listaUsuarios = snap.docs.map((d) => ({ ...(d.data() as ContaCadastradaLocal), uid: d.id }));
-      }
-    } catch {
-      // Usa cache sincronizado se offline momentaneamente
-    }
-
-    const contaEncontrada = listaUsuarios.find(
-      (c) =>
-        c.email.toLowerCase() === emailLimpo &&
-        (!c.senhaHash || c.senhaHash === senhaCodificada)
-    );
-
-    if (contaEncontrada) {
-      const perfil: UserProfile = {
-        uid: contaEncontrada.uid,
-        nome: contaEncontrada.nome,
-        email: contaEncontrada.email,
-        role: contaEncontrada.role,
-        postoId: contaEncontrada.postoId || 'posto-matriz-01',
-        ativo: true,
-        criadoEm: contaEncontrada.criadoEm,
-        atualizadoEm: new Date().toISOString(),
-      };
-      persistirSessao(perfil);
-      setPostoId(perfil.postoId);
-      return;
-    }
-
-    if (listaUsuarios.some((c) => c.email.toLowerCase() === emailLimpo)) {
-      throw new Error('Senha incorreta para este e-mail.');
-    }
-
     try {
       await signInWithEmailAndPassword(auth, emailLimpo, senha);
-    } catch {
-      throw new Error(
-        'Conta não encontrada ou senha incorreta. Clique em "Cadastrar Acesso" para criar sua conta na nuvem.'
-      );
+    } catch (err: any) {
+      const code = err?.code;
+      if (code === 'auth/user-not-found' || code === 'auth/invalid-credential') {
+        throw new Error('E-mail ou senha incorretos.');
+      } else if (code === 'auth/wrong-password') {
+        throw new Error('Senha incorreta.');
+      } else if (code === 'auth/invalid-email') {
+        throw new Error('Formato de e-mail inválido.');
+      } else if (code === 'auth/too-many-requests') {
+        throw new Error('Muitas tentativas sem sucesso. Aguarde alguns instantes e tente novamente.');
+      } else {
+        throw new Error(err?.message || 'Falha na autenticação. Verifique suas credenciais.');
+      }
     }
-  };
-
-  /**
-   * Acesso operacional conectado 24h ao Cloud Firestore
-   */
-  const signInDemo = async (role: UserRole) => {
-    const nomesPadrao: Record<UserRole, string> = {
-      GERENTE: 'Gerente Operacional',
-      SUPERVISOR: 'Supervisor de Pista',
-      OPERADOR: 'Operador de Caixa',
-      MASTER: 'Administrador Master',
-    };
-    const uid = `operador-nuvem-${role.toLowerCase()}`;
-    const cloudProfile: UserProfile = {
-      uid,
-      nome: nomesPadrao[role] || `Operador (${role})`,
-      email: `${role.toLowerCase()}@meuposto.com`,
-      role,
-      postoId: 'posto-matriz-01',
-      ativo: true,
-      criadoEm: new Date().toISOString(),
-      atualizadoEm: new Date().toISOString(),
-    };
-    try {
-      await setDoc(doc(db, 'usuarios', uid), cloudProfile, { merge: true });
-    } catch {
-      // ignore
-    }
-    persistirSessao(cloudProfile);
-    setPostoId(cloudProfile.postoId);
   };
 
   const signOut = async () => {
     try {
       await fbSignOut(auth);
     } catch (e) {
-      console.warn(e);
+      console.warn('Erro ao deslogar:', e);
     }
-    persistirSessao(null);
+    setUserProfile(null);
     setCurrentUser(null);
+    try {
+      localStorage.removeItem(STORAGE_SESSAO_KEY);
+    } catch {
+      // ignore
+    }
   };
 
   const setPostoAtivo = (novoPostoId: string) => {
     setPostoId(novoPostoId);
   };
-
-  const usuariosCadastrados = contasNuvem.map(({ senhaHash: _, ...rest }) => rest);
 
   return (
     <AuthContext.Provider
@@ -350,11 +289,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         currentUser,
         userProfile,
         loading,
-        usuariosCadastrados,
+        usuariosCadastrados: contasNuvem,
         signInWithGoogle,
         signInWithCredentials,
         registerAccess,
-        signInDemo,
         signOut,
         setPostoAtivo,
         postoId,

@@ -207,7 +207,6 @@ const MainApp: React.FC = () => {
     userProfile,
     postoId,
     usuariosCadastrados,
-    signInDemo,
     signInWithGoogle,
     signInWithCredentials,
     registerAccess,
@@ -229,7 +228,6 @@ const MainApp: React.FC = () => {
   const [cadastroNome, setCadastroNome] = useState('');
   const [cadastroEmail, setCadastroEmail] = useState('');
   const [cadastroSenha, setCadastroSenha] = useState('');
-  const [cadastroRole, setCadastroRole] = useState<UserRole>('GERENTE');
   const [erroAuth, setErroAuth] = useState('');
   const [autenticando, setAutenticando] = useState(false);
 
@@ -415,7 +413,6 @@ const MainApp: React.FC = () => {
           nome: cadastroNome,
           email: cadastroEmail,
           senha: cadastroSenha,
-          role: cadastroRole,
         });
       } catch (err: unknown) {
         setErroAuth(err instanceof Error ? err.message : 'Erro ao cadastrar acesso.');
@@ -485,33 +482,6 @@ const MainApp: React.FC = () => {
 
           {modoAcesso === 'LOGIN' ? (
             <form onSubmit={handleSubmeterLogin} className="space-y-3.5">
-              {usuariosCadastrados.length > 0 && (
-                <div className="space-y-1.5">
-                  <span className="block text-[10px] font-bold text-slate-400 uppercase">
-                    Acessos Cadastrados (clique para preencher):
-                  </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {usuariosCadastrados.slice(0, 4).map((u) => (
-                      <button
-                        key={u.uid}
-                        type="button"
-                        onClick={() => {
-                          setLoginEmail(u.email);
-                          setErroAuth('');
-                        }}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition cursor-pointer ${
-                          loginEmail.toLowerCase() === u.email.toLowerCase()
-                            ? 'bg-blue-600/20 border-blue-500 text-blue-300'
-                            : 'bg-slate-800/80 border-slate-700 text-slate-300 hover:bg-slate-800'
-                        }`}
-                      >
-                        {u.nome} ({u.role})
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">E-mail</label>
                 <input
@@ -578,32 +548,21 @@ const MainApp: React.FC = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Função / Perfil</label>
-                  <select
-                    value={cadastroRole}
-                    onChange={(e) => setCadastroRole(e.target.value as UserRole)}
-                    className="w-full px-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs font-semibold text-white focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="GERENTE">Gerente Geral</option>
-                    <option value="SUPERVISOR">Supervisor de Pista</option>
-                    <option value="OPERADOR">Operador / Caixa</option>
-                  </select>
-                </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Criar Senha</label>
+                <input
+                  type="password"
+                  required
+                  minLength={6}
+                  value={cadastroSenha}
+                  onChange={(e) => setCadastroSenha(e.target.value)}
+                  placeholder="Mín. 6 caracteres"
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                />
+              </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Criar Senha</label>
-                  <input
-                    type="password"
-                    required
-                    minLength={4}
-                    value={cadastroSenha}
-                    onChange={(e) => setCadastroSenha(e.target.value)}
-                    placeholder="Mín. 4 dígitos"
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-                  />
-                </div>
+              <div className="p-2.5 bg-slate-950/60 border border-slate-800/80 rounded-xl text-[11px] text-slate-400">
+                <span>Cadastro protegido: Novos colaboradores ingressam com perfil operacional. Cargos de gerência e supervisão são validados e promovidos internamente.</span>
               </div>
 
               <button
@@ -615,36 +574,6 @@ const MainApp: React.FC = () => {
               </button>
             </form>
           )}
-
-          {/* Barra Compacta de Acesso Rápido sem Senha */}
-          <div className="pt-3 border-t border-slate-800 space-y-2">
-            <div className="text-[10px] font-bold text-slate-500 uppercase text-center">
-              Acesso Rápido de Pista (1 Clique)
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => signInDemo('GERENTE')}
-                className="py-2 px-2 bg-slate-800/80 hover:bg-slate-800 border border-slate-700 rounded-lg text-xs font-semibold text-slate-200 transition cursor-pointer"
-              >
-                Gerente
-              </button>
-              <button
-                type="button"
-                onClick={() => signInDemo('SUPERVISOR')}
-                className="py-2 px-2 bg-slate-800/80 hover:bg-slate-800 border border-slate-700 rounded-lg text-xs font-semibold text-slate-200 transition cursor-pointer"
-              >
-                Supervisor
-              </button>
-              <button
-                type="button"
-                onClick={() => signInDemo('OPERADOR')}
-                className="py-2 px-2 bg-slate-800/80 hover:bg-slate-800 border border-slate-700 rounded-lg text-xs font-semibold text-slate-200 transition cursor-pointer"
-              >
-                Operador
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     );
