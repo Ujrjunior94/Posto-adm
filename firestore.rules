@@ -2,7 +2,7 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Negação estrita por padrão
+    // Negação estrita por padrão (Zero-Trust)
     match /{document=**} {
       allow read, write: if false;
     }
@@ -12,7 +12,9 @@ service cloud.firestore {
       allow read: if true;
     }
 
-    // Funções utilitárias de validação e segurança
+    // ==========================================
+    // Funções de Autenticação e Identidade
+    // ==========================================
     function isAuthenticated() {
       return request.auth != null && request.auth.uid != null;
     }
@@ -33,6 +35,39 @@ service cloud.firestore {
       return resource.data;
     }
 
+    // Administrador bootstrap verificado pelo Firebase Auth (segurança criptográfica sem autoproclamação)
+    function isBootstrapAdminEmail() {
+      return isAuthenticated()
+        && request.auth.token.email == 'ubirajaraaux@gmail.com'
+        && request.auth.token.email_verified == true;
+    }
+
+    // Validação estrita da existência e integridade do perfil
+    function userDocExists() {
+      return isAuthenticated() && exists(/databases/$(database)/documents/usuarios/$(request.auth.uid));
+    }
+
+    function currentUserData() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
+    }
+
+    // Usuário precisa existir e estar explicitamente ativo
+    function isUserActive() {
+      return userDocExists() && currentUserData().ativo == true;
+    }
+
+    function isManager() {
+      return isUserActive() && (currentUserData().role == 'GERENTE' || currentUserData().role == 'ADMINISTRADOR');
+    }
+
+    // Vínculo obrigatório ao posto: sem perfil válido ou se inativo, acesso é SEMPRE NEGADO
+    function isPostoMember(postoId) {
+      return isUserActive() && (
+        currentUserData().postoId == postoId ||
+        isManager()
+      );
+    }
+
     function isValidPostoDoc(postoId) {
       return incoming() is map
         && incoming().postoId is string
@@ -46,61 +81,76 @@ service cloud.firestore {
         && incoming().uid == uid
         && incoming().uid.size() <= 128
         && incoming().nome is string
+        && incoming().nome.size() >= 2
         && incoming().nome.size() <= 150
         && incoming().email is string
-        && incoming().email.size() <= 200;
+        && incoming().email.size() <= 200
+        && incoming().postoId is string
+        && incoming().postoId.size() <= 64
+        && incoming().role is string
+        && incoming().ativo is bool;
     }
 
-    function userHasDoc() {
-      return isAuthenticated() && exists(/databases/$(database)/documents/usuarios/$(request.auth.uid));
-    }
-
-    function currentUserData() {
-      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
-    }
-
-    function isManager() {
-      return userHasDoc() && (currentUserData().role == 'GERENTE' || currentUserData().role == 'ADMINISTRADOR');
-    }
-
-    function isPostoMember(postoId) {
-      return isAuthenticated() && (
-        !userHasDoc() ||
-        currentUserData().postoId == postoId ||
-        isManager()
-      );
-    }
-
-    // Coleção de Usuários: Apenas autenticados leem; auto-criação restrita; impede auto-elevação de privilégio
+    // ==========================================
+    // Coleção de Usuários
+    // ==========================================
     match /usuarios/{uid} {
-      allow get, list: if isAuthenticated();
-      // Auto-cadastro: o próprio usuário autenticado cria seu perfil inicial
-      allow create: if isUser(uid) && isValidUserPayload(uid);
-      // Atualização: o próprio usuário pode atualizar dados cadastrais, MAS não pode alterar o próprio 'role' (privilégio);
-      // apenas Gerente/Administrador pode alterar o 'role'.
+      // Leitura pontual: o próprio usuário, membros do mesmo posto ativo, ou gestores
+      allow get: if isAuthenticated() && (
+        isUser(uid) ||
+        (isUserActive() && (currentUserData().postoId == resource.data.postoId || isManager()))
+      );
+
+      // Listagem: restrita a usuários ativos autenticados
+      allow list: if isUserActive();
+
+      // Auto-cadastro seguro:
+      // Impede terminantemente a criação direta de perfis privilegiados (GERENTE/ADMINISTRADOR) via API.
+      // Novos cadastros só podem ser criados como 'OPERADOR', exceto o administrador bootstrap verificado.
+      allow create: if isUser(uid) && isValidUserPayload(uid) && (
+        incoming().role == 'OPERADOR' ||
+        (isBootstrapAdminEmail() && incoming().role in ['GERENTE', 'ADMINISTRADOR'])
+      );
+
+      // Atualização de perfil:
+      // O próprio usuário pode atualizar dados cadastrais básicos, mas É PROIBIDO de:
+      // 1. Alterar o próprio 'role' (anti-elevação de privilégios)
+      // 2. Alterar o próprio status 'ativo' (anti-auto-reativação)
+      // 3. Alterar o próprio 'postoId' (isolamento multi-tenant)
+      // Apenas Gestores ativos podem alterar 'role', 'ativo' ou 'postoId' de colaboradores.
       allow update: if isValidId(uid) && isValidUserPayload(uid) && (
-        (isUser(uid) && incoming().role == existingData().role) ||
+        (
+          isUser(uid)
+          && incoming().role == existingData().role
+          && incoming().ativo == existingData().ativo
+          && incoming().postoId == existingData().postoId
+        ) ||
         isManager()
       );
-      // Exclusão: restrita exclusivamente a gestores
-      allow delete: if isValidId(uid) && isManager();
+
+      // Exclusão de contas: estritamente restrita a gestores ativos (proibido auto-exclusão para evitar orfandade)
+      allow delete: if isValidId(uid) && isManager() && !isUser(uid);
     }
 
-    // Isolamento Multi-tenant: Postos e subcoleções operacionais
+    // ==========================================
+    // Multi-tenant: Postos e Subcoleções
+    // ==========================================
     match /postos/{postoId} {
-      allow get, list: if isValidId(postoId) && isPostoMember(postoId);
-      allow create, update: if isValidId(postoId) && isPostoMember(postoId);
-      allow delete: if isValidId(postoId) && isManager();
+      allow get: if isValidId(postoId) && isPostoMember(postoId);
+      allow list: if isManager();
+      allow create, update: if isValidId(postoId) && isManager();
+      allow delete: if false; // Proibido apagar documentos de postos
 
-      // Trilha de Auditoria: Imutabilidade estrita (WORM - Write Once, Read Many)
-      // Impedir qualquer exclusão ou adulteração de logs de auditoria
+      // Trilha de Auditoria: Imutabilidade Estrita (WORM - Write Once, Read Many)
       match /auditoria/{auditoriaId} {
-        allow get, list: if isValidId(postoId) && isValidId(auditoriaId) && isPostoMember(postoId);
+        allow get, list: if isValidId(postoId) && isPostoMember(postoId);
         allow create: if isValidId(postoId) && isValidId(auditoriaId) && isValidPostoDoc(postoId) && isPostoMember(postoId);
-        allow update, delete: if false; // Proibição absoluta de alteração ou apagamento de auditoria
+        allow update, delete: if false; // Proibição absoluta de alteração ou apagamento de registros de auditoria
       }
 
-      // Subcoleções operacionais padrão
+      // Subcoleções Operacionais do Posto:
+      // funcionarios, escalas, escalasImportadas, turnos, fechamentos, ocorrenciasCaixa,
+      // rateios, lmc, tanques, bicos, afericoes, densidades, analises, conformidades, relatorios
       match /{subcollection}/{docId} {
         allow get, list: if isValidId(postoId) && isValidId(docId) && isPostoMember(postoId);
         allow create, update: if isValidId(postoId) && isValidId(docId) && isValidPostoDoc(postoId) && isPostoMember(postoId);

@@ -8,9 +8,11 @@ import {
   updateProfile,
   signOut as fbSignOut,
 } from 'firebase/auth';
-import { collection, doc, getDoc, getDocs, onSnapshot, setDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, onSnapshot, setDoc } from 'firebase/firestore';
 import { auth, googleProvider, db } from '../config/firebase';
 import { UserProfile, UserRole } from '../types';
+
+export const BOOTSTRAP_ADMIN_EMAIL = 'ubirajaraaux@gmail.com';
 
 export interface ContaCadastradaLocal {
   uid: string;
@@ -27,13 +29,13 @@ interface RegisterAccessParams {
   nome: string;
   email: string;
   senha: string;
-  role?: UserRole;
 }
 
 interface AuthContextType {
   currentUser: FirebaseUser | null;
   userProfile: UserProfile | null;
   loading: boolean;
+  authError: string | null;
   usuariosCadastrados: ContaCadastradaLocal[];
   signInWithGoogle: () => Promise<void>;
   signInWithCredentials: (email: string, senha: string) => Promise<void>;
@@ -43,21 +45,19 @@ interface AuthContextType {
   postoId: string;
 }
 
-const STORAGE_SESSAO_KEY = 'meuposto_sessao_ativa_v1';
-
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [postoId, setPostoId] = useState<string>('posto-matriz-01');
   const [loading, setLoading] = useState<boolean>(true);
   const [contasNuvem, setContasNuvem] = useState<ContaCadastradaLocal[]>([]);
 
-  // Sincronização em tempo real da equipe/usuários cadastrados
+  // Sincronização em tempo real da equipe do posto (somente com perfil ativo e autenticado)
   useEffect(() => {
-    // Somente escuta usuários se houver alguém autenticado
-    if (!currentUser) {
+    if (!currentUser || !userProfile || !userProfile.ativo) {
       setContasNuvem([]);
       return;
     }
@@ -65,33 +65,49 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const unsubUsuarios = onSnapshot(
       collection(db, 'usuarios'),
       (snap) => {
-        const lista: ContaCadastradaLocal[] = snap.docs.map((d) => {
-          const data = d.data() as any;
-          return {
-            uid: d.id,
-            nome: data.nome || 'Usuário',
-            email: data.email || '',
-            role: data.role || 'OPERADOR',
-            postoId: data.postoId || 'posto-matriz-01',
-            ativo: data.ativo ?? true,
-            criadoEm: data.criadoEm || new Date().toISOString(),
-            atualizadoEm: data.atualizadoEm || new Date().toISOString(),
-          };
-        });
+        const lista: ContaCadastradaLocal[] = snap.docs
+          .map((d) => {
+            const data = d.data() as any;
+            return {
+              uid: d.id,
+              nome: data.nome || 'Usuário',
+              email: data.email || '',
+              role: data.role || 'OPERADOR',
+              postoId: data.postoId || 'posto-matriz-01',
+              ativo: data.ativo ?? true,
+              criadoEm: data.criadoEm || new Date().toISOString(),
+              atualizadoEm: data.atualizadoEm || new Date().toISOString(),
+            };
+          })
+          // Filtra usuários para manter isolamento de posto (a menos que seja gestor)
+          .filter((u) => {
+            if (userProfile.role === 'GERENTE' || userProfile.role === 'ADMINISTRADOR') return true;
+            return u.postoId === userProfile.postoId;
+          });
+
         setContasNuvem(lista);
       },
       (err) => {
-        console.warn('Listener de usuários do posto:', err);
+        console.warn('[Segurança] Listener de usuários restrito pelas regras:', err);
       }
     );
 
     return () => unsubUsuarios();
-  }, [currentUser]);
+  }, [currentUser, userProfile]);
 
-  // Autenticação Central Firebase Auth Oficial (JWT Criptográfico)
+  // Autenticação Central Firebase Auth Oficial com Zero Confiança em LocalStorage
   useEffect(() => {
+    // Elimina qualquer resquício de sessão antiga baseada em localStorage
+    try {
+      localStorage.removeItem('meuposto_sessao_ativa_v1');
+    } catch {
+      // ignore
+    }
+
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
       setCurrentUser(fbUser);
+      setAuthError(null);
+
       if (fbUser) {
         try {
           const userDocRef = doc(db, 'usuarios', fbUser.uid);
@@ -99,57 +115,53 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           if (snap.exists()) {
             const data = snap.data() as UserProfile;
-            setUserProfile(data);
-            if (data.postoId) setPostoId(data.postoId);
-            try {
-              localStorage.setItem(STORAGE_SESSAO_KEY, JSON.stringify(data));
-            } catch {
-              // ignore
+
+            // Verificação de Status Ativo (Regra de Bloqueio Imediato de Contas Inativas)
+            if (!data.ativo) {
+              console.warn(`[Segurança] Usuário ${fbUser.uid} autenticado, mas inativo no sistema.`);
+              setUserProfile(null);
+              setAuthError('Sua conta está desativada no sistema. Entre em contato com o gerente do seu posto.');
+            } else {
+              setUserProfile(data);
+              if (data.postoId) setPostoId(data.postoId);
+              setAuthError(null);
             }
           } else {
-            // Se o documento ainda não existe (ex: primeiro login via Google ou conta recém-criada),
-            // verifica se é o primeiro usuário do posto. Se for, atribui GERENTE; caso contrário, OPERADOR.
-            let roleAtribuida: UserRole = 'OPERADOR';
-            try {
-              const allSnap = await getDocs(collection(db, 'usuarios'));
-              if (allSnap.empty) {
-                roleAtribuida = 'GERENTE';
-              }
-            } catch {
-              roleAtribuida = 'OPERADOR';
-            }
+            // Documento de perfil inexistente:
+            // Se for o administrador legítimo pré-autorizado (Bootstrap Admin), provisiona o perfil inicial de GERENTE
+            if (fbUser.email && fbUser.email.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL.toLowerCase()) {
+              const agora = new Date().toISOString();
+              const adminPerfil: UserProfile = {
+                uid: fbUser.uid,
+                nome: fbUser.displayName || 'Administrador Geral',
+                email: fbUser.email.toLowerCase(),
+                role: 'GERENTE',
+                postoId: 'posto-matriz-01',
+                ativo: true,
+                criadoEm: agora,
+                atualizadoEm: agora,
+              };
 
-            const novoPerfil: UserProfile = {
-              uid: fbUser.uid,
-              nome: fbUser.displayName || fbUser.email?.split('@')[0] || 'Usuário Operacional',
-              email: fbUser.email || '',
-              role: roleAtribuida,
-              postoId: 'posto-matriz-01',
-              ativo: true,
-              criadoEm: new Date().toISOString(),
-              atualizadoEm: new Date().toISOString(),
-            };
-
-            await setDoc(userDocRef, novoPerfil, { merge: true });
-            setUserProfile(novoPerfil);
-            setPostoId(novoPerfil.postoId);
-            try {
-              localStorage.setItem(STORAGE_SESSAO_KEY, JSON.stringify(novoPerfil));
-            } catch {
-              // ignore
+              await setDoc(userDocRef, adminPerfil, { merge: true });
+              setUserProfile(adminPerfil);
+              setPostoId(adminPerfil.postoId);
+              setAuthError(null);
+            } else {
+              // Usuário sem perfil cadastrado na nuvem: não autoriza acesso
+              console.warn(`[Segurança] Usuário ${fbUser.uid} sem perfil em /usuarios.`);
+              setUserProfile(null);
+              setAuthError('Perfil não localizado no sistema. Solicite ao gestor do posto para cadastrar seu acesso.');
             }
           }
         } catch (err) {
-          console.error('Erro ao sincronizar perfil do Firestore com Firebase Auth:', err);
+          console.error('[Segurança] Falha de leitura do perfil no Firestore:', err);
+          setUserProfile(null);
+          setAuthError('Falha ao validar seu perfil de acesso na nuvem. Verifique a conexão com o servidor.');
         }
       } else {
-        // Sessão encerrada no Firebase Auth -> Negação de acesso imediata
+        // Desconectado do Firebase Auth -> Estado limpo e sem autorização
         setUserProfile(null);
-        try {
-          localStorage.removeItem(STORAGE_SESSAO_KEY);
-        } catch {
-          // ignore
-        }
+        setAuthError(null);
       }
       setLoading(false);
     });
@@ -158,19 +170,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const signInWithGoogle = async () => {
+    setAuthError(null);
     try {
       await signInWithPopup(auth, googleProvider);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Erro no login Google:', err);
+      setAuthError(err?.message || 'Falha na autenticação via Google.');
       throw err;
     }
   };
 
   /**
-   * Cadastro seguro de novo acesso no Firebase Authentication oficial.
-   * Não grava senhas em Base64 e impede auto-elevação para Gerente/Supervisor.
+   * Cadastro seguro de novo operador no Firebase Authentication oficial.
+   * Não grava senhas em Base64 e impede autoproclamação de privilégios.
+   * Todo novo cadastro recebe compulsoriamente a função OPERADOR,
+   * a menos que seja o administrador bootstrap verificado.
    */
   const registerAccess = async ({ nome, email, senha }: RegisterAccessParams) => {
+    setAuthError(null);
     const emailLimpo = email.trim().toLowerCase();
     const nomeLimpo = nome.trim();
 
@@ -184,19 +201,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error('A senha de acesso deve ter pelo menos 6 caracteres.');
     }
 
-    // Regra de Integridade e Proteção contra Elevação de Privilégios:
-    // O primeiro usuário da base de dados torna-se GERENTE para configuração do posto.
-    // Todos os cadastros subsequentes entram como OPERADOR e só podem ser promovidos
-    // pelo Gerente através da aba de controle de Funcionários.
-    let roleDefinida: UserRole = 'OPERADOR';
-    try {
-      const snapExistentes = await getDocs(collection(db, 'usuarios'));
-      if (snapExistentes.empty) {
-        roleDefinida = 'GERENTE';
-      }
-    } catch {
-      roleDefinida = 'OPERADOR';
-    }
+    // Regra Segura de Papéis: Somente o e-mail bootstrap oficial pode iniciar como GERENTE.
+    // Qualquer outro cadastro recebe obrigatoriamente a função OPERADOR.
+    const roleDefinida: UserRole =
+      emailLimpo === BOOTSTRAP_ADMIN_EMAIL.toLowerCase() ? 'GERENTE' : 'OPERADOR';
 
     // Criação da credencial oficial e segura no Firebase Auth
     let cred;
@@ -230,7 +238,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       atualizadoEm: agora,
     };
 
-    // Grava perfil no Firestore sem qualquer senha (a senha fica sob guarda do Firebase Auth)
+    // Grava perfil no Firestore sem senhas (sob custódia do Firebase Auth)
     await setDoc(doc(db, 'usuarios', fbUser.uid), novoPerfil, { merge: true });
     setUserProfile(novoPerfil);
     setPostoId(novoPerfil.postoId);
@@ -238,9 +246,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   /**
    * Login com E-mail e Senha exigindo autenticação Firebase válida.
-   * Não utiliza Base64 e emite token criptográfico oficial do Firebase.
    */
   const signInWithCredentials = async (email: string, senha: string) => {
+    setAuthError(null);
     const emailLimpo = email.trim().toLowerCase();
     if (!emailLimpo || !senha) {
       throw new Error('Preencha o e-mail e a senha para entrar.');
@@ -272,11 +280,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     setUserProfile(null);
     setCurrentUser(null);
-    try {
-      localStorage.removeItem(STORAGE_SESSAO_KEY);
-    } catch {
-      // ignore
-    }
+    setAuthError(null);
   };
 
   const setPostoAtivo = (novoPostoId: string) => {
@@ -289,6 +293,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         currentUser,
         userProfile,
         loading,
+        authError,
         usuariosCadastrados: contasNuvem,
         signInWithGoogle,
         signInWithCredentials,

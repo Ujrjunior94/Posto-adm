@@ -205,6 +205,7 @@ const MainApp: React.FC = () => {
   const {
     currentUser,
     userProfile,
+    authError,
     postoId,
     usuariosCadastrados,
     signInWithGoogle,
@@ -212,7 +213,7 @@ const MainApp: React.FC = () => {
     registerAccess,
     signOut,
   } = useAuth();
-  const { isOnline, syncState, pendingCount, ultimoPingNuvem, syncNow } = useSync();
+  const { isOnline, syncState, pendingCount, ultimoPingNuvem, syncNow, storageDisponivel } = useSync();
 
   const [activeTab, setActiveTab] = useState('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -472,11 +473,22 @@ const MainApp: React.FC = () => {
             </button>
           </div>
 
-          {/* Alerta de Erro */}
-          {erroAuth && (
-            <div className="p-3 rounded-xl bg-red-950/70 border border-red-800 text-red-200 text-xs flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
-              <span>{erroAuth}</span>
+          {/* Alerta de Erro ou Bloqueio de Acesso */}
+          {(erroAuth || authError) && (
+            <div className="p-3.5 rounded-xl bg-red-950/70 border border-red-800 text-red-200 text-xs flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>{erroAuth || authError}</span>
+              </div>
+              {currentUser && (
+                <button
+                  type="button"
+                  onClick={() => signOut()}
+                  className="self-start text-[11px] underline text-red-300 hover:text-white cursor-pointer"
+                >
+                  Encerrar sessão de {currentUser.email}
+                </button>
+              )}
             </div>
           )}
 
